@@ -10,6 +10,9 @@
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
 
+// Configuration: Reading interval in milliseconds
+const unsigned long READING_INTERVAL = 30000; // 30000ms = 30 seconds
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -104,22 +107,47 @@ void printGPSJSON(GPSData gpsData) {
 
 void loop() {
   static unsigned long lastPrintTime = 0;
+  static bool sensorsOn = true;
+  static bool firstRun = true;
   unsigned long currentTime = millis();
   
-  // Update sensors
-  imuSensor.update();
-  gpsSensor.update();
-  
-  // Print JSON at regular intervals (50ms = 20Hz)
-  if (currentTime - lastPrintTime >= 50) {
+  // Check if interval has passed or first run
+  if (firstRun || (currentTime - lastPrintTime >= READING_INTERVAL)) {
+    // Power on sensors (skip on first run since they're already on)
+    if (!sensorsOn && !firstRun) {
+      Serial.println("\n--- Waking up sensors ---");
+      imuSensor.powerOn();
+      gpsSensor.powerOn();
+      sensorsOn = true;
+      delay(2000); // Give sensors time to stabilize
+    }
+    
+    // Update sensors to get fresh data
+    for (int i = 0; i < 20; i++) {
+      imuSensor.update();
+      gpsSensor.update();
+      delay(50); // Wait 50ms between updates to collect data
+    }
+    
     // Get data from sensors
     IMUData imuData = imuSensor.getIMUData();
     GPSData gpsData = gpsSensor.getGPSData();
     
     // Print separate JSON objects for each sensor
+    Serial.println("\n--- Sensor Data ---");
     printIMUJSON(imuData);
     printGPSJSON(gpsData);
     
+    // Power off sensors (skip on first run, will power off after first reading)
+    Serial.println("--- Powering down sensors ---\n");
+    imuSensor.powerOff();
+    gpsSensor.powerOff();
+    sensorsOn = false;
+    
     lastPrintTime = currentTime;
+    firstRun = false;
   }
+  
+  // Deep sleep until next reading (optional - saves more power)
+  delay(100);
 }

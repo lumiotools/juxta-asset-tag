@@ -42,7 +42,7 @@ public:
     pinMode(GPS_RESET_PIN, OUTPUT);
     digitalWrite(GPS_RESET_PIN, HIGH);
     
-    delay(100);
+    delay(500); // Give GPS more time to stabilize
     
     // Initialize GPS
     Serial.println("Initializing NEO-M9N GPS...");
@@ -77,6 +77,27 @@ public:
   
   GPSData getGPSData() {
     return data;
+  }
+  
+  void powerOff() {
+    // Put GPS into backup mode (low power)
+    gps.powerOff(0); // 0 = backup mode
+    Serial.println("GPS powered off");
+  }
+  
+  void powerOn() {
+    // Wake up GPS from backup mode
+    digitalWrite(GPS_RESET_PIN, LOW);
+    delay(100);
+    digitalWrite(GPS_RESET_PIN, HIGH);
+    delay(1000); // Give GPS time to boot
+    
+    // Re-establish connection
+    if (gps.begin(Serial2)) {
+      Serial.println("GPS powered on");
+    } else {
+      Serial.println("GPS power on failed");
+    }
   }
 };
 

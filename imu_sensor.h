@@ -154,6 +154,27 @@ public:
   IMUData getIMUData() {
     return data;
   }
+  
+  void powerOff() {
+    // Put IMU into sleep mode
+    digitalWrite(IMU_RESET_PIN, LOW);
+    Serial.println("IMU powered off");
+  }
+  
+  void powerOn() {
+    // Wake up IMU from sleep mode
+    digitalWrite(IMU_RESET_PIN, HIGH);
+    delay(100);
+    
+    // Re-initialize IMU
+    if (imu.begin()) {
+      imu.enableRotationVector();
+      imu.enableAccelerometer();
+      imu.enableGyro();
+      imu.enableMagnetometer();
+      Serial.println("IMU powered on");
+    }
+  }
 };
 
 #endif
