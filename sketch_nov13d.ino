@@ -1,10 +1,11 @@
 /*
  * ESP32-S3 WROOM with BNO085 IMU Sensor and NEO-M9N GPS
- * Reads and prints IMU and GPS data as JSON
+ * Reads and sends IMU and GPS data as JSON via POST request
  */
 
 #include "imu_sensor.h"
 #include "gps_sensor.h"
+#include "customwifi.h"
 
 // Create sensor instances
 IMUSensor imuSensor;
@@ -12,6 +13,7 @@ GPSSensor gpsSensor;
 
 // Configuration: Reading interval in milliseconds
 const unsigned long READING_INTERVAL = 30000; // 30000ms = 30 seconds
+const int MAX_RETRIES = 2; // Retry 2 times on failure
 
 void setup() {
   Serial.begin(115200);
@@ -26,83 +28,114 @@ void setup() {
   // Initialize GPS sensor
   gpsSensor.begin();
   
+  // Connect to WiFi
+  CustomWiFi::connectWiFi();
+  
   Serial.println("\nStarting data stream...\n");
   delay(100);
 }
 
-void printIMUJSON(IMUData imuData) {
-  Serial.print("{\"imu\":{");
+String createSensorJSON(IMUData imuData, GPSData gpsData) {
+  String json = "{\"sensors\":{";
+  
+  // IMU Data
+  json += "\"imu\":{";
   
   if (imuData.hasQuaternion) {
-    Serial.print("\"quaternion\":{");
-    Serial.print("\"i\":"); Serial.print(imuData.quaternion.i, 4); Serial.print(",");
-    Serial.print("\"j\":"); Serial.print(imuData.quaternion.j, 4); Serial.print(",");
-    Serial.print("\"k\":"); Serial.print(imuData.quaternion.k, 4); Serial.print(",");
-    Serial.print("\"real\":"); Serial.print(imuData.quaternion.real, 4); Serial.print(",");
-    Serial.print("\"accuracy\":"); Serial.print(imuData.quaternion.accuracy, 4);
-    Serial.print("},");
+    json += "\"quaternion\":{";
+    json += "\"i\":" + String(imuData.quaternion.i, 4) + ",";
+    json += "\"j\":" + String(imuData.quaternion.j, 4) + ",";
+    json += "\"k\":" + String(imuData.quaternion.k, 4) + ",";
+    json += "\"real\":" + String(imuData.quaternion.real, 4) + ",";
+    json += "\"accuracy\":" + String(imuData.quaternion.accuracy, 4);
+    json += "},";
     
-    Serial.print("\"euler\":{");
-    Serial.print("\"roll\":"); Serial.print(imuData.euler.roll, 2); Serial.print(",");
-    Serial.print("\"pitch\":"); Serial.print(imuData.euler.pitch, 2); Serial.print(",");
-    Serial.print("\"yaw\":"); Serial.print(imuData.euler.yaw, 2);
-    Serial.print("},");
+    json += "\"euler\":{";
+    json += "\"roll\":" + String(imuData.euler.roll, 2) + ",";
+    json += "\"pitch\":" + String(imuData.euler.pitch, 2) + ",";
+    json += "\"yaw\":" + String(imuData.euler.yaw, 2);
+    json += "},";
   }
   
   if (imuData.hasAccel) {
-    Serial.print("\"accelerometer\":{");
-    Serial.print("\"x\":"); Serial.print(imuData.accelerometer.x, 3); Serial.print(",");
-    Serial.print("\"y\":"); Serial.print(imuData.accelerometer.y, 3); Serial.print(",");
-    Serial.print("\"z\":"); Serial.print(imuData.accelerometer.z, 3);
-    Serial.print("},");
+    json += "\"accelerometer\":{";
+    json += "\"x\":" + String(imuData.accelerometer.x, 3) + ",";
+    json += "\"y\":" + String(imuData.accelerometer.y, 3) + ",";
+    json += "\"z\":" + String(imuData.accelerometer.z, 3);
+    json += "},";
   }
   
   if (imuData.hasGyro) {
-    Serial.print("\"gyroscope\":{");
-    Serial.print("\"x\":"); Serial.print(imuData.gyroscope.x, 3); Serial.print(",");
-    Serial.print("\"y\":"); Serial.print(imuData.gyroscope.y, 3); Serial.print(",");
-    Serial.print("\"z\":"); Serial.print(imuData.gyroscope.z, 3);
-    Serial.print("},");
+    json += "\"gyroscope\":{";
+    json += "\"x\":" + String(imuData.gyroscope.x, 3) + ",";
+    json += "\"y\":" + String(imuData.gyroscope.y, 3) + ",";
+    json += "\"z\":" + String(imuData.gyroscope.z, 3);
+    json += "},";
   }
   
   if (imuData.hasMag) {
-    Serial.print("\"magnetometer\":{");
-    Serial.print("\"x\":"); Serial.print(imuData.magnetometer.x, 3); Serial.print(",");
-    Serial.print("\"y\":"); Serial.print(imuData.magnetometer.y, 3); Serial.print(",");
-    Serial.print("\"z\":"); Serial.print(imuData.magnetometer.z, 3);
-    Serial.print("}");
+    json += "\"magnetometer\":{";
+    json += "\"x\":" + String(imuData.magnetometer.x, 3) + ",";
+    json += "\"y\":" + String(imuData.magnetometer.y, 3) + ",";
+    json += "\"z\":" + String(imuData.magnetometer.z, 3);
+    json += "}";
   }
   
-  Serial.print(",\"timestamp\":");
-  Serial.print(imuData.timestamp);
-  Serial.println("}}");
-}
-
-void printGPSJSON(GPSData gpsData) {
-  Serial.print("{\"gps\":{");
-  Serial.print("\"fix\":"); Serial.print(gpsData.hasValidFix ? "true" : "false"); Serial.print(",");
-  Serial.print("\"fixType\":"); Serial.print(gpsData.fixType); Serial.print(",");
-  Serial.print("\"satellites\":"); Serial.print(gpsData.satellites); Serial.print(",");
+  json += ",\"timestamp\":" + String(imuData.timestamp);
+  json += "},";
+  
+  // GPS Data
+  json += "\"gps\":{";
+  json += "\"fix\":" + String(gpsData.hasValidFix ? "true" : "false") + ",";
+  json += "\"fixType\":" + String(gpsData.fixType) + ",";
+  json += "\"satellites\":" + String(gpsData.satellites) + ",";
   
   if (gpsData.hasValidFix) {
-    Serial.print("\"latitude\":"); Serial.print(gpsData.latitude, 7); Serial.print(",");
-    Serial.print("\"longitude\":"); Serial.print(gpsData.longitude, 7); Serial.print(",");
-    Serial.print("\"altitude\":"); Serial.print(gpsData.altitude, 2); Serial.print(",");
-    Serial.print("\"speed\":"); Serial.print(gpsData.speed, 2); Serial.print(",");
-    Serial.print("\"heading\":"); Serial.print(gpsData.heading, 2); Serial.print(",");
-    Serial.print("\"hdop\":"); Serial.print(gpsData.hdop, 2);
+    json += "\"latitude\":" + String(gpsData.latitude, 7) + ",";
+    json += "\"longitude\":" + String(gpsData.longitude, 7) + ",";
+    json += "\"altitude\":" + String(gpsData.altitude, 2) + ",";
+    json += "\"speed\":" + String(gpsData.speed, 2) + ",";
+    json += "\"heading\":" + String(gpsData.heading, 2) + ",";
+    json += "\"hdop\":" + String(gpsData.hdop, 2);
   } else {
-    Serial.print("\"latitude\":0,");
-    Serial.print("\"longitude\":0,");
-    Serial.print("\"altitude\":0,");
-    Serial.print("\"speed\":0,");
-    Serial.print("\"heading\":0,");
-    Serial.print("\"hdop\":0");
+    json += "\"latitude\":0,";
+    json += "\"longitude\":0,";
+    json += "\"altitude\":0,";
+    json += "\"speed\":0,";
+    json += "\"heading\":0,";
+    json += "\"hdop\":0";
   }
   
-  Serial.print(",\"timestamp\":");
-  Serial.print(gpsData.timestamp);
-  Serial.println("}}");
+  json += ",\"timestamp\":" + String(gpsData.timestamp);
+  json += "}}";
+  
+  return json;
+}
+
+bool sendSensorDataWithRetry(String jsonData) {
+  int retries = 0;
+  bool success = false;
+  
+  while (retries < MAX_RETRIES && !success) {
+    Serial.println("\n--- Sending sensor data (Attempt " + String(retries + 1) + "/" + String(MAX_RETRIES) + ") ---");
+    success = CustomWiFi::sendSensorData(jsonData);
+    
+    if (!success) {
+      retries++;
+      if (retries < MAX_RETRIES) {
+        Serial.println("Retrying in 2 seconds...");
+        delay(2000);
+      }
+    }
+  }
+  
+  if (!success) {
+    Serial.println("ERROR: Sending through WiFi failed after " + String(MAX_RETRIES) + " attempts\n");
+    return false;
+  } else {
+    Serial.println("Data sent successfully\n");
+    return true;
+  }
 }
 
 void loop() {
@@ -133,21 +166,29 @@ void loop() {
     IMUData imuData = imuSensor.getIMUData();
     GPSData gpsData = gpsSensor.getGPSData();
     
-    // Print separate JSON objects for each sensor
-    Serial.println("\n--- Sensor Data ---");
-    printIMUJSON(imuData);
-    printGPSJSON(gpsData);
+    // Create JSON and send via WiFi
+    String jsonData = createSensorJSON(imuData, gpsData);
+    bool dataSent = sendSensorDataWithRetry(jsonData);
     
-    // Power off sensors (skip on first run, will power off after first reading)
-    Serial.println("--- Powering down sensors ---\n");
+    if (dataSent) {
+      Serial.println("Data transmission successful");
+    } else {
+      Serial.println("Data transmission failed");
+    }
+    
+    // Power off sensors
+    Serial.println("--- Powering down sensors ---");
     imuSensor.powerOff();
     gpsSensor.powerOff();
     sensorsOn = false;
+    
+    // Power off WiFi
+    Serial.println("--- Turning off WiFi ---");
+    CustomWiFi::disconnectWiFi();
     
     lastPrintTime = currentTime;
     firstRun = false;
   }
   
-  // Deep sleep until next reading (optional - saves more power)
   delay(100);
 }
