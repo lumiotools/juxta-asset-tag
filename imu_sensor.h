@@ -12,8 +12,8 @@
 // IMU pin definitions
 #define I2C_SDA_PIN 8      // IMU_SDA
 #define I2C_SCL_PIN 9      // IMU_SCL
-#define IMU_RESET_PIN 12   // IMU_RESET pin
-#define IMU_INT_PIN 13     // INT pin for interrupts (optional)
+#define IMU_RESET_PIN 13   // IMU_RESET pin
+#define IMU_INT_PIN 12     // INT pin for interrupts (optional)
 
 // Structure to hold all IMU data
 struct IMUData {

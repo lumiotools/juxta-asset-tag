@@ -3,10 +3,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
-
-// WiFi Configuration
-const char* WIFI_SSID = "your_ssid";
-const char* WIFI_PASSWORD = "your_password";
+#include "nvs_config.h"
 
 // Server Configuration
 const char* SERVER_URL = "http://your-server.com/api/sensor-data";
@@ -15,8 +12,17 @@ const int REQUEST_TIMEOUT = 5000; // 5 seconds
 class CustomWiFi {
 public:
   static bool connectWiFi() {
-    Serial.println("Connecting to WiFi: " + String(WIFI_SSID));
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // Read WiFi credentials from NVS
+    String ssid = NVSConfig::getWiFiSSID();
+    String password = NVSConfig::getWiFiPassword();
+    
+    if (ssid.length() == 0 || password.length() == 0) {
+      Serial.println("ERROR: WiFi credentials not found in NVS");
+      return false;
+    }
+    
+    Serial.println("Connecting to WiFi: " + ssid);
+    WiFi.begin(ssid.c_str(), password.c_str());
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
