@@ -38,12 +38,12 @@ public:
     }
   }
   
-  // Get current time as formatted string
+  // Get current time as formatted string (yyyy:mm:dd hh:mm:ss)
   static String getCurrentTimeString() {
     time_t now = time(nullptr);
     struct tm* timeinfo = localtime(&now);
     char buffer[30];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+    strftime(buffer, sizeof(buffer), "%Y:%m:%d %H:%M:%S", timeinfo);
     return String(buffer);
   }
   

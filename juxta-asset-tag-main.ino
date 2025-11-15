@@ -144,7 +144,7 @@ String createSensorJSON(IMUData imuData, GPSData gpsData) {
 
   json += "\"device_id\":\"" + DeviceID::getMACAddress() + "\",";
   json += "\"battery_level\":" + String(BatteryMonitor::getBatteryPercentage()) + ",";
-  json += "\"timestamp\":" + String(TimeSync::getCurrentTimestamp()) + ",";
+  json += "\"timestamp\":\"" + TimeSync::getCurrentTimeString() + "\",";
   
   // IMU Data
   json += "\"imu\":{";
