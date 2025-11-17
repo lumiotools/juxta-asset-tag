@@ -54,9 +54,9 @@ public:
     
     // Setup IMU reset pin
     pinMode(IMU_RESET_PIN, OUTPUT);
-    digitalWrite(IMU_RESET_PIN, HIGH);
-    delay(10);
     digitalWrite(IMU_RESET_PIN, LOW);
+    delay(10);
+    digitalWrite(IMU_RESET_PIN, HIGH);
     delay(100);
     
     // Initialize BNO085
@@ -130,12 +130,14 @@ public:
   
   void powerOff() {
     // Put IMU into sleep mode
-    digitalWrite(IMU_RESET_PIN, HIGH);
+    digitalWrite(IMU_RESET_PIN, LOW);
   }
   
   void powerOn() {
     // Wake up IMU from sleep mode
     digitalWrite(IMU_RESET_PIN, LOW);
+    delay(10);
+    digitalWrite(IMU_RESET_PIN, HIGH);
     delay(100);
     
     // Re-initialize IMU
