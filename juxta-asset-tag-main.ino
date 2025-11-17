@@ -1,7 +1,4 @@
-/*
- * ESP32-S3 WROOM with BNO085 IMU Sensor and NEO-M9N GPS
- * Reads and sends IMU and GPS data as JSON via POST request
- */
+// ESP32-S3 Asset Tag - IMU & GPS data transmission
 
 #include "imu_sensor.h"
 #include "gps_sensor.h"
@@ -14,35 +11,27 @@
 #include "battery_monitor.h"
 #include "battery_indicator_led.h"
 #include "ble_config.h"
-#include <esp_wifi.h>
-#include <esp_event.h>
-#include <Adafruit_NeoPixel.h>
+#include "ws2812b_simple.h"
 
 // LED Configuration
 const int LED_PIN = 40;
 const unsigned long LED_PULSE_DURATION = 20; // milliseconds
 
 // NeoPixel Status LED Configuration
-const int STATUS_LED_PIN = 39;
-const int NUM_LEDS = 1;
+const int STATUS_LED_PIN = RGB_BUILTIN;
 
 // LED State
 volatile bool ledPulseRequested = false;
 unsigned long ledPulseStartTime = 0;
 
-// NeoPixel Status LED instance
-Adafruit_NeoPixel statusLED(NUM_LEDS, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+// Status LED instance
+WS2812B statusLED(STATUS_LED_PIN);
 
 // Battery Indicator LED instance (separate from status LED)
 BatteryIndicatorLED batteryIndicatorLED;
 
 // Transmission handler for failed data retry logic
 TransmissionHandler transmissionHandler;
-
-// Non-blocking POST state
-bool postInProgress = false;
-unsigned long postStartTime = 0;
-String pendingJSONData = "";
 
 // Create sensor instances
 IMUSensor imuSensor;
@@ -55,30 +44,24 @@ bool gpsInitialized = false;
 // Configuration: Reading interval in milliseconds
 const unsigned long READING_INTERVAL = 30000; // 30000ms = 30 seconds
 
-// WiFi Event Handler for TX events
-void wifiEventHandler(void* arg, esp_event_base_t eventBase, int32_t eventId, void* eventData) {
-  if (eventBase == WIFI_EVENT && eventId == WIFI_EVENT_TX_DONE) {
-    ledPulseRequested = true;
-    ledPulseStartTime = millis();
-  }
+// LED Pulse Handler - Called when WiFi transmission completes
+void triggerLEDPulse() {
+  ledPulseRequested = true;
+  ledPulseStartTime = millis();
 }
 
 void updateStatusLED() {
   // Green if both IMU and GPS initialized, Red if either failed
   if (imuInitialized && gpsInitialized) {
-    statusLED.setPixelColor(0, statusLED.Color(0, 255, 0)); // Green
+    statusLED.setPixelColor(0, 0, 255, 0); // Green
   } else {
-    statusLED.setPixelColor(0, statusLED.Color(255, 0, 0)); // Red
+    statusLED.setPixelColor(0, 255, 0, 0); // Red
   }
-  statusLED.show();
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  
-  Serial.println("ESP32-S3 BNO085 IMU + NEO-M9N GPS Sensor Test");
-  Serial.println("=============================================");
   
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
@@ -95,151 +78,98 @@ void setup() {
   batteryIndicatorLED.updateBatteryLED(); // Set initial color based on battery
   delay(100);
   
-  // Initialize NeoPixel Status LED
-  statusLED.begin();
+  // Initialize Status LED
   statusLED.setBrightness(255);
   updateStatusLED(); // Show red initially (not initialized)
-  Serial.println("NeoPixel Status LED initialized on GPIO " + String(STATUS_LED_PIN));
   
   // Initialize LED pin
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  Serial.println("LED initialized on GPIO " + String(LED_PIN));
   
-  // Register WiFi event handler for TX events
-  ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_TX_DONE, &wifiEventHandler, NULL));
-  Serial.println("WiFi TX event handler registered");
+  // Register callback for WiFi transmission completion (triggers LED pulse)
+  CustomWiFi::setTransmissionCallback(triggerLEDPulse);
   
   // Initialize IMU sensor
   imuInitialized = imuSensor.begin();
-  if (imuInitialized) {
-    Serial.println("IMU sensor initialized successfully");
-  } else {
-    Serial.println("IMU sensor initialization FAILED");
-  }
   
   // Initialize GPS sensor
   gpsInitialized = gpsSensor.begin();
-  if (gpsInitialized) {
-    Serial.println("GPS sensor initialized successfully");
-  } else {
-    Serial.println("GPS sensor initialization FAILED");
-  }
   
   // Update status LED based on sensor initialization
   updateStatusLED();
-  
+  // One-time credential setup (comment out after first upload)
+  NVSConfig::setWiFiSSID("GarageNeo");
+  NVSConfig::setWiFiPassword("G@r@ge#123");
   // Connect to WiFi
   CustomWiFi::connectWiFi();
   
   // Sync time with NTP server
   TimeSync::syncTimeNTP();
   
-  Serial.println("\nStarting data stream...\n");
   delay(100);
 }
 
 String createSensorJSON(IMUData imuData, GPSData gpsData) {
-  String json = "{";
-
-  json += "\"device_id\":\"" + DeviceID::getMACAddress() + "\",";
-  json += "\"battery_level\":" + String(BatteryMonitor::getBatteryPercentage()) + ",";
-  json += "\"timestamp\":\"" + TimeSync::getCurrentTimeString() + "\",";
+  static char jsonBuffer[900]; // Reduced: typical JSON ~600-800 bytes
+  int pos = 0;
   
-  // IMU Data
-  json += "\"imu\":{";
+  String deviceId = DeviceID::getMACAddress();
+  String timestamp = TimeSync::getCurrentTimeString();
+  int batteryLevel = BatteryMonitor::getBatteryPercentage();
+  
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "{\"device_id\":\"%s\",\"battery_level\":%d,\"timestamp\":\"%s\",\"imu\":{", 
+                  deviceId.c_str(), batteryLevel, timestamp.c_str());
   
   if (imuData.hasQuaternion) {
-    json += "\"quaternion\":{";
-    json += "\"i\":" + String(imuData.quaternion.i, 4) + ",";
-    json += "\"j\":" + String(imuData.quaternion.j, 4) + ",";
-    json += "\"k\":" + String(imuData.quaternion.k, 4) + ",";
-    json += "\"real\":" + String(imuData.quaternion.real, 4) + ",";
-    json += "\"accuracy\":" + String(imuData.quaternion.accuracy, 4);
-    json += "},";
-    
-    json += "\"euler\":{";
-    json += "\"roll\":" + String(imuData.euler.roll, 2) + ",";
-    json += "\"pitch\":" + String(imuData.euler.pitch, 2) + ",";
-    json += "\"yaw\":" + String(imuData.euler.yaw, 2);
-    json += "},";
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"quaternion\":{\"i\":%.4f,\"j\":%.4f,\"k\":%.4f,\"real\":%.4f,\"accuracy\":%.4f},", 
+                    imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, 
+                    imuData.quaternion.real, imuData.quaternion.accuracy);
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"euler\":{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f},", 
+                    imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw);
   }
   
   if (imuData.hasAccel) {
-    json += "\"accelerometer\":{";
-    json += "\"x\":" + String(imuData.accelerometer.x, 3) + ",";
-    json += "\"y\":" + String(imuData.accelerometer.y, 3) + ",";
-    json += "\"z\":" + String(imuData.accelerometer.z, 3);
-    json += "},";
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"accelerometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
+                    imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z);
   }
   
   if (imuData.hasGyro) {
-    json += "\"gyroscope\":{";
-    json += "\"x\":" + String(imuData.gyroscope.x, 3) + ",";
-    json += "\"y\":" + String(imuData.gyroscope.y, 3) + ",";
-    json += "\"z\":" + String(imuData.gyroscope.z, 3);
-    json += "},";
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"gyroscope\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
+                    imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z);
   }
   
   if (imuData.hasMag) {
-    json += "\"magnetometer\":{";
-    json += "\"x\":" + String(imuData.magnetometer.x, 3) + ",";
-    json += "\"y\":" + String(imuData.magnetometer.y, 3) + ",";
-    json += "\"z\":" + String(imuData.magnetometer.z, 3);
-    json += "}";
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"magnetometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}", 
+                    imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z);
   }
   
-  // GPS Data
-  json += "\"gps\":{";
-  json += "\"fix\":" + String(gpsData.hasValidFix ? "true" : "false") + ",";
-  json += "\"fixType\":" + String(gpsData.fixType) + ",";
-  json += "\"satellites\":" + String(gpsData.satellites) + ",";
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "},\"gps\":{");
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "\"fix\":%s,\"fixType\":%d,\"satellites\":%d,", 
+                  gpsData.hasValidFix ? "true" : "false", gpsData.fixType, gpsData.satellites);
   
   if (gpsData.hasValidFix) {
-    json += "\"latitude\":" + String(gpsData.latitude, 7) + ",";
-    json += "\"longitude\":" + String(gpsData.longitude, 7) + ",";
-    json += "\"altitude\":" + String(gpsData.altitude, 2) + ",";
-    json += "\"speed\":" + String(gpsData.speed, 2) + ",";
-    json += "\"heading\":" + String(gpsData.heading, 2) + ",";
-    json += "\"hdop\":" + String(gpsData.hdop, 2);
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"latitude\":%.7f,\"longitude\":%.7f,\"altitude\":%.2f,\"speed\":%.2f,\"heading\":%.2f,\"hdop\":%.2f", 
+                    gpsData.latitude, gpsData.longitude, gpsData.altitude, 
+                    gpsData.speed, gpsData.heading, gpsData.hdop);
   } else {
-    json += "\"latitude\":0,";
-    json += "\"longitude\":0,";
-    json += "\"altitude\":0,";
-    json += "\"speed\":0,";
-    json += "\"heading\":0,";
-    json += "\"hdop\":0";
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                    "\"latitude\":0,\"longitude\":0,\"altitude\":0,\"speed\":0,\"heading\":0,\"hdop\":0");
   }
-
-  json += "}";
   
-  return json;
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "}}");
+  
+  return String(jsonBuffer);
 }
 
 void sendDataWithRetryLogic(String jsonData) {
-  Serial.println("\n--- Starting Data Transmission with Retry Logic ---");
-  
   // Use transmission handler to check queue and send appropriately
-  bool success = transmissionHandler.handleDataTransmission(jsonData);
-  
-  if (success) {
-    Serial.println("Data transmission successful!");
-  } else {
-    Serial.println("Data transmission failed - queued for retry");
-  }
-  postInProgress = false;
-}
-
-void handleNonBlockingPost() {
-  if (!postInProgress) return;
-  
-  unsigned long elapsed = millis() - postStartTime;
-  
-  // Timeout after 30 seconds
-  if (elapsed > 30000) {
-    Serial.println("POST request timeout");
-    postInProgress = false;
-  }
+  transmissionHandler.handleDataTransmission(jsonData);
 }
 
 void loop() {
@@ -252,13 +182,11 @@ void loop() {
   // Update BLE (handles connections and processes WiFi credentials)
   BLEConfig::update();
   
-  // Ensure BLE advertising continues (restart if needed)
-  if (!BLEConfig::isConnected()) {
-    static unsigned long lastBLEAdvertiseCheck = 0;
-    if (currentTime - lastBLEAdvertiseCheck >= 5000) { // Check every 5 seconds
-      BLEConfig::restartAdvertising();
-      lastBLEAdvertiseCheck = currentTime;
-    }
+  // Ensure BLE advertising continues (simplified check)
+  static unsigned long lastBLEAdvertiseCheck = 0;
+  if (!BLEConfig::isConnected() && (currentTime - lastBLEAdvertiseCheck >= 5000)) {
+    BLEConfig::restartAdvertising();
+    lastBLEAdvertiseCheck = currentTime;
   }
   
   // Handle LED pulse for WiFi TX events (runs every loop iteration)
@@ -276,24 +204,16 @@ void loop() {
     batteryIndicatorLED.updateBatteryLED();
     lastBatteryUpdate = currentTime;
     
-    // Print battery info to serial
-    Serial.println(BatteryMonitor::getBatteryStatus());
-    
     // Critical battery warning
     if (BatteryMonitor::getBatteryPercentage() < 10) {
-      Serial.println("!!! CRITICAL BATTERY !!!");
       batteryIndicatorLED.doubleBlink();
     }
   }
-  
-  // Handle non-blocking POST in background
-  handleNonBlockingPost();
   
   // Check if interval has passed or first run
   if (firstRun || (currentTime - lastPrintTime >= READING_INTERVAL)) {
     // Power on sensors (skip on first run since they're already on)
     if (!sensorsOn && !firstRun) {
-      Serial.println("\n--- Waking up sensors ---");
       imuSensor.powerOn();
       gpsSensor.powerOn();
       sensorsOn = true;
@@ -301,15 +221,14 @@ void loop() {
     }
     
     // Reconnect WiFi for retry logic and transmission
-    Serial.println("\n--- Reconnecting WiFi ---");
     CustomWiFi::connectWiFi();
     delay(1000); // Wait for WiFi to stabilize
     
-    // Update sensors to get fresh data
-    for (int i = 0; i < 20; i++) {
+    // Update sensors to get fresh data (reduced iterations)
+    for (int i = 0; i < 10; i++) {
       imuSensor.update();
       gpsSensor.update();
-      delay(50); // Wait 50ms between updates to collect data
+      delay(50);
     }
     
     // Get data from sensors
@@ -321,13 +240,11 @@ void loop() {
     sendDataWithRetryLogic(jsonData);
     
     // Power off sensors immediately (transmission continues in background)
-    Serial.println("--- Powering down sensors ---");
     imuSensor.powerOff();
     gpsSensor.powerOff();
     sensorsOn = false;
     
     // Power off WiFi
-    Serial.println("--- Turning off WiFi ---");
     CustomWiFi::disconnectWiFi();
     
     lastPrintTime = currentTime;

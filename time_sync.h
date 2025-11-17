@@ -6,50 +6,28 @@
 
 class TimeSync {
 public:
-  // Synchronize system time with NTP server
+  // Synchronize system time with NTP server (simplified)
   static bool syncTimeNTP() {
-    Serial.println("Syncing time with NTP server...");
-    
-    // Configure time with NTP server
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    
-    Serial.print("Waiting for NTP time sync: ");
+    configTime(0, 0, "pool.ntp.org");
     time_t now = time(nullptr);
     int attempts = 0;
-    
-    // Wait for time to be set (max 20 attempts, ~10 seconds)
-    while (now < 24 * 3600 && attempts < 20) {
+    while (now < 24 * 3600 && attempts < 15) {
       delay(500);
-      Serial.print(".");
       now = time(nullptr);
       attempts++;
     }
-    
-    Serial.println();
-    
-    if (now > 24 * 3600) {
-      time_t now = time(nullptr);
-      Serial.print("Time synced! Current time: ");
-      Serial.println(ctime(&now));
-      return true;
-    } else {
-      Serial.println("ERROR: Failed to sync time with NTP server");
-      return false;
-    }
+    return (now > 24 * 3600);
   }
   
   // Get current time as formatted string (yyyy:mm:dd hh:mm:ss)
   static String getCurrentTimeString() {
     time_t now = time(nullptr);
     struct tm* timeinfo = localtime(&now);
-    char buffer[30];
-    strftime(buffer, sizeof(buffer), "%Y:%m:%d %H:%M:%S", timeinfo);
+    char buffer[20];
+    snprintf(buffer, sizeof(buffer), "%04d:%02d:%02d %02d:%02d:%02d",
+             timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+             timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
     return String(buffer);
-  }
-  
-  // Get current Unix timestamp
-  static long getCurrentTimestamp() {
-    return time(nullptr);
   }
 };
 

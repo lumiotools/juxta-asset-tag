@@ -21,13 +21,7 @@ public:
       err = nvs_flash_init();
     }
     
-    if (err == ESP_OK) {
-      Serial.println("NVS initialized successfully");
-      return true;
-    } else {
-      Serial.println("ERROR: Failed to initialize NVS");
-      return false;
-    }
+    return (err == ESP_OK);
   }
 
   // Read WiFi SSID from NVS
@@ -36,19 +30,13 @@ public:
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
     
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to open NVS namespace for reading");
       return "";
     }
     
     size_t ssidLen = 0;
     err = nvs_get_str(nvsHandle, WIFI_SSID_KEY, nullptr, &ssidLen);
     
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-      Serial.println("WARNING: WiFi SSID not found in NVS");
-      nvs_close(nvsHandle);
-      return "";
-    } else if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to read WiFi SSID from NVS");
+    if (err == ESP_ERR_NVS_NOT_FOUND || err != ESP_OK) {
       nvs_close(nvsHandle);
       return "";
     }
@@ -57,7 +45,6 @@ public:
     nvs_get_str(nvsHandle, WIFI_SSID_KEY, ssid, &ssidLen);
     nvs_close(nvsHandle);
     
-    Serial.println("WiFi SSID read from NVS: " + String(ssid));
     return String(ssid);
   }
 
@@ -67,19 +54,13 @@ public:
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
     
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to open NVS namespace for reading");
       return "";
     }
     
     size_t passwordLen = 0;
     err = nvs_get_str(nvsHandle, WIFI_PASSWORD_KEY, nullptr, &passwordLen);
     
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-      Serial.println("WARNING: WiFi Password not found in NVS");
-      nvs_close(nvsHandle);
-      return "";
-    } else if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to read WiFi Password from NVS");
+    if (err == ESP_ERR_NVS_NOT_FOUND || err != ESP_OK) {
       nvs_close(nvsHandle);
       return "";
     }
@@ -88,7 +69,6 @@ public:
     nvs_get_str(nvsHandle, WIFI_PASSWORD_KEY, password, &passwordLen);
     nvs_close(nvsHandle);
     
-    Serial.println("WiFi Password read from NVS (length: " + String(passwordLen) + ")");
     return String(password);
   }
 
@@ -98,13 +78,11 @@ public:
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
     
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to open NVS namespace for writing");
       return false;
     }
     
     err = nvs_set_str(nvsHandle, WIFI_SSID_KEY, ssid);
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to write WiFi SSID to NVS");
       nvs_close(nvsHandle);
       return false;
     }
@@ -112,13 +90,7 @@ public:
     err = nvs_commit(nvsHandle);
     nvs_close(nvsHandle);
     
-    if (err == ESP_OK) {
-      Serial.println("WiFi SSID written to NVS: " + String(ssid));
-      return true;
-    } else {
-      Serial.println("ERROR: Failed to commit WiFi SSID to NVS");
-      return false;
-    }
+    return (err == ESP_OK);
   }
 
   // Write WiFi Password to NVS
@@ -127,13 +99,11 @@ public:
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
     
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to open NVS namespace for writing");
       return false;
     }
     
     err = nvs_set_str(nvsHandle, WIFI_PASSWORD_KEY, password);
     if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to write WiFi Password to NVS");
       nvs_close(nvsHandle);
       return false;
     }
@@ -141,38 +111,9 @@ public:
     err = nvs_commit(nvsHandle);
     nvs_close(nvsHandle);
     
-    if (err == ESP_OK) {
-      Serial.println("WiFi Password written to NVS");
-      return true;
-    } else {
-      Serial.println("ERROR: Failed to commit WiFi Password to NVS");
-      return false;
-    }
+    return (err == ESP_OK);
   }
 
-  // Clear WiFi credentials from NVS
-  static bool clearWiFiCredentials() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      Serial.println("ERROR: Failed to open NVS namespace");
-      return false;
-    }
-    
-    nvs_erase_key(nvsHandle, WIFI_SSID_KEY);
-    nvs_erase_key(nvsHandle, WIFI_PASSWORD_KEY);
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    if (err == ESP_OK) {
-      Serial.println("WiFi credentials cleared from NVS");
-      return true;
-    } else {
-      Serial.println("ERROR: Failed to clear WiFi credentials");
-      return false;
-    }
-  }
 };
 
 // Static member definitions

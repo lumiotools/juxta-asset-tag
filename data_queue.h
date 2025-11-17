@@ -2,10 +2,11 @@
 #define DATA_QUEUE_H
 
 #include <Arduino.h>
+#include <string.h>
 
 class DataQueue {
 private:
-  static const int MAX_QUEUE_SIZE = 10;
+  static const int MAX_QUEUE_SIZE = 3; // Reduced to save memory
   String dataQueue[MAX_QUEUE_SIZE];
   int queueLength = 0;
 
@@ -13,12 +14,10 @@ public:
   // Add JSON data to queue
   bool enqueue(String jsonData) {
     if (queueLength >= MAX_QUEUE_SIZE) {
-      Serial.println("ERROR: Data queue is full!");
       return false;
     }
     dataQueue[queueLength] = jsonData;
     queueLength++;
-    Serial.println("Data queued. Queue length: " + String(queueLength));
     return true;
   }
 
@@ -53,38 +52,32 @@ public:
 
   // Create JSON array from queued data
   String createJSONArray() {
-    String jsonArray = "[";
+    static char jsonBuffer[2500]; // Reduced: max 3 items * ~800 bytes
+    int pos = 0;
+    
+    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "[");
     
     for (int i = 0; i < queueLength; i++) {
-      jsonArray += dataQueue[i];
-      if (i < queueLength - 1) {
-        jsonArray += ",";
+      const char* item = dataQueue[i].c_str();
+      int itemLen = strlen(item);
+      if (pos + itemLen + 2 < sizeof(jsonBuffer)) {
+        if (i > 0) {
+          jsonBuffer[pos++] = ',';
+        }
+        memcpy(jsonBuffer + pos, item, itemLen);
+        pos += itemLen;
       }
     }
     
-    jsonArray += "]";
-    return jsonArray;
+    jsonBuffer[pos++] = ']';
+    jsonBuffer[pos] = '\0';
+    
+    return String(jsonBuffer);
   }
 
   // Clear entire queue
   void clear() {
     queueLength = 0;
-    Serial.println("Data queue cleared");
-  }
-
-  // Print queue contents for debugging
-  void printQueueStatus() {
-    Serial.println("\n=== Data Queue Status ===");
-    Serial.println("Queue Length: " + String(queueLength) + "/" + String(MAX_QUEUE_SIZE));
-    
-    if (queueLength == 0) {
-      Serial.println("Queue is empty");
-    } else {
-      for (int i = 0; i < queueLength; i++) {
-        Serial.println("Item " + String(i + 1) + " size: " + String(dataQueue[i].length()) + " bytes");
-      }
-    }
-    Serial.println("========================\n");
   }
 };
 

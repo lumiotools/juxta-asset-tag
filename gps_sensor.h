@@ -1,7 +1,4 @@
-/*
- * GPS Sensor Module - NEO-M9N
- * Handles all GPS sensor initialization and data reading
- */
+// GPS Sensor Module - NEO-M9N
 
 #ifndef GPS_SENSOR_H
 #define GPS_SENSOR_H
@@ -45,16 +42,12 @@ public:
     delay(500); // Give GPS more time to stabilize
     
     // Initialize GPS
-    Serial.println("Initializing NEO-M9N GPS...");
-    
     if (gps.begin(Serial2) == true) {
-      Serial.println("GPS found!");
       gps.setUART1Output(COM_TYPE_UBX); // Set UART output to UBX only
       gps.setI2COutput(COM_TYPE_UBX);
       gps.saveConfigSelective(VAL_CFG_SUBSEC_IOPORT); // Save config
       return true;
     } else {
-      Serial.println("GPS not detected! Check wiring.");
       return false;
     }
   }
@@ -82,7 +75,6 @@ public:
   void powerOff() {
     // Put GPS into backup mode (low power)
     gps.powerOff(0); // 0 = backup mode
-    Serial.println("GPS powered off");
   }
   
   void powerOn() {
@@ -93,11 +85,7 @@ public:
     delay(1000); // Give GPS time to boot
     
     // Re-establish connection
-    if (gps.begin(Serial2)) {
-      Serial.println("GPS powered on");
-    } else {
-      Serial.println("GPS power on failed");
-    }
+    gps.begin(Serial2);
   }
 };
 
