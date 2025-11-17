@@ -4,28 +4,31 @@
 #include "gps_sensor.h"
 #include "customwifi.h"
 #include "time_sync.h"
-#include "device_id.h"
 #include "data_queue.h"
 #include "transmission_handler.h"
 #include "nvs_config.h"
 #include "battery_monitor.h"
 #include "battery_indicator_led.h"
 #include "ble_config.h"
-#include "ws2812b_simple.h"
+#include <Adafruit_NeoPixel.h>
+
+// Device ID Configuration (hardcoded to save memory)
+const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 
 // LED Configuration
 const int LED_PIN = 40;
-const unsigned long LED_PULSE_DURATION = 20; // milliseconds
+const unsigned long LED_PULSE_DURATION = 500; // milliseconds
 
 // NeoPixel Status LED Configuration
-const int STATUS_LED_PIN = RGB_BUILTIN;
+const int STATUS_LED_PIN = 48;
+const int STATUS_LED_COUNT = 1;
 
 // LED State
 volatile bool ledPulseRequested = false;
 unsigned long ledPulseStartTime = 0;
 
 // Status LED instance
-WS2812B statusLED(STATUS_LED_PIN);
+Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Battery Indicator LED instance (separate from status LED)
 BatteryIndicatorLED batteryIndicatorLED;
@@ -53,10 +56,11 @@ void triggerLEDPulse() {
 void updateStatusLED() {
   // Green if both IMU and GPS initialized, Red if either failed
   if (imuInitialized && gpsInitialized) {
-    statusLED.setPixelColor(0, 0, 255, 0); // Green
+    statusLED.setPixelColor(0, statusLED.Color(0, 255, 0)); // Green
   } else {
-    statusLED.setPixelColor(0, 255, 0, 0); // Red
+    statusLED.setPixelColor(0, statusLED.Color(255, 0, 0)); // Red
   }
+  statusLED.show();
 }
 
 void setup() {
@@ -79,7 +83,9 @@ void setup() {
   delay(100);
   
   // Initialize Status LED
-  statusLED.setBrightness(255);
+  statusLED.begin();  // Initialize GPIO first!
+  statusLED.setBrightness(100);
+  statusLED.show();
   updateStatusLED(); // Show red initially (not initialized)
   
   // Initialize LED pin
@@ -90,10 +96,22 @@ void setup() {
   CustomWiFi::setTransmissionCallback(triggerLEDPulse);
   
   // Initialize IMU sensor
+  Serial.println("Initializing IMU sensor...");
   imuInitialized = imuSensor.begin();
+  if (imuInitialized) {
+    Serial.println("IMU initialized successfully");
+  } else {
+    Serial.println("IMU initialization failed - continuing without IMU");
+  }
   
   // Initialize GPS sensor
+  Serial.println("Initializing GPS sensor...");
   gpsInitialized = gpsSensor.begin();
+  if (gpsInitialized) {
+    Serial.println("GPS initialized successfully");
+  } else {
+    Serial.println("GPS initialization failed - continuing without GPS");
+  }
   
   // Update status LED based on sensor initialization
   updateStatusLED();
@@ -110,46 +128,34 @@ void setup() {
 }
 
 String createSensorJSON(IMUData imuData, GPSData gpsData) {
-  static char jsonBuffer[900]; // Reduced: typical JSON ~600-800 bytes
+  static char jsonBuffer[800];
+  char timestamp[20];
   int pos = 0;
   
-  String deviceId = DeviceID::getMACAddress();
-  String timestamp = TimeSync::getCurrentTimeString();
+  TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
   int batteryLevel = BatteryMonitor::getBatteryPercentage();
   
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "{\"device_id\":\"%s\",\"battery_level\":%d,\"timestamp\":\"%s\",\"imu\":{", 
-                  deviceId.c_str(), batteryLevel, timestamp.c_str());
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "{\"device_id\":\"%s\",\"battery_level\":%d,\"timestamp\":\"%s\",\"imu\":{\"quaternion\":{\"i\":%.4f,\"j\":%.4f,\"k\":%.4f,\"real\":%.4f},", 
+                  DEVICE_ID, batteryLevel, timestamp,
+                  imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, imuData.quaternion.real);
   
-  if (imuData.hasQuaternion) {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"quaternion\":{\"i\":%.4f,\"j\":%.4f,\"k\":%.4f,\"real\":%.4f,\"accuracy\":%.4f},", 
-                    imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, 
-                    imuData.quaternion.real, imuData.quaternion.accuracy);
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"euler\":{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f},", 
-                    imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw);
-  }
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                  "\"euler\":{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f},", 
+                  imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw);
   
-  if (imuData.hasAccel) {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"accelerometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
-                    imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z);
-  }
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                  "\"accelerometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
+                  imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z);
   
-  if (imuData.hasGyro) {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"gyroscope\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
-                    imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z);
-  }
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                  "\"gyroscope\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
+                  imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z);
   
-  if (imuData.hasMag) {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"magnetometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}", 
-                    imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z);
-  }
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
+                  "\"magnetometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}},", 
+                  imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z);
   
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "},\"gps\":{");
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "\"fix\":%s,\"fixType\":%d,\"satellites\":%d,", 
+  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "\"gps\":{\"fix\":%s,\"fixType\":%d,\"satellites\":%d,", 
                   gpsData.hasValidFix ? "true" : "false", gpsData.fixType, gpsData.satellites);
   
   if (gpsData.hasValidFix) {
@@ -189,15 +195,7 @@ void loop() {
     lastBLEAdvertiseCheck = currentTime;
   }
   
-  // Handle LED pulse for WiFi TX events (runs every loop iteration)
-  if (ledPulseRequested) {
-    if (currentTime - ledPulseStartTime < LED_PULSE_DURATION) {
-      digitalWrite(LED_PIN, HIGH); // LED ON
-    } else {
-      digitalWrite(LED_PIN, LOW); // LED OFF
-      ledPulseRequested = false;
-    }
-  }
+  
   
   // Update battery indicator LED every 5 seconds
   if (currentTime - lastBatteryUpdate >= 5000) {
@@ -238,6 +236,17 @@ void loop() {
     // Create JSON and send with retry logic
     String jsonData = createSensorJSON(imuData, gpsData);
     sendDataWithRetryLogic(jsonData);
+
+
+    // Handle LED pulse for WiFi TX events (runs every loop iteration)
+    if (ledPulseRequested) {
+      if (currentTime - ledPulseStartTime < LED_PULSE_DURATION) {
+        digitalWrite(LED_PIN, HIGH); // LED ON
+      } else {
+        digitalWrite(LED_PIN, LOW); // LED OFF
+        ledPulseRequested = false;
+      }
+    }
     
     // Power off sensors immediately (transmission continues in background)
     imuSensor.powerOff();

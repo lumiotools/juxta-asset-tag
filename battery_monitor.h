@@ -50,10 +50,6 @@ public:
     float percentage = ((voltage - BATTERY_MIN_VOLTAGE) / 
                        (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE)) * 100.0f;
     
-    // Ensure percentage is between 0-100
-    if (percentage > 100) percentage = 100;
-    if (percentage < 0) percentage = 0;
-    
     return (int)percentage;
   }
 
@@ -69,8 +65,6 @@ public:
     // Yellow: 74-25% (mix of Red and Green)
     else if (percentage >= 25) {
       // Interpolate between green and red
-      // At 75%: full green
-      // At 25%: full red
       int greenComponent = (int)(255 * (percentage - 25) / 50);
       int redComponent = 255 - greenComponent;
       return (redComponent << 16) | (greenComponent << 8);
@@ -80,7 +74,6 @@ public:
       return 0xFF0000; // Red (0xFF0000)
     }
   }
-
 };
 
 #endif

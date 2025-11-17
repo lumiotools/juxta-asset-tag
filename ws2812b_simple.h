@@ -26,6 +26,11 @@ private:
   
 public:
   WS2812B(int p) : pin(p), brightness(255) {
+    // Don't initialize GPIO in constructor - causes boot crash
+    // GPIO will be initialized in begin()
+  }
+  
+  void begin() {
     pinMode(pin, OUTPUT);
     digitalWrite(pin, LOW);
   }
@@ -42,6 +47,10 @@ public:
     sendByte(b_adj);
     interrupts();
     delayMicroseconds(50); // Reset pulse
+  }
+  
+  void clear() {
+    setPixelColor(0, 0, 0, 0);
   }
   
   void setBrightness(uint8_t b) {

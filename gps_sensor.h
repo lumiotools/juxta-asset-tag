@@ -3,7 +3,7 @@
 #ifndef GPS_SENSOR_H
 #define GPS_SENSOR_H
 
-#include <SparkFun_u-blox_GNSS_v3.h>
+#include <TinyGPSPlus.h>
 
 // GPS pin definitions
 #define GPS_TX_PIN 17      // GPS_TX
@@ -27,44 +27,41 @@ struct GPSData {
 
 class GPSSensor {
 private:
-  SFE_UBLOX_GNSS gps;
+  TinyGPSPlus gps;
   GPSData data;
 
 public:
   bool begin() {
-    // Initialize GPS UART
-    Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    // Initialize GPS UART (TinyGPS uses 9600 baud by default for NMEA)
+    Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
     
     // Initialize GPS Reset pin
     pinMode(GPS_RESET_PIN, OUTPUT);
     digitalWrite(GPS_RESET_PIN, HIGH);
     
-    delay(500); // Give GPS more time to stabilize
+    delay(500);
     
-    // Initialize GPS
-    if (gps.begin(Serial2) == true) {
-      gps.setUART1Output(COM_TYPE_UBX); // Set UART output to UBX only
-      gps.setI2COutput(COM_TYPE_UBX);
-      gps.saveConfigSelective(VAL_CFG_SUBSEC_IOPORT); // Save config
-      return true;
-    } else {
-      return false;
-    }
+    return true; // TinyGPS doesn't need explicit initialization
   }
   
   void update() {
-    // Read GPS data
-    if (gps.getPVT()) {
-      data.latitude = gps.getLatitude() / 10000000.0;
-      data.longitude = gps.getLongitude() / 10000000.0;
-      data.altitude = gps.getAltitude() / 1000.0;
-      data.speed = gps.getGroundSpeed() / 1000.0;
-      data.heading = gps.getHeading() / 100000.0;
-      data.satellites = gps.getSIV();
-      data.fixType = gps.getFixType();
-      data.hdop = gps.getHorizontalDOP() / 100.0;
+    // Feed GPS parser with available data
+    while (Serial2.available() > 0) {
+      gps.encode(Serial2.read());
+    }
+    
+    // Update data if location is valid
+    if (gps.location.isUpdated()) {
+      data.latitude = gps.location.lat();
+      data.longitude = gps.location.lng();
+      data.altitude = gps.altitude.meters();
+      data.speed = gps.speed.mps();
+      data.heading = gps.course.deg();
+      data.satellites = gps.satellites.value();
+      data.hdop = gps.hdop.hdop();
       data.timestamp = millis();
-      data.hasValidFix = (data.fixType >= 2);
+      data.hasValidFix = gps.location.isValid();
+      data.fixType = data.hasValidFix ? 3 : 0;
     }
   }
   
@@ -73,19 +70,14 @@ public:
   }
   
   void powerOff() {
-    // Put GPS into backup mode (low power)
-    gps.powerOff(0); // 0 = backup mode
+    // Reset GPS to put in low power
+    digitalWrite(GPS_RESET_PIN, LOW);
   }
   
   void powerOn() {
-    // Wake up GPS from backup mode
-    digitalWrite(GPS_RESET_PIN, LOW);
-    delay(100);
+    // Wake up GPS
     digitalWrite(GPS_RESET_PIN, HIGH);
-    delay(1000); // Give GPS time to boot
-    
-    // Re-establish connection
-    gps.begin(Serial2);
+    delay(1000);
   }
 };
 
