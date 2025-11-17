@@ -1,7 +1,4 @@
-/*
- * IMU Sensor Module - BNO085
- * Handles all IMU sensor initialization and data reading
- */
+// IMU Sensor Module - BNO085
 
 #ifndef IMU_SENSOR_H
 #define IMU_SENSOR_H
@@ -12,8 +9,8 @@
 // IMU pin definitions
 #define I2C_SDA_PIN 8      // IMU_SDA
 #define I2C_SCL_PIN 9      // IMU_SCL
-#define IMU_RESET_PIN 12   // IMU_RESET pin
-#define IMU_INT_PIN 13     // INT pin for interrupts (optional)
+#define IMU_RESET_PIN 13   // IMU_RESET pin
+#define IMU_INT_PIN 12     // INT pin for interrupts (optional)
 
 // Structure to hold all IMU data
 struct IMUData {
@@ -65,41 +62,21 @@ public:
     delay(100);
     
     // Initialize BNO085
-    Serial.println("Initializing BNO085...");
-    
     if (!imu.begin()) {
-      Serial.println("BNO085 not detected! Check wiring.");
       return false;
     }
     
-    Serial.println("BNO085 found!");
-    
     // Enable reports
-    if (imu.enableRotationVector() == true) {
-      Serial.println("Rotation vector enabled");
-    }
-    
-    if (imu.enableAccelerometer() == true) {
-      Serial.println("Accelerometer enabled");
-    }
-    
-    if (imu.enableGyro() == true) {
-      Serial.println("Gyroscope enabled");
-    }
-    
-    if (imu.enableMagnetometer() == true) {
-      Serial.println("Magnetometer enabled");
-    }
+    imu.enableRotationVector();
+    imu.enableAccelerometer();
+    imu.enableGyro();
+    imu.enableMagnetometer();
     
     return true;
   }
   
   void update() {
     // Check if IMU data is available
-    if (imu.wasReset()) {
-      Serial.println("{\"status\":\"imu_reset\"}");
-    }
-    
     if (imu.getSensorEvent() == true) {
       
       // Rotation Vector (Quaternion)
@@ -111,16 +88,14 @@ public:
         data.quaternion.accuracy = imu.getQuatRadianAccuracy();
         data.hasQuaternion = true;
         
-        // Convert to Euler angles
-        float roll = atan2(2.0 * (data.quaternion.real * data.quaternion.i + data.quaternion.j * data.quaternion.k), 
-                           1.0 - 2.0 * (data.quaternion.i * data.quaternion.i + data.quaternion.j * data.quaternion.j));
-        float pitch = asin(2.0 * (data.quaternion.real * data.quaternion.j - data.quaternion.k * data.quaternion.i));
-        float yaw = atan2(2.0 * (data.quaternion.real * data.quaternion.k + data.quaternion.i * data.quaternion.j), 
-                          1.0 - 2.0 * (data.quaternion.j * data.quaternion.j + data.quaternion.k * data.quaternion.k));
+        // Convert to Euler angles (simplified calculation)
+        float qr = data.quaternion.real, qi = data.quaternion.i;
+        float qj = data.quaternion.j, qk = data.quaternion.k;
+        float qii = qi * qi, qjj = qj * qj;
         
-        data.euler.roll = roll * 180.0 / PI;
-        data.euler.pitch = pitch * 180.0 / PI;
-        data.euler.yaw = yaw * 180.0 / PI;
+        data.euler.roll = atan2(2.0 * (qr * qi + qj * qk), 1.0 - 2.0 * (qii + qjj)) * 57.2958f;
+        data.euler.pitch = asin(2.0 * (qr * qj - qk * qi)) * 57.2958f;
+        data.euler.yaw = atan2(2.0 * (qr * qk + qi * qj), 1.0 - 2.0 * (qjj + qk * qk)) * 57.2958f;
       }
       
       // Accelerometer
@@ -158,7 +133,6 @@ public:
   void powerOff() {
     // Put IMU into sleep mode
     digitalWrite(IMU_RESET_PIN, LOW);
-    Serial.println("IMU powered off");
   }
   
   void powerOn() {
@@ -172,7 +146,6 @@ public:
       imu.enableAccelerometer();
       imu.enableGyro();
       imu.enableMagnetometer();
-      Serial.println("IMU powered on");
     }
   }
 };
