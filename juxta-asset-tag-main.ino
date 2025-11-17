@@ -17,15 +17,10 @@ const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 
 // LED Configuration
 const int LED_PIN = 40;
-const unsigned long LED_PULSE_DURATION = 500; // milliseconds
 
 // NeoPixel Status LED Configuration
 const int STATUS_LED_PIN = 48;
 const int STATUS_LED_COUNT = 1;
-
-// LED State
-volatile bool ledPulseRequested = false;
-unsigned long ledPulseStartTime = 0;
 
 // Status LED instance
 Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -47,11 +42,6 @@ bool gpsInitialized = false;
 // Configuration: Reading interval in milliseconds
 const unsigned long READING_INTERVAL = 30000; // 30000ms = 30 seconds
 
-// LED Pulse Handler - Called when WiFi transmission completes
-void triggerLEDPulse() {
-  ledPulseRequested = true;
-  ledPulseStartTime = millis();
-}
 
 void updateStatusLED() {
   // Green if both IMU and GPS initialized, Red if either failed
@@ -88,12 +78,8 @@ void setup() {
   statusLED.show();
   updateStatusLED(); // Show red initially (not initialized)
   
-  // Initialize LED pin
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
-  // Register callback for WiFi transmission completion (triggers LED pulse)
-  CustomWiFi::setTransmissionCallback(triggerLEDPulse);
+  // Initialize LED pin and register with WiFi class
+  CustomWiFi::setTxLEDPin(LED_PIN);
   
   // Initialize IMU sensor
   Serial.println("Initializing IMU sensor...");
@@ -233,22 +219,11 @@ void loop() {
     IMUData imuData = imuSensor.getIMUData();
     GPSData gpsData = gpsSensor.getGPSData();
     
-    // Create JSON and send with retry logic
+    // Create JSON and send with retry logic (LED blinks automatically during transmission)
     String jsonData = createSensorJSON(imuData, gpsData);
     sendDataWithRetryLogic(jsonData);
-
-
-    // Handle LED pulse for WiFi TX events (runs every loop iteration)
-    if (ledPulseRequested) {
-      if (currentTime - ledPulseStartTime < LED_PULSE_DURATION) {
-        digitalWrite(LED_PIN, HIGH); // LED ON
-      } else {
-        digitalWrite(LED_PIN, LOW); // LED OFF
-        ledPulseRequested = false;
-      }
-    }
     
-    // Power off sensors immediately (transmission continues in background)
+    // Power off sensors immediately
     imuSensor.powerOff();
     gpsSensor.powerOff();
     sensorsOn = false;
