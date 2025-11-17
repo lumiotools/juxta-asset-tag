@@ -1,0 +1,26 @@
+{
+  "imu": {
+    "quaternion": {
+      "i": -0.003,
+      "j": 0.8231,
+      "k": -0.0123,
+      "real": 0.5678,
+      "accuracy": 3.1416
+    },
+    "euler": { "roll": -176.18, "pitch": 69.17, "yaw": -176.95 },
+    "accelerometer": { "x": -8.887, "y": -0.23, "z": -3.371 },
+    "gyroscope": { "x": 0.0, "y": -0.002, "z": 0.0 },
+    "magnetometer": { "x": -18.5, "y": 70.375, "z": -6.625 }
+  },
+  "gps": {
+    "fix": false,
+    "fixType": 0,
+    "satellites": 0,
+    "latitude": 0,
+    "longitude": 0,
+    "altitude": 0,
+    "speed": 0,
+    "heading": 0,
+    "hdop": 0
+  }
+}
