@@ -18,6 +18,9 @@ const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 // LED Configuration
 const int LED_PIN = 40;
 
+// BLE LED Configuration
+const int BLE_LED_PIN = 41;
+
 // NeoPixel Status LED Configuration
 const int STATUS_LED_PIN = 48;
 const int STATUS_LED_COUNT = 1;
@@ -56,12 +59,18 @@ void updateStatusLED() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  statusLED.setPixelColor(0, statusLED.Color(255, 165, 0)); // Orange
+  statusLED.show();
+  delay(1000);
   
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
   
   // Initialize BLE for WiFi credential configuration (always advertising)
   BLEConfig::begin();
+  
+  // Initialize BLE LED pin
+  BLEConfig::setBLELEDPin(BLE_LED_PIN);
   
   // Initialize Battery Monitor ADC
   BatteryMonitor::initializeADC();
@@ -160,6 +169,11 @@ String createSensorJSON(IMUData imuData, GPSData gpsData) {
 }
 
 void sendDataWithRetryLogic(String jsonData) {
+  // Send data via BLE if a device is connected
+  if (BLEConfig::isConnected()) {
+    BLEConfig::sendDataViaBLE(jsonData);
+  }
+  
   // Use transmission handler to check queue and send appropriately
   transmissionHandler.handleDataTransmission(jsonData);
 }
