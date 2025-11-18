@@ -9,7 +9,7 @@
 #include "nvs_config.h"
 #include "battery_monitor.h"
 #include "battery_indicator_led.h"
-#include "ble_config.h"
+// #include "ble_config.h"  // BLE disabled - using WiFi only for data transmission
 #include <Adafruit_NeoPixel.h>
 
 // Device ID Configuration (hardcoded to save memory)
@@ -18,8 +18,8 @@ const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 // LED Configuration
 const int LED_PIN = 40;
 
-// BLE LED Configuration
-const int BLE_LED_PIN = 41;
+// BLE LED Configuration (commented out - BLE disabled)
+// const int BLE_LED_PIN = 41;
 
 // NeoPixel Status LED Configuration
 const int STATUS_LED_PIN = 48;
@@ -66,11 +66,11 @@ void setup() {
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
   
-  // Initialize BLE for WiFi credential configuration (always advertising)
-  BLEConfig::begin();
+  // Initialize BLE for WiFi credential configuration (always advertising) - DISABLED
+  // BLEConfig::begin();
   
-  // Initialize BLE LED pin
-  BLEConfig::setBLELEDPin(BLE_LED_PIN);
+  // Initialize BLE LED pin - DISABLED
+  // BLEConfig::setBLELEDPin(BLE_LED_PIN);
   
   // Initialize Battery Monitor ADC
   BatteryMonitor::initializeADC();
@@ -169,12 +169,12 @@ String createSensorJSON(IMUData imuData, GPSData gpsData) {
 }
 
 void sendDataWithRetryLogic(String jsonData) {
-  // Send data via BLE if a device is connected
-  if (BLEConfig::isConnected()) {
-    BLEConfig::sendDataViaBLE(jsonData);
-  }
+  // Send data via BLE if a device is connected - DISABLED (using WiFi only)
+  // if (BLEConfig::isConnected()) {
+  //   BLEConfig::sendDataViaBLE(jsonData);
+  // }
   
-  // Use transmission handler to check queue and send appropriately
+  // Use transmission handler to check queue and send appropriately via WiFi
   transmissionHandler.handleDataTransmission(jsonData);
 }
 
@@ -185,15 +185,15 @@ void loop() {
   static bool firstRun = true;
   unsigned long currentTime = millis();
   
-  // Update BLE (handles connections and processes WiFi credentials)
-  BLEConfig::update();
+  // Update BLE (handles connections and processes WiFi credentials) - DISABLED
+  // BLEConfig::update();
   
-  // Ensure BLE advertising continues (simplified check)
-  static unsigned long lastBLEAdvertiseCheck = 0;
-  if (!BLEConfig::isConnected() && (currentTime - lastBLEAdvertiseCheck >= 5000)) {
-    BLEConfig::restartAdvertising();
-    lastBLEAdvertiseCheck = currentTime;
-  }
+  // Ensure BLE advertising continues (simplified check) - DISABLED
+  // static unsigned long lastBLEAdvertiseCheck = 0;
+  // if (!BLEConfig::isConnected() && (currentTime - lastBLEAdvertiseCheck >= 5000)) {
+  //   BLEConfig::restartAdvertising();
+  //   lastBLEAdvertiseCheck = currentTime;
+  // }
   
   
   
@@ -212,8 +212,14 @@ void loop() {
   if (firstRun || (currentTime - lastPrintTime >= READING_INTERVAL)) {
     // Power on sensors (skip on first run since they're already on)
     if (!sensorsOn && !firstRun) {
-      imuSensor.powerOn();
-      gpsSensor.powerOn();
+      if (imuInitialized) {
+        imuSensor.powerOn();
+        // Update initialization flag in case powerOn() re-initialized successfully
+        imuInitialized = imuSensor.getInitialized();
+      }
+      if (gpsInitialized) {
+        gpsSensor.powerOn();
+      }
       sensorsOn = true;
       delay(2000); // Give sensors time to stabilize
     }
@@ -223,9 +229,14 @@ void loop() {
     delay(1000); // Wait for WiFi to stabilize
     
     // Update sensors to get fresh data (reduced iterations)
+    // Only update if sensors are initialized to avoid crashes
     for (int i = 0; i < 10; i++) {
-      imuSensor.update();
-      gpsSensor.update();
+      if (imuInitialized) {
+        imuSensor.update();
+      }
+      if (gpsInitialized) {
+        gpsSensor.update();
+      }
       delay(50);
     }
     

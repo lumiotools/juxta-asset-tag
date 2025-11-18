@@ -45,6 +45,7 @@ class IMUSensor {
 private:
   BNO08x imu;
   IMUData data;
+  bool isInitialized = false;
 
 public:
   bool begin() {
@@ -61,6 +62,7 @@ public:
     
     // Initialize BNO085
     if (!imu.begin()) {
+      isInitialized = false;
       return false;
     }
     
@@ -70,10 +72,16 @@ public:
     imu.enableGyro();
     imu.enableMagnetometer();
     
+    isInitialized = true;
     return true;
   }
   
   void update() {
+    // Safety check: Don't access IMU if not initialized
+    if (!isInitialized) {
+      return;
+    }
+    
     // Check if IMU data is available
     if (imu.getSensorEvent() == true) {
       
@@ -131,6 +139,7 @@ public:
   void powerOff() {
     // Put IMU into sleep mode
     digitalWrite(IMU_RESET_PIN, LOW);
+    isInitialized = false; // Mark as uninitialized after power off
   }
   
   void powerOn() {
@@ -146,7 +155,14 @@ public:
       imu.enableAccelerometer();
       imu.enableGyro();
       imu.enableMagnetometer();
+      isInitialized = true;
+    } else {
+      isInitialized = false; // Mark as failed if initialization fails
     }
+  }
+  
+  bool getInitialized() {
+    return isInitialized;
   }
 };
 

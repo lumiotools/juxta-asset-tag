@@ -58,11 +58,11 @@ private:
       deviceConnected = false;
     }
     
-    void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
-      mtuSize = param->mtu.mtu;
-      Serial.print("MTU size changed to: ");
-      Serial.println(mtuSize);
-    }
+    // void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
+    //   mtuSize = param->mtu.mtu;
+    //   Serial.print("MTU size changed to: ");
+    //   Serial.println(mtuSize);
+    // }
   };
 
   // SSID Characteristic Callbacks
