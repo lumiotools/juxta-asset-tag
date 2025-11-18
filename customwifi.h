@@ -37,6 +37,9 @@ public:
     // Read WiFi credentials from NVS
     String ssid = NVSConfig::getWiFiSSID();
     String password = NVSConfig::getWiFiPassword();
+
+    Serial.println("Connecting to WiFi SSID: " + ssid);
+    Serial.println("Using password: " + password);
     
     if (ssid.length() == 0 || password.length() == 0) {
       return false;

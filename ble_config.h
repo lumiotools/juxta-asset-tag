@@ -16,6 +16,7 @@
 #define PASSWORD_CHAR_UUID  "12345678-1234-1234-1234-123456789abe"
 #define STATUS_CHAR_UUID    "12345678-1234-1234-1234-123456789abf"
 #define DATA_CHAR_UUID      "12345678-1234-1234-1234-123456789ac0"
+#define CURRENT_SSID_CHAR_UUID "12345678-1234-1234-1234-123456789ac1"
 
 // BLE Device Name
 #define BLE_DEVICE_NAME     "AssetTag-Config"
@@ -28,6 +29,7 @@ private:
   static BLECharacteristic* pPasswordCharacteristic;
   static BLECharacteristic* pStatusCharacteristic;
   static BLECharacteristic* pDataCharacteristic;
+  static BLECharacteristic* pCurrentSSIDCharacteristic;
   static bool deviceConnected;
   static bool oldDeviceConnected;
   static String receivedSSID;
@@ -52,17 +54,21 @@ private:
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
       mtuSize = 23; // Default MTU size, will be updated after negotiation
+      
+      // Load and send current SSID when client connects
+      String currentSSID = NVSConfig::getWiFiSSID();
+      if (pCurrentSSIDCharacteristic != nullptr) {
+        if (currentSSID.length() > 0) {
+          pCurrentSSIDCharacteristic->setValue(currentSSID.c_str());
+        } else {
+          pCurrentSSIDCharacteristic->setValue("Not configured");
+        }
+      }
     }
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
     }
-    
-    // void onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
-    //   mtuSize = param->mtu.mtu;
-    //   Serial.print("MTU size changed to: ");
-    //   Serial.println(mtuSize);
-    // }
   };
 
   // SSID Characteristic Callbacks
@@ -164,6 +170,18 @@ public:
     pDataCharacteristic->addDescriptor(new BLE2902());
     pDataCharacteristic->setValue("{}");
     
+    // Create Current SSID Characteristic (read-only to show saved WiFi)
+    pCurrentSSIDCharacteristic = pService->createCharacteristic(
+      CURRENT_SSID_CHAR_UUID,
+      BLECharacteristic::PROPERTY_READ
+    );
+    String currentSSID = NVSConfig::getWiFiSSID();
+    if (currentSSID.length() > 0) {
+      pCurrentSSIDCharacteristic->setValue(currentSSID.c_str());
+    } else {
+      pCurrentSSIDCharacteristic->setValue("Not configured");
+    }
+    
     // Start the service
     pService->start();
     
@@ -202,7 +220,10 @@ public:
       bool ssidSaved = NVSConfig::setWiFiSSID(receivedSSID.c_str());
       bool passwordSaved = NVSConfig::setWiFiPassword(receivedPassword.c_str());
       
-      // Credentials saved (no status update to save code)
+      // Update current SSID characteristic with the new value
+      if (pCurrentSSIDCharacteristic != nullptr && ssidSaved) {
+        pCurrentSSIDCharacteristic->setValue(receivedSSID.c_str());
+      }
       
       // Reset flags
       credentialsReceived = false;
@@ -277,6 +298,7 @@ BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
+BLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
 bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";

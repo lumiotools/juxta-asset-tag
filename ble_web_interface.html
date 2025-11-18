@@ -483,52 +483,141 @@
             const decoder = new TextDecoder('utf-8');
             const chunk = decoder.decode(value);
 
+            console.log(`Received chunk (${chunk.length} bytes):`, chunk.substring(0, 50) + '...');
+            
             // Append chunk to buffer
             dataBuffer += chunk;
+            console.log(`Buffer size: ${dataBuffer.length} bytes`);
 
-            // Try to parse complete JSON objects
-            // Look for complete JSON by checking for matching braces
-            let braceCount = 0;
+            // Try to parse complete JSON (object or array)
+            // Only parse if we have what looks like a complete structure
+            let startChar = null;
+            let closingChar = null;
             let startIndex = -1;
             
+            // Find the first valid starting character
             for (let i = 0; i < dataBuffer.length; i++) {
                 if (dataBuffer[i] === '{') {
-                    if (braceCount === 0) startIndex = i;
-                    braceCount++;
-                } else if (dataBuffer[i] === '}') {
-                    braceCount--;
-                    if (braceCount === 0 && startIndex !== -1) {
-                        // Found complete JSON object
-                        const jsonString = dataBuffer.substring(startIndex, i + 1);
-                        try {
-                            const data = JSON.parse(jsonString);
-                            dataCount++;
-
-                            // Update data display with formatted JSON
-                            dataDisplay.textContent = JSON.stringify(data, null, 2);
-
-                            // Update timestamp
-                            const now = new Date();
-                            lastUpdate.textContent = `Last updated: ${now.toLocaleTimeString()} (${dataCount} updates)`;
-
-                            // Update individual cards
-                            updateDataCards(data);
-
-                            console.log('Received sensor data:', data);
-                            
-                            // Clear buffer up to this point
-                            dataBuffer = dataBuffer.substring(i + 1);
-                            startIndex = -1;
-                        } catch (error) {
-                            console.error('Failed to parse JSON:', error);
-                            // Keep buffer as is, might be incomplete
+                    startChar = '{';
+                    closingChar = '}';
+                    startIndex = i;
+                    break;
+                } else if (dataBuffer[i] === '[') {
+                    startChar = '[';
+                    closingChar = ']';
+                    startIndex = i;
+                    break;
+                }
+            }
+            
+            // If we found a start, check if we have a complete structure
+            if (startIndex !== -1) {
+                let braceDepth = 0;
+                let bracketDepth = 0;
+                let isComplete = false;
+                let endIndex = -1;
+                let inString = false;
+                let escapeNext = false;
+                
+                for (let i = startIndex; i < dataBuffer.length; i++) {
+                    const char = dataBuffer[i];
+                    
+                    // Handle string escaping
+                    if (escapeNext) {
+                        escapeNext = false;
+                        continue;
+                    }
+                    if (char === '\\') {
+                        escapeNext = true;
+                        continue;
+                    }
+                    if (char === '"') {
+                        inString = !inString;
+                        continue;
+                    }
+                    
+                    // Only count braces/brackets outside of strings
+                    if (!inString) {
+                        if (char === '{') braceDepth++;
+                        else if (char === '}') braceDepth--;
+                        else if (char === '[') bracketDepth++;
+                        else if (char === ']') bracketDepth--;
+                        
+                        // Check if we've closed the original structure
+                        if (braceDepth === 0 && bracketDepth === 0) {
+                            isComplete = true;
+                            endIndex = i;
+                            break;
                         }
                     }
+                }
+                
+                // Only try to parse if we have a complete structure
+                if (isComplete) {
+                    const jsonString = dataBuffer.substring(startIndex, endIndex + 1);
+                    console.log(`Complete JSON detected (${jsonString.length} bytes)`);
+                    
+                    try {
+                        const parsed = JSON.parse(jsonString);
+                        
+                        // Always expect array format
+                        if (Array.isArray(parsed)) {
+                            // Handle array of sensor data (normal case)
+                            console.log(`✓ Parsed array with ${parsed.length} item(s) successfully`);
+                            
+                            // Process each item in the array
+                            parsed.forEach((dataItem, index) => {
+                                dataCount++;
+                                
+                                // Update cards with the latest item (last in array)
+                                if (index === parsed.length - 1) {
+                                    updateDataCards(dataItem);
+                                }
+                            });
+                            
+                            // Display the entire array
+                            dataDisplay.textContent = JSON.stringify(parsed, null, 2);
+                            
+                            // Update timestamp with appropriate message
+                            const now = new Date();
+                            if (parsed.length === 1) {
+                                lastUpdate.textContent = `Last updated: ${now.toLocaleTimeString()} (${dataCount} total updates)`;
+                            } else {
+                                lastUpdate.textContent = `Last updated: ${now.toLocaleTimeString()} (${dataCount} total updates, received ${parsed.length} queued items)`;
+                            }
+                        } else {
+                            // Unexpected: received single object instead of array
+                            // Treat it as a single-item array
+                            dataCount++;
+                            console.log('⚠ Received single object (expected array), treating as single-item array');
+                            
+                            // Wrap in array for consistent display
+                            const wrappedArray = [parsed];
+                            dataDisplay.textContent = JSON.stringify(wrappedArray, null, 2);
+                            
+                            const now = new Date();
+                            lastUpdate.textContent = `Last updated: ${now.toLocaleTimeString()} (${dataCount} total updates)`;
+                            
+                            updateDataCards(parsed);
+                        }
+                        
+                        // Clear the processed data from buffer
+                        dataBuffer = dataBuffer.substring(endIndex + 1).trim();
+                        console.log('Buffer cleared, remaining:', dataBuffer.length, 'bytes');
+                        
+                    } catch (error) {
+                        console.error('✗ Failed to parse JSON:', error.message);
+                        console.error('Problematic JSON:', jsonString.substring(0, 100) + '...');
+                        // Clear invalid data
+                        dataBuffer = dataBuffer.substring(endIndex + 1).trim();
+                    }
+                } else {
+                    console.log('Incomplete JSON, waiting for more chunks...');
                 }
             }
             
             // Clear buffer if it gets too large (prevent memory issues)
-            if (dataBuffer.length > 2000) {
+            if (dataBuffer.length > 5000) {
                 console.warn('Buffer overflow, clearing...');
                 dataBuffer = '';
             }
