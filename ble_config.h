@@ -8,6 +8,8 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include "nvs_config.h"
+#include "battery_monitor.h"
+#include "time_sync.h"
 #include <Ticker.h>
 
 // BLE Service and Characteristic UUIDs
@@ -36,6 +38,7 @@ private:
   static String receivedPassword;
   static bool credentialsReceived;
   static uint16_t mtuSize;
+  static const char* deviceId;
   
   // BLE LED Configuration
   static int bleLedPin;
@@ -55,14 +58,28 @@ private:
       deviceConnected = true;
       mtuSize = 23; // Default MTU size, will be updated after negotiation
       
-      // Load and send current SSID when client connects
+      // Load current SSID, device_id, timestamp, and battery
       String currentSSID = NVSConfig::getWiFiSSID();
+      if (currentSSID.length() == 0) {
+        currentSSID = "Not configured";
+      }
+      
+      // Get timestamp
+      char timestamp[20];
+      TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
+      
+      // Get battery level
+      int batteryLevel = BatteryMonitor::getBatteryPercentage();
+      
+      // Get device_id (use stored value or default)
+      const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
+      
+      // Create JSON string with device_id, timestamp, battery, and currentSSID
+      String data = "{\"device_id\":\"" + String(devId) + "\",\"timestamp\":\"" + String(timestamp) + "\",\"battery\":" + String(batteryLevel) + ",\"currentSSID\":\"" + currentSSID + "\"}";
+      
+      // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
-        if (currentSSID.length() > 0) {
-          pCurrentSSIDCharacteristic->setValue(currentSSID.c_str());
-        } else {
-          pCurrentSSIDCharacteristic->setValue("Not configured");
-        }
+        pCurrentSSIDCharacteristic->setValue(data.c_str());
       }
     }
 
@@ -119,6 +136,11 @@ private:
   };
 
 public:
+  // Set Device ID
+  static void setDeviceId(const char* id) {
+    deviceId = id;
+  }
+  
   // Set BLE LED Pin
   static void setBLELEDPin(int pin) {
     bleLedPin = pin;
@@ -305,6 +327,7 @@ String BLEConfig::receivedSSID = "";
 String BLEConfig::receivedPassword = "";
 bool BLEConfig::credentialsReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
+const char* BLEConfig::deviceId = nullptr;
 int BLEConfig::bleLedPin = -1;
 Ticker* BLEConfig::bleLedTicker = nullptr;
 volatile bool BLEConfig::bleLedState = false;

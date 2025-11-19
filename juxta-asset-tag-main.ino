@@ -69,6 +69,9 @@ void setup() {
   // Initialize BLE for WiFi credential configuration (always advertising)
   BLEConfig::begin();
   
+  // Set Device ID for BLE
+  BLEConfig::setDeviceId(DEVICE_ID);
+  
   // Initialize BLE LED pin
   BLEConfig::setBLELEDPin(BLE_LED_PIN);
   
