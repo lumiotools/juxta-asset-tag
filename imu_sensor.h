@@ -76,6 +76,7 @@ public:
     return true;
   }
   
+  // This function is used to update the IMU data and read data from the IMU
   void update() {
     // Safety check: Don't access IMU if not initialized
     if (!isInitialized) {
@@ -149,16 +150,17 @@ public:
     digitalWrite(IMU_RESET_PIN, HIGH);
     delay(100);
     
+    isInitialized = true;
     // Re-initialize IMU
-    if (imu.begin()) {
-      imu.enableRotationVector();
-      imu.enableAccelerometer();
-      imu.enableGyro();
-      imu.enableMagnetometer();
-      isInitialized = true;
-    } else {
-      isInitialized = false; // Mark as failed if initialization fails
-    }
+    // if (imu.begin()) {
+    //   imu.enableRotationVector();
+    //   imu.enableAccelerometer();
+    //   imu.enableGyro();
+    //   imu.enableMagnetometer();
+    //   isInitialized = true;
+    // } else {
+    //   isInitialized = false; // Mark as failed if initialization fails
+    // }
   }
   
   bool getInitialized() {

@@ -207,6 +207,8 @@ void loop() {
   if (firstRun || (currentTime - lastPrintTime >= READING_INTERVAL)) {
     // Power on sensors (skip on first run since they're already on)
     if (!sensorsOn && !firstRun) {
+      Serial.println("imuInitialized: " + String(imuInitialized));
+      Serial.println("gpsInitialized: " + String(gpsInitialized));
       if (imuInitialized) {
         imuSensor.powerOn();
         // Update initialization flag in case powerOn() re-initialized successfully
