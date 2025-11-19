@@ -221,9 +221,11 @@ void loop() {
       delay(2000); // Give sensors time to stabilize
     }
     
-    // Reconnect WiFi for retry logic and transmission
-    CustomWiFi::connectWiFi();
-    delay(1000); // Wait for WiFi to stabilize
+    if (!BLEConfig::isConnected()) {
+      // Reconnect WiFi for retry logic and transmission
+      CustomWiFi::connectWiFi();
+      delay(1000); // Wait for WiFi to stabilize
+    }
     
     // Update sensors to get fresh data (increased to allow all IMU sensor types to report)
     // Only update if sensors are initialized to avoid crashes
@@ -250,8 +252,10 @@ void loop() {
     gpsSensor.powerOff();
     sensorsOn = false;
     
-    // Power off WiFi
-    CustomWiFi::disconnectWiFi();
+    if (CustomWiFi::isConnected()) {
+      // Power off WiFi
+      CustomWiFi::disconnectWiFi();
+    }
     
     lastPrintTime = currentTime;
     firstRun = false;

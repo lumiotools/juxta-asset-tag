@@ -90,6 +90,10 @@ public:
     }
   }
   
+  static bool isConnected() {
+    return WiFi.isConnected();
+  }
+  
   static void disconnectWiFi() {
     WiFi.disconnect(true); // true = turn off WiFi radio
   }
