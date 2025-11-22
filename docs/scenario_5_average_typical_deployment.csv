@@ -1,0 +1,27 @@
+Period,Connection State,Cycle Duration (sec),Energy per Cycle (mAs),Average Current (mA),Time Weight,Weighted Contribution (mA)
+First Minute,BLE Active (Scenario 1),30.00,2329.21,77.64,0.07%,0.05
+After BLE Stops,WiFi Connected (60%),30.00,1186.93,39.56,60%,23.74
+After BLE Stops,WiFi Disconnected (40%),300.00,879.48,2.93,40%,1.17
+TOTAL WEIGHTED AVERAGE,-,-,-,24.91,100%,24.91
+
+Component Breakdown - WiFi Connected (60% of time),Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active/WiFi),Active,120.00,8.00,960.00,30.00
+IMU Sensor,Active,3.50,3.00,10.50,30.00
+GPS Sensor,Active,30.00,3.00,90.00,30.00
+Status LED (GPIO 48),Active,7.50,8.00,60.00,30.00
+Battery LED (GPIO 38),Active,7.50,8.00,60.00,30.00
+WiFi TX LED (GPIO 40),Active,2.50,2.00,5.00,30.00
+ESP32-S3 (Deep Sleep),Deep Sleep,0.01,22.00,0.22,30.00
+IMU Sensor (Sleep),Deep Sleep,0.005,22.00,0.11,30.00
+GPS Sensor (Sleep),Deep Sleep,0.05,22.00,1.10,30.00
+
+Component Breakdown - WiFi Disconnected (40% of time),Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active no WiFi),Active,80.00,8.00,640.00,300.00
+IMU Sensor,Active,3.50,3.00,10.50,300.00
+GPS Sensor,Active,30.00,3.00,90.00,300.00
+Status LED (GPIO 48),Active,7.50,8.00,60.00,300.00
+Battery LED (GPIO 38),Active,7.50,8.00,60.00,300.00
+ESP32-S3 (Deep Sleep),Deep Sleep,0.01,292.00,2.92,300.00
+IMU Sensor (Sleep),Deep Sleep,0.005,292.00,1.46,300.00
+GPS Sensor (Sleep),Deep Sleep,0.05,292.00,14.60,300.00
+

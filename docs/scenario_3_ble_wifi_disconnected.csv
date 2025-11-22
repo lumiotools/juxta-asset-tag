@@ -1,0 +1,13 @@
+Component,Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active no WiFi),Active,80.00,8.00,640.00,300.00
+IMU Sensor,Active,3.50,3.00,10.50,300.00
+GPS Sensor,Active,30.00,3.00,90.00,300.00
+Status LED (GPIO 48),Active,7.50,8.00,60.00,300.00
+Battery LED (GPIO 38),Active,7.50,8.00,60.00,300.00
+ESP32-S3 (Deep Sleep),Deep Sleep,0.01,292.00,2.92,300.00
+IMU Sensor (Sleep),Deep Sleep,0.005,292.00,1.46,300.00
+GPS Sensor (Sleep),Deep Sleep,0.05,292.00,14.60,300.00
+Status LED (Off in sleep),Deep Sleep,0.00,292.00,0.00,300.00
+Battery LED (Off in sleep),Deep Sleep,0.00,292.00,0.00,300.00
+TOTAL PER CYCLE,-,2.93,300.00,879.48,300.00
+

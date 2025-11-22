@@ -1,0 +1,43 @@
+Period,Component Mix,Cycle Duration (sec),Energy per Cycle (mAs),Average Current (mA),Weight,Weighted Contribution (mA)
+Period 1: BLE Connected,BLE Connected (Scenario 1),30.00,2329.21,77.64,20%,15.53
+Period 2: WiFi Connected,BLE Off WiFi Connected (Scenario 2),30.00,1186.93,39.56,30%,11.87
+Period 3: WiFi Disconnected,BLE Off WiFi Disconnected (Scenario 3),300.00,879.48,2.93,30%,0.88
+Period 4: WiFi Intermittent,BLE Off WiFi Intermittent (50/50 mix),165.00,1033.21,21.25,20%,4.25
+TOTAL WEIGHTED AVERAGE,-,-,-,32.53,100%,32.53
+
+Component Breakdown - Period 1 (BLE Connected),Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active/WiFi),Active,120.00,8.00,960.00,30.00
+IMU Sensor,Active,3.50,3.00,10.50,30.00
+GPS Sensor,Active,30.00,3.00,90.00,30.00
+Status LED (GPIO 48),Active,7.50,8.00,60.00,30.00
+Battery LED (GPIO 38),Active,7.50,8.00,60.00,30.00
+BLE Radio,Active,5.00,8.00,40.00,30.00
+WiFi TX LED,Active,2.50,2.00,5.00,30.00
+BLE Activity LED,Active,2.50,1.00,2.50,30.00
+ESP32-S3 (Idle/BLE),Idle,35.00,22.00,770.00,30.00
+IMU Sensor (Sleep),Idle,0.005,22.00,0.11,30.00
+GPS Sensor (Sleep),Idle,0.05,22.00,1.10,30.00
+Status LED,Idle,7.50,22.00,165.00,30.00
+Battery LED,Idle,7.50,22.00,165.00,30.00
+
+Component Breakdown - Period 2 (WiFi Connected),Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active/WiFi),Active,120.00,8.00,960.00,30.00
+IMU Sensor,Active,3.50,3.00,10.50,30.00
+GPS Sensor,Active,30.00,3.00,90.00,30.00
+Status LED,Active,7.50,8.00,60.00,30.00
+Battery LED,Active,7.50,8.00,60.00,30.00
+WiFi TX LED,Active,2.50,2.00,5.00,30.00
+ESP32-S3 (Deep Sleep),Deep Sleep,0.01,22.00,0.22,30.00
+IMU Sensor (Sleep),Deep Sleep,0.005,22.00,0.11,30.00
+GPS Sensor (Sleep),Deep Sleep,0.05,22.00,1.10,30.00
+
+Component Breakdown - Period 3 (WiFi Disconnected),Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active no WiFi),Active,80.00,8.00,640.00,300.00
+IMU Sensor,Active,3.50,3.00,10.50,300.00
+GPS Sensor,Active,30.00,3.00,90.00,300.00
+Status LED,Active,7.50,8.00,60.00,300.00
+Battery LED,Active,7.50,8.00,60.00,300.00
+ESP32-S3 (Deep Sleep),Deep Sleep,0.01,292.00,2.92,300.00
+IMU Sensor (Sleep),Deep Sleep,0.005,292.00,1.46,300.00
+GPS Sensor (Sleep),Deep Sleep,0.05,292.00,14.60,300.00
+

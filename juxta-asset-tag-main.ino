@@ -11,6 +11,8 @@
 #include "battery_indicator_led.h"
 #include "ble_config.h"
 #include <Adafruit_NeoPixel.h>
+#include <esp_system.h>
+#include "esp_sleep.h"
 
 // Device ID Configuration (hardcoded to save memory)
 const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
@@ -33,6 +35,9 @@ BatteryIndicatorLED batteryIndicatorLED;
 
 // Transmission handler for failed data retry logic
 TransmissionHandler transmissionHandler;
+
+// BLE start time tracking
+unsigned long bleStartTime = 0;
 
 // Create sensor instances
 IMUSensor imuSensor;
@@ -66,14 +71,27 @@ void setup() {
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
   
-  // Initialize BLE for WiFi credential configuration (always advertising)
-  BLEConfig::begin();
+  // Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
+  Serial.println("Initializing data queue...");
+  if (!transmissionHandler.begin()) {
+    Serial.println("Warning: Data queue initialization failed!");
+  }
   
-  // Set Device ID for BLE
-  BLEConfig::setDeviceId(DEVICE_ID);
+  // Check ESP reset reason
+  esp_reset_reason_t resetReason = esp_reset_reason();
+  Serial.print("Reset reason: ");
+  Serial.println(resetReason);
   
-  // Initialize BLE LED pin
-  BLEConfig::setBLELEDPin(BLE_LED_PIN);
+  // Initialize BLE only if reset reason is POWER_ON or reset button press
+  if (resetReason == ESP_RST_POWERON || resetReason == ESP_RST_EXT) {
+    Serial.println("Starting BLE (POWER_ON or reset button press)");
+    BLEConfig::begin();
+    BLEConfig::setDeviceId(DEVICE_ID);
+    BLEConfig::setBLELEDPin(BLE_LED_PIN);
+    bleStartTime = millis(); // Set BLE start time when BLE begins
+  } else {
+    Serial.println("BLE not started (reset reason not POWER_ON or reset button)");
+  }
   
   // Initialize Battery Monitor ADC
   BatteryMonitor::initializeADC();
@@ -171,9 +189,9 @@ String createSensorJSON(IMUData imuData, GPSData gpsData) {
   return String(jsonBuffer);
 }
 
-void sendDataWithRetryLogic(String jsonData) {
+bool sendDataWithRetryLogic(String jsonData) {
   // Use transmission handler to send via WiFi and/or BLE with queue logic
-  transmissionHandler.handleDataTransmission(jsonData);
+  return transmissionHandler.handleDataTransmission(jsonData);
 }
 
 void loop() {
@@ -183,14 +201,22 @@ void loop() {
   static bool firstRun = true;
   unsigned long currentTime = millis();
   
-  // Update BLE (handles connections and processes WiFi credentials)
-  BLEConfig::update();
+  // Only update BLE if it's enabled (saves power after BLE is stopped)
+  static bool bleJustStopped = false;
   
-  // Ensure BLE advertising continues (simplified check)
-  static unsigned long lastBLEAdvertiseCheck = 0;
-  if (!BLEConfig::isConnected() && (currentTime - lastBLEAdvertiseCheck >= 5000)) {
-    BLEConfig::restartAdvertising();
-    lastBLEAdvertiseCheck = currentTime;
+  if (BLEConfig::isEnabled()) {
+    // Update BLE (handles connections and processes WiFi credentials)
+    BLEConfig::update();
+    
+    // Check if BLE is disconnected and more than 1 minute has passed since start
+    if (!BLEConfig::isConnected() && bleStartTime > 0) {
+      if (currentTime - bleStartTime >= 60000) { // 60000ms = 1 minute
+        Serial.println("BLE disconnected for more than 1 minute, stopping BLE permanently");
+        BLEConfig::stop();
+        bleStartTime = 0; // Reset to prevent further checks
+        bleJustStopped = true; // Flag to trigger deep sleep check after next transmission
+      }
+    }
   }
   
   
@@ -224,12 +250,6 @@ void loop() {
       delay(2000); // Give sensors time to stabilize
     }
     
-    if (!BLEConfig::isConnected()) {
-      // Reconnect WiFi for retry logic and transmission
-      CustomWiFi::connectWiFi();
-      delay(1000); // Wait for WiFi to stabilize
-    }
-    
     // Update sensors to get fresh data (increased to allow all IMU sensor types to report)
     // Only update if sensors are initialized to avoid crashes
     for (int i = 0; i < 50; i++) {
@@ -245,15 +265,47 @@ void loop() {
     // Get data from sensors
     IMUData imuData = imuSensor.getIMUData();
     GPSData gpsData = gpsSensor.getGPSData();
-    
-    // Create JSON and send with retry logic (LED blinks automatically during transmission)
-    String jsonData = createSensorJSON(imuData, gpsData);
-    sendDataWithRetryLogic(jsonData);
-    
+
     // Power off sensors immediately
     imuSensor.powerOff();
     gpsSensor.powerOff();
     sensorsOn = false;
+    
+    // Create JSON and send with retry logic (LED blinks automatically during transmission)
+    String jsonData = createSensorJSON(imuData, gpsData);
+    
+    if (!BLEConfig::isConnected()) {
+      // Reconnect WiFi for retry logic and transmission
+      CustomWiFi::connectWiFi();
+      delay(1000); // Wait for WiFi to stabilize
+    }
+    
+    bool sendSuccess = sendDataWithRetryLogic(jsonData);
+
+    // After BLE is powered off, check WiFi connection and transmission, then deep sleep
+    if (bleJustStopped) {
+      bleJustStopped = false;
+      
+      // Check WiFi connection status
+      bool wifiConnected = CustomWiFi::isConnected();
+      
+      // Disconnect WiFi before deep sleep
+      if (wifiConnected) {
+        CustomWiFi::disconnectWiFi();
+      }
+      
+      // Deep sleep based on WiFi connection and transmission success
+      if (wifiConnected && sendSuccess) {
+        Serial.println("WiFi connected and send successful - Deep sleeping for 30 seconds");
+        esp_sleep_enable_timer_wakeup(30 * 1000000ULL); // 30 seconds in microseconds
+      } else {
+        Serial.println("WiFi not connected or send failed - Deep sleeping for 5 minutes");
+        esp_sleep_enable_timer_wakeup(5 * 60 * 1000000ULL); // 5 minutes in microseconds
+      }
+      
+      // Enter deep sleep
+      esp_deep_sleep_start();
+    }
     
     if (CustomWiFi::isConnected()) {
       // Power off WiFi

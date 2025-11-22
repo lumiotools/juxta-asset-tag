@@ -272,11 +272,11 @@ Battery: 3.02V | 2% | Critical
 - **Update Frequency:** Every 5 seconds
 - **Colors:** Green (75-100%), Yellow (25-75%), Red (0-24%)
 
-### GPIO 39 - Device Status LED (Separate)
+### GPIO 48 - Device Status LED (Separate)
 - **Type:** NeoPixel WS2812B RGB LED
 - **Function:** IMU/GPS initialization status
-- **Color:** Green (OK) or Red (Error)
-- **Brightness:** 255/255 (full brightness)
+- **Color:** Green (OK) or Red (Error) or Orange (Initializing)
+- **Brightness:** 100/255 (full brightness)
 - **Current:** 5-10 mA
 - **Always On:** Yes (for status indication)
 
@@ -286,6 +286,13 @@ Battery: 3.02V | 2% | Critical
 - **Voltage:** 3.3V
 - **Current:** 2-10 mA (during pulse)
 - **Duration:** 20ms pulse on WiFi TX event
+
+### GPIO 41 - BLE Activity LED (Separate)
+- **Type:** Standard GPIO output
+- **Function:** BLE activity indicator (data received/transmitted)
+- **Voltage:** 3.3V
+- **Current:** 2-10 mA (during pulse)
+- **Duration:** 20ms pulses during BLE activity
 
 ---
 

@@ -1,0 +1,16 @@
+Component,Phase,Current (mA),Duration (sec),Energy (mAs),Cycle Duration (sec)
+ESP32-S3 (Active/WiFi),Active,120.00,8.00,960.00,30.00
+IMU Sensor,Active,3.50,3.00,10.50,30.00
+GPS Sensor,Active,30.00,3.00,90.00,30.00
+Status LED (GPIO 48),Active,7.50,8.00,60.00,30.00
+Battery LED (GPIO 38),Active,7.50,8.00,60.00,30.00
+BLE Radio (Advertising),Active,5.00,8.00,40.00,30.00
+WiFi TX LED (GPIO 40),Active,2.50,2.00,5.00,30.00
+BLE Activity LED (GPIO 41),Active,2.50,1.00,2.50,30.00
+ESP32-S3 (Idle/BLE active),Idle,35.00,22.00,770.00,30.00
+IMU Sensor (Sleep),Idle,0.005,22.00,0.11,30.00
+GPS Sensor (Sleep),Idle,0.05,22.00,1.10,30.00
+Status LED (GPIO 48),Idle,7.50,22.00,165.00,30.00
+Battery LED (GPIO 38),Idle,7.50,22.00,165.00,30.00
+TOTAL PER CYCLE,-,77.64,30.00,2329.21,30.00
+

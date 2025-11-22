@@ -10,6 +10,7 @@ private:
   DataQueue dataQueue;
 
   // Unified send function - tries both WiFi and BLE
+  // Only attempts transmission if WiFi is connected or BLE is connected
   bool sendData(const String& data) {
     bool wifiSuccess = false;
     bool bleSuccess = false;
@@ -19,8 +20,8 @@ private:
       bleSuccess = BLEConfig::sendDataViaBLE(data);
     }
 
-    if (!bleSuccess) {
-      // Try WiFi transmission
+    // Only try WiFi if BLE didn't succeed and WiFi is connected
+    if (!bleSuccess && CustomWiFi::isConnected()) {
       wifiSuccess = CustomWiFi::sendSensorData(data);
     }
     
@@ -29,29 +30,42 @@ private:
   }
 
 public:
+  // Initialize the data queue (must be called before use)
+  bool begin() {
+    return dataQueue.begin();
+  }
+
   // Check transmission status and handle accordingly
   // Always sends data as array format (single item or multiple items)
-  // Returns: true if data sent successfully (via WiFi or BLE), false if failed or in progress
+  // Returns: true if data sent successfully (via WiFi or BLE), false if saved to queue or failed
   bool handleDataTransmission(String currentJSON) {
     // Always add current data to queue first
     dataQueue.enqueue(currentJSON);
     
-    // Create JSON array from queue (1 or more items)
-    String jsonArray = dataQueue.createJSONArray();
+    // Check if WiFi or BLE is connected before attempting transmission
+    bool wifiConnected = CustomWiFi::isConnected();
+    bool bleConnected = BLEConfig::isConnected();
     
-    // Try to send the array
-    bool success = sendData(jsonArray);
-    
-    if (success) {
-      // Clear queue on successful transmission
-      dataQueue.clear();
+    // Only attempt to send if WiFi or BLE is connected
+    if (wifiConnected || bleConnected) {
+      // Create JSON array from queue (1 or more items)
+      String jsonArray = dataQueue.createJSONArray();
+      
+      // Try to send the array
+      bool success = sendData(jsonArray);
+      
+      if (success) {
+        // Clear queue on successful transmission
+        dataQueue.clear();
+        return true;
+      } else {
+        // Transmission failed, data stays in queue for next attempt
+        return false;
+      }
     } else {
-      // Remove the current item we just added if sending failed
-      // Keep it in queue for next transmission attempt
-      // Queue now contains the current item that failed to send
+      // WiFi and BLE not connected, save to queue and don't attempt transmission
+      return false;
     }
-    
-    return success;
   }
 
   // Get reference to data queue for external monitoring

@@ -1,39 +1,47 @@
 # Data Transmission Retry System - Implementation Guide
 
-This system implements intelligent data queuing for failed WiFi transmissions. It automatically batches failed data into JSON arrays and attempts retransmission.
+This system implements intelligent data queuing for failed WiFi/BLE transmissions. It automatically batches failed data into JSON arrays and attempts retransmission via WiFi or BLE. The queue persists to NVS flash memory, ensuring data survives power cycles.
 
 ---
 
 ## Step-by-Step Workflow
 
-### STEP 1: First Data Attempt (Queue Empty)
+### STEP 1: Add Current Data to Queue
 
 - Current sensor data is in JSON format
-- DataQueue is empty (no previous failures)
-- Action: Send JSON directly via HTTP POST
-- If SUCCESS: Data transmitted, cycle continues normally
-- If FAILED: Data added to queue (now has 1 item)
+- **Always** add current data to queue first (regardless of queue state)
+- Queue persists to NVS flash after each change
+- Queue survives power cycles (loaded from NVS on boot)
 
-### STEP 2: Second Data Attempt (Queue has 1 item)
+### STEP 2: Check Connections
 
-- Queue contains 1 failed JSON object
-- New sensor data arrives (another JSON object)
-- Action: 
-  1. Add new data to queue (now has 2 items)
-  2. Convert queue to JSON ARRAY: `[{obj1}, {obj2}]`
-  3. Send array via HTTP POST
-- If SUCCESS: Both objects transmitted, queue cleared
-- If FAILED: Both items remain in queue (now has 2 items)
+- Check if WiFi is connected
+- Check if BLE is connected
+- If neither connected: Save to queue, return (no transmission attempt)
+- If either connected: Proceed to transmission
 
-### STEP 3: Multiple Failures (Queue has 2+ items)
+### STEP 3: Create JSON Array
 
-- Queue accumulating failed transmissions (2 or more items)
-- Serial print: `"!!! WARNING: Queue has X items !!!"`
-- Serial print: `"!!! NEED BLE HERE - Queue is accumulating failed transmissions !!!"`
-- Current data still added to queue if space available
-- This indicates persistent WiFi failure
-- ACTION REQUIRED: Implement BLE backup transmission
-- Max queue capacity: 10 items (configurable)
+- Convert entire queue to JSON array format
+- **Always** sends as array, even if only 1 item: `[{obj1}]` or `[{obj1}, {obj2}, ...]`
+- Array format is consistent regardless of queue size
+
+### STEP 4: Attempt Transmission
+
+- **Try BLE first** (if connected):
+  - Send array via BLE (chunked if large)
+  - If SUCCESS: Clear queue, return true
+  - If FAILED: Continue to WiFi
+- **Try WiFi** (if connected and BLE failed or not available):
+  - Send array via HTTP POST (5-second timeout)
+  - If SUCCESS: Clear queue, return true
+  - If FAILED: Keep data in queue, return false
+
+### STEP 5: Queue Persistence
+
+- Queue data automatically saved to NVS after each change
+- On next boot: Queue loaded from NVS, retry continues
+- Max queue capacity: Calculated dynamically based on available NVS space (typically 3-10 items)
 
 ---
 
@@ -41,65 +49,81 @@ This system implements intelligent data queuing for failed WiFi transmissions. I
 
 ### `data_queue.h` - DataQueue Class
 
-- Stores up to 10 failed JSON objects as String array
+- Stores failed JSON objects as String array (dynamic max size based on NVS space)
 - FIFO queue management (First In, First Out)
+- **Persists to NVS flash memory** - survives power cycles
+- Calculates max queue size on first boot based on available NVS space
 
 **Key Methods:**
-- `enqueue(jsonData)` - Add JSON to queue
-- `dequeue()` - Remove and return first item
+- `begin()` - Initialize queue (loads from NVS, calculates max size on first boot)
+- `enqueue(jsonData)` - Add JSON to queue (auto-saves to NVS)
+- `dequeue()` - Remove and return first item (auto-saves to NVS)
 - `getLength()` - Get current queue size
 - `isEmpty()` - Check if queue is empty
-- `createJSONArray()` - Convert queue to JSON array format
-- `clear()` - Empty entire queue
-- `printQueueStatus()` - Debug output
+- `createJSONArray()` - Convert queue to JSON array format (always array, even if 1 item)
+- `clear()` - Empty entire queue (auto-saves to NVS)
+- `getMaxSize()` - Get maximum queue capacity
 
 ### `transmission_handler.h` - TransmissionHandler Class
 
 - Central logic for transmission decision-making
 - Contains DataQueue instance internally
+- Tries BLE first, then WiFi
+- Always sends data as JSON array format
 
-**Key Method:**
+**Key Methods:**
+- `begin()` - Initialize transmission handler (must be called before use)
 - `handleDataTransmission(currentJSON)`
-  - Main function that implements the 3-step workflow
+  - Main function that implements the transmission workflow
+  - Always adds current data to queue first
+  - Creates JSON array from entire queue
+  - Tries BLE first (if connected), then WiFi (if connected)
   - Returns: `true` if successful, `false` if failed
   - Handles all queuing logic automatically
+- `getDataQueue()` - Get reference to data queue for external monitoring
 
 ---
 
 ## JSON Formats
 
-### Single Transmission (Queue Empty)
+### Transmission Format (Always JSON Array)
 
-```json
-{
-  "device_id": "AA:BB:CC:DD:EE:FF",
-  "battery_level": 85,
-  "timestamp": 1234567890,
-  "imu": {...},
-  "gps": {...}
-}
-```
+**Note:** System always sends data as JSON array, even if queue contains only 1 item.
 
-### Batch Transmission (Queue has items)
-
+**Single Item (Queue had only current data):**
 ```json
 [
   {
-    "device_id": "AA:BB:CC:DD:EE:FF",
+    "device_id": "ASSET_TAG_001",
     "battery_level": 85,
-    "timestamp": 1234567890,
-    "imu": {...},
-    "gps": {...}
-  },
-  {
-    "device_id": "AA:BB:CC:DD:EE:FF",
-    "battery_level": 84,
-    "timestamp": 1234567891,
+    "timestamp": "2024-11-15T10:30:00Z",
     "imu": {...},
     "gps": {...}
   }
 ]
 ```
+
+**Multiple Items (Queue had previous failed data):**
+```json
+[
+  {
+    "device_id": "ASSET_TAG_001",
+    "battery_level": 85,
+    "timestamp": "2024-11-15T10:29:30Z",
+    "imu": {...},
+    "gps": {...}
+  },
+  {
+    "device_id": "ASSET_TAG_001",
+    "battery_level": 84,
+    "timestamp": "2024-11-15T10:30:00Z",
+    "imu": {...},
+    "gps": {...}
+  }
+]
+```
+
+**Device ID:** Hardcoded as "ASSET_TAG_001" in code (change for each device), not MAC address.
 
 ---
 
@@ -118,25 +142,29 @@ This system implements intelligent data queuing for failed WiFi transmissions. I
 TransmissionHandler transmissionHandler;
 ```
 
-### 3. Function Call (in main loop)
+### 3. Initialization (in setup)
+
+```cpp
+// Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
+if (!transmissionHandler.begin()) {
+  Serial.println("Warning: Data queue initialization failed!");
+}
+```
+
+### 4. Function Call (in main loop)
 
 ```cpp
 String jsonData = createSensorJSON(imuData, gpsData);
-sendDataWithRetryLogic(jsonData);
+bool sendSuccess = sendDataWithRetryLogic(jsonData);
 ```
 
-### 4. Implementation Function
+### 5. Implementation Function
 
 ```cpp
-void sendDataWithRetryLogic(String jsonData) {
-  Serial.println("\n--- Starting Data Transmission with Retry Logic ---");
-  bool success = transmissionHandler.handleDataTransmission(jsonData);
-  if (success) {
-    Serial.println("Data transmission successful!");
-  } else {
-    Serial.println("Data transmission failed - queued for retry");
-  }
-  postInProgress = false;
+bool sendDataWithRetryLogic(String jsonData) {
+  // Use transmission handler to send via WiFi and/or BLE with queue logic
+  // Always sends as JSON array (1 or more items)
+  return transmissionHandler.handleDataTransmission(jsonData);
 }
 ```
 
@@ -144,115 +172,130 @@ void sendDataWithRetryLogic(String jsonData) {
 
 ## Typical Operation Sequence
 
-### Cycle 1
+### Cycle 1 (WiFi/BLE Connected)
 
 ```
 ├─ Collect IMU + GPS data → Create JSON1
-├─ Check queue: EMPTY
-├─ Send JSON1 directly
-└─ ✓ Success → Queue stays empty
+├─ Add JSON1 to queue (Length: 1, saved to NVS)
+├─ Create array: [JSON1]
+├─ Try BLE (if connected) or WiFi (if connected)
+└─ ✓ Success → Queue cleared (Length: 0, saved to NVS)
 ```
 
-### Cycle 2 (WiFi disconnected)
+### Cycle 2 (WiFi/BLE Disconnected)
 
 ```
 ├─ Collect IMU + GPS data → Create JSON2
-├─ Check queue: EMPTY
-├─ Send JSON2 directly
-└─ ✗ Failed → Add JSON2 to queue (Length: 1)
+├─ Add JSON2 to queue (Length: 1, saved to NVS)
+├─ Check connections: WiFi ✗, BLE ✗
+└─ No transmission attempt → Queue: [JSON2] (persists to NVS)
 ```
 
-### Cycle 3 (WiFi still down)
+### Cycle 3 (WiFi/BLE Still Down)
 
 ```
 ├─ Collect IMU + GPS data → Create JSON3
-├─ Check queue: LENGTH = 1
-├─ Add JSON3 to queue (Length: 2)
-├─ Create array: [JSON2, JSON3]
-├─ Send array
-└─ ✗ Failed → Queue keeps both items (Length: 2)
+├─ Add JSON3 to queue (Length: 2, saved to NVS)
+├─ Check connections: WiFi ✗, BLE ✗
+└─ No transmission attempt → Queue: [JSON2, JSON3] (persists to NVS)
 ```
 
-### Cycle 4 (WiFi still down)
+### Cycle 4 (WiFi/BLE Recovered)
 
 ```
 ├─ Collect IMU + GPS data → Create JSON4
-├─ Check queue: LENGTH = 2 (≥ 2)
-├─ ⚠️  Print "NEED BLE HERE"
-├─ Add JSON4 to queue if space (Length: 3)
-└─ Waiting for BLE implementation or WiFi recovery
+├─ Add JSON4 to queue (Length: 3, saved to NVS)
+├─ Create array: [JSON2, JSON3, JSON4]
+├─ Try BLE (if connected) or WiFi (if connected)
+└─ ✓ Success → Queue cleared (Length: 0, saved to NVS)
 ```
 
-### Cycle 5 (WiFi recovered)
+### Cycle 5 (After Power Cycle)
 
 ```
+├─ Boot: Queue loaded from NVS (Length: 0 if previous cycle succeeded)
 ├─ Collect IMU + GPS data → Create JSON5
-├─ Check queue: LENGTH = 3 (≥ 2)
-├─ ⚠️  Print "NEED BLE HERE" (still full)
-└─ Add JSON5 to queue (Length: 4)
+├─ Add JSON5 to queue (Length: 1, saved to NVS)
+├─ Create array: [JSON5]
+├─ Try BLE (if connected) or WiFi (if connected)
+└─ ✓ Success → Queue cleared
 ```
 
-**Note:** Future enhancement: BLE module sends queued data or WiFi reconnects with array retry
+**Note:** Queue persists across power cycles via NVS flash memory. Failed transmissions are automatically retried on next boot.
 
 ---
 
 ## Error Handling
 
-### Queue Full (10 items)
+### Queue Full (Max Size Reached)
 
-- New data cannot be added
+- Max queue size calculated dynamically based on available NVS space (typically 3-10 items)
+- New data cannot be added if queue is full
 - Serial output: `"ERROR: Queue is full! Data cannot be added."`
-- BLE implementation required to clear queue
+- Queue persists to NVS, will retry on next boot or when connection restored
 
 ### Network Failure Detection
 
-- Automatic via `CustomWiFi::sendSensorData()` return value
+- Automatic via `CustomWiFi::sendSensorData()` return value (WiFi)
+- Automatic via `BLEConfig::sendDataViaBLE()` return value (BLE)
 - No manual timeout checks needed
+- Transmission handler tries BLE first, then WiFi if BLE not available
+
+### Connection Status
+
+- Checks `CustomWiFi::isConnected()` for WiFi status
+- Checks `BLEConfig::isConnected()` for BLE status
+- Only attempts transmission if at least one connection is active
+- If neither connected, data saved to queue without transmission attempt
 
 ---
 
 ## Future Enhancements
 
-### 1. BLE Implementation
+### 1. Compression
 
-- When queue reaches 2+ items, send via BLE instead of WiFi
-- Can clear queue even if WiFi is unavailable
-- **Status:** BLE is currently implemented for WiFi credential setup, but data transmission fallback is pending
-
-### 2. Persistent Storage
-
-- Save queue to SPIFFS/SD card
-- Recover failed data after power loss
-
-### 3. Compression
-
-- Compress JSON before queuing to save memory
+- Compress JSON before queuing to save NVS space
 - Especially important for large arrays
+- Could increase max queue size
 
-### 4. Smart Retry
+### 2. Smart Retry
 
-- Exponential backoff between WiFi retry attempts
+- Exponential backoff between retry attempts
 - Check WiFi signal strength before attempting transmission
+- Prioritize BLE when WiFi signal is weak
+
+### 3. Queue Management
+
+- Automatic queue size optimization based on NVS usage
+- Queue rotation (FIFO with max age limit)
+- Queue statistics and monitoring
+
+### 4. Enhanced BLE Transmission
+
+- Larger MTU negotiation for faster BLE transmission
+- BLE connection priority when WiFi unavailable
 
 ---
 
 ## Implementation Status
 
 **Current Implementation:**
-- ✅ Data queue system (max 10 items)
-- ✅ Automatic retry logic with batch transmission
-- ✅ Queue status monitoring and alerts
+- ✅ Data queue system (dynamic max size based on NVS space, typically 3-10 items)
+- ✅ Automatic retry logic with batch transmission (always JSON array format)
+- ✅ Queue persistence to NVS flash memory (survives power cycles)
+- ✅ BLE data transmission fallback (tries BLE first, then WiFi)
 - ✅ Integration with main sketch
+- ✅ First boot queue size calculation
+- ✅ Queue loaded from NVS on boot
 
 **Pending:**
-- ⏳ BLE data transmission fallback (when queue ≥ 2 items)
-- ⏳ Persistent storage for queue data
-- ⏳ JSON compression
+- ⏳ JSON compression (to increase max queue size)
 - ⏳ Smart retry with exponential backoff
+- ⏳ Queue statistics and monitoring
 
 ---
 
 **Last Updated:** December 2024  
 **File:** `juxta-asset-tag-main.ino`  
-**Related Files:** `data_queue.h`, `transmission_handler.h`, `customwifi.h`
+**Related Files:** `data_queue.h`, `transmission_handler.h`, `customwifi.h`, `ble_config.h`, `nvs_config.h`
 

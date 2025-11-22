@@ -11,6 +11,9 @@
 #include "battery_monitor.h"
 #include "time_sync.h"
 #include <Ticker.h>
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_bt_controller.h"
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -39,6 +42,7 @@ private:
   static bool credentialsReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
+  static bool bleDisabled;  // Flag to track if BLE is permanently disabled
   
   // BLE LED Configuration
   static int bleLedPin;
@@ -218,12 +222,18 @@ public:
     receivedPassword = "";
     credentialsReceived = false;
     mtuSize = 23; // Default BLE MTU size
+    bleDisabled = false; // Reset disabled flag when starting BLE
     
     return true;
   }
   
   // Update BLE (call this in loop to handle connections and process received data)
   static void update() {
+    // Don't update if BLE is disabled
+    if (bleDisabled) {
+      return;
+    }
+    
     // Handle disconnection
     if (!deviceConnected && oldDeviceConnected) {
       delay(500); // Give the bluetooth stack the chance to get things ready
@@ -256,19 +266,69 @@ public:
   
   // Check if BLE is connected
   static bool isConnected() {
+    if (bleDisabled) {
+      return false; // Always return false if BLE is disabled
+    }
     return deviceConnected;
   }
   
   // Restart advertising
   static void restartAdvertising() {
-    if (!deviceConnected) {
+    if (!deviceConnected && !bleDisabled) {
       BLEDevice::startAdvertising();
     }
   }
   
+  // Stop and deinitialize BLE permanently (consumes no power)
+  static void stop() {
+    // Stop LED blinking
+    if (bleLedPin >= 0 && bleLedTicker != nullptr) {
+      bleLedTicker->detach();
+      digitalWrite(bleLedPin, LOW);
+    }
+    
+    // Stop advertising first
+    if (pServer != nullptr) {
+      pServer->getAdvertising()->stop();
+    }
+    
+    // Deinitialize BLE stack completely (true = free memory)
+    BLEDevice::deinit(true);
+    
+    // Disable Bluetooth controller to completely power off the radio
+    esp_bt_controller_disable();
+    
+    // Deinitialize Bluetooth controller to free resources
+    esp_bt_controller_deinit();
+    
+    // Clear all pointers to prevent any accidental access
+    pServer = nullptr;
+    pService = nullptr;
+    pSSIDCharacteristic = nullptr;
+    pPasswordCharacteristic = nullptr;
+    pStatusCharacteristic = nullptr;
+    pDataCharacteristic = nullptr;
+    pCurrentSSIDCharacteristic = nullptr;
+    
+    // Set disabled flag
+    bleDisabled = true;
+    deviceConnected = false;
+    oldDeviceConnected = false;
+    
+    // Clear credentials
+    receivedSSID = "";
+    receivedPassword = "";
+    credentialsReceived = false;
+  }
+  
+  // Check if BLE is enabled (not permanently disabled)
+  static bool isEnabled() {
+    return !bleDisabled;
+  }
+  
   // Send sensor data via BLE (with chunking for large data)
   static bool sendDataViaBLE(const String& jsonData) {
-    if (!deviceConnected || pDataCharacteristic == nullptr) {
+    if (bleDisabled || !deviceConnected || pDataCharacteristic == nullptr) {
       return false;
     }
     
@@ -331,6 +391,7 @@ const char* BLEConfig::deviceId = nullptr;
 int BLEConfig::bleLedPin = -1;
 Ticker* BLEConfig::bleLedTicker = nullptr;
 volatile bool BLEConfig::bleLedState = false;
+bool BLEConfig::bleDisabled = false;
 
 #endif
 
