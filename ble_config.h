@@ -12,8 +12,6 @@
 #include "time_sync.h"
 #include <Ticker.h>
 #include "esp_bt.h"
-#include "esp_bt_main.h"
-#include "esp_bt_controller.h"
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -296,10 +294,10 @@ public:
     BLEDevice::deinit(true);
     
     // Disable Bluetooth controller to completely power off the radio
-    esp_bt_controller_disable();
+    // esp_bt_controller_disable();
     
-    // Deinitialize Bluetooth controller to free resources
-    esp_bt_controller_deinit();
+    // // Deinitialize Bluetooth controller to free resources
+    // esp_bt_controller_deinit();
     
     // Clear all pointers to prevent any accidental access
     pServer = nullptr;
@@ -327,7 +325,7 @@ public:
   }
   
   // Send sensor data via BLE (with chunking for large data)
-  static bool sendDataViaBLE(const String& jsonData) {
+  static bool sendDataViaBLE(const String& csvData) {
     if (bleDisabled || !deviceConnected || pDataCharacteristic == nullptr) {
       return false;
     }
@@ -341,19 +339,22 @@ public:
     // Calculate safe chunk size (MTU - 3 bytes for ATT header)
     uint16_t maxChunkSize = (mtuSize > 23) ? (mtuSize - 3) : 20;
     
+    // Add newline terminator to CSV data for UI detection
+    String dataWithNewline = csvData + "\n";
+    
     // If data fits in one chunk, send directly
-    if (jsonData.length() <= maxChunkSize) {
-      pDataCharacteristic->setValue(jsonData.c_str());
+    if (dataWithNewline.length() <= maxChunkSize) {
+      pDataCharacteristic->setValue(dataWithNewline.c_str());
       pDataCharacteristic->notify();
       delay(50); // Give BLE stack time to process
     } else {
       // Send data in chunks
-      int totalLength = jsonData.length();
+      int totalLength = dataWithNewline.length();
       int offset = 0;
       
       while (offset < totalLength) {
         int chunkSize = min((int)maxChunkSize, totalLength - offset);
-        String chunk = jsonData.substring(offset, offset + chunkSize);
+        String chunk = dataWithNewline.substring(offset, offset + chunkSize);
         
         pDataCharacteristic->setValue(chunk.c_str());
         pDataCharacteristic->notify();

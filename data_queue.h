@@ -37,8 +37,8 @@ private:
       availableSpace -= RESERVED_SPACE;
     }
     
-    // Estimate size per queue item: ~1000 bytes per JSON item + overhead
-    const int BYTES_PER_ITEM = 1050; // ~1000 bytes JSON + 50 bytes overhead
+    // Estimate size per queue item: ~300 bytes per CSV item + overhead
+    const int BYTES_PER_ITEM = 350; // ~300 bytes CSV + 50 bytes overhead
     
     // Calculate max items that fit
     int maxItems = availableSpace / BYTES_PER_ITEM;
@@ -56,11 +56,11 @@ private:
   void saveToNVS() {
     if (!initialized) return;
     
-    // Create JSON array string
-    String jsonArray = createJSONArray();
+    // Create CSV string (newline separated)
+    String csvData = createCSVString();
     
     // Save to NVS
-    NVSConfig::setQueueData(jsonArray.c_str());
+    NVSConfig::setQueueData(csvData.c_str());
   }
   
   // Load queue data from NVS
@@ -72,31 +72,30 @@ private:
       return;
     }
     
-    // Parse JSON array - buffer size based on max queue size
-    // Estimate: ~850 bytes per item + overhead
-    int docSize = (MAX_QUEUE_SIZE * 900) + 500; // Add 500 bytes overhead
-    if (docSize > 50000) docSize = 50000; // Cap at 50KB to prevent excessive memory usage
-    
-    DynamicJsonDocument doc(docSize);
-    DeserializationError error = deserializeJson(doc, queueData);
-    
-    if (error) {
-      Serial.print("Failed to parse queue data from NVS: ");
-      Serial.println(error.c_str());
-      queueLength = 0;
-      return;
-    }
-    
-    // Load items into queue
+    // Parse CSV format (newline separated)
     queueLength = 0;
-    if (doc.is<JsonArray>()) {
-      JsonArray arr = doc.as<JsonArray>();
-      for (JsonVariant item : arr) {
-        if (queueLength < MAX_QUEUE_SIZE && item.is<const char*>()) {
-          dataQueue[queueLength] = String(item.as<const char*>());
-          queueLength++;
-        }
+    int startIdx = 0;
+    int endIdx = 0;
+    
+    while (endIdx >= 0 && queueLength < MAX_QUEUE_SIZE) {
+      endIdx = queueData.indexOf('\n', startIdx);
+      
+      String line;
+      if (endIdx >= 0) {
+        line = queueData.substring(startIdx, endIdx);
+        startIdx = endIdx + 1;
+      } else {
+        // Last line (no newline at end)
+        line = queueData.substring(startIdx);
       }
+      
+      if (line.length() > 0) {
+        dataQueue[queueLength] = line;
+        queueLength++;
+      }
+      
+      // Break if no more newlines found
+      if (endIdx < 0) break;
     }
     
     Serial.print("Loaded ");
@@ -220,45 +219,43 @@ public:
     return MAX_QUEUE_SIZE;
   }
 
-  // Create JSON array from queued data
-  String createJSONArray() {
+  // Create CSV string from queued data (newline separated)
+  String createCSVString() {
     if (!initialized) {
-      return "[]";
+      return "";
     }
     
     // Calculate required buffer size dynamically
-    int totalSize = 2; // "[]"
+    int totalSize = 0;
     for (int i = 0; i < queueLength; i++) {
       totalSize += dataQueue[i].length();
-      if (i > 0) totalSize++; // comma
+      if (i > 0) totalSize++; // newline
     }
     
     // Allocate buffer (with some extra for safety)
-    char* jsonBuffer = (char*)malloc(totalSize + 100);
-    if (jsonBuffer == nullptr) {
-      return "[]"; // Return empty array on allocation failure
+    char* csvBuffer = (char*)malloc(totalSize + 100);
+    if (csvBuffer == nullptr) {
+      return ""; // Return empty string on allocation failure
     }
     
     int pos = 0;
-    pos += snprintf(jsonBuffer + pos, totalSize + 100 - pos, "[");
     
     for (int i = 0; i < queueLength; i++) {
       const char* item = dataQueue[i].c_str();
       int itemLen = strlen(item);
       if (pos + itemLen + 2 < totalSize + 100) {
         if (i > 0) {
-          jsonBuffer[pos++] = ',';
+          csvBuffer[pos++] = '\n';
         }
-        memcpy(jsonBuffer + pos, item, itemLen);
+        memcpy(csvBuffer + pos, item, itemLen);
         pos += itemLen;
       }
     }
     
-    jsonBuffer[pos++] = ']';
-    jsonBuffer[pos] = '\0';
+    csvBuffer[pos] = '\0';
     
-    String result = String(jsonBuffer);
-    free(jsonBuffer);
+    String result = String(csvBuffer);
+    free(csvBuffer);
     
     return result;
   }

@@ -36,11 +36,11 @@ public:
   }
 
   // Check transmission status and handle accordingly
-  // Always sends data as array format (single item or multiple items)
+  // Always sends data as CSV array format (single item or multiple items)
   // Returns: true if data sent successfully (via WiFi or BLE), false if saved to queue or failed
-  bool handleDataTransmission(String currentJSON) {
+  bool handleDataTransmission(String currentCSV) {
     // Always add current data to queue first
-    dataQueue.enqueue(currentJSON);
+    dataQueue.enqueue(currentCSV);
     
     // Check if WiFi or BLE is connected before attempting transmission
     bool wifiConnected = CustomWiFi::isConnected();
@@ -48,11 +48,11 @@ public:
     
     // Only attempt to send if WiFi or BLE is connected
     if (wifiConnected || bleConnected) {
-      // Create JSON array from queue (1 or more items)
-      String jsonArray = dataQueue.createJSONArray();
+      // Create CSV string from queue (1 or more items, newline separated)
+      String csvData = dataQueue.createCSVString();
       
-      // Try to send the array
-      bool success = sendData(jsonArray);
+      // Try to send the CSV data
+      bool success = sendData(csvData);
       
       if (success) {
         // Clear queue on successful transmission

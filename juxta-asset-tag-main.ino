@@ -143,55 +143,45 @@ void setup() {
   delay(100);
 }
 
-String createSensorJSON(IMUData imuData, GPSData gpsData) {
-  static char jsonBuffer[800];
+String createSensorCSV(IMUData imuData, GPSData gpsData) {
+  static char csvBuffer[500];
   char timestamp[20];
-  int pos = 0;
   
   TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
   int batteryLevel = BatteryMonitor::getBatteryPercentage();
   
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "{\"device_id\":\"%s\",\"battery_level\":%d,\"timestamp\":\"%s\",\"imu\":{\"quaternion\":{\"i\":%.4f,\"j\":%.4f,\"k\":%.4f,\"real\":%.4f},", 
-                  DEVICE_ID, batteryLevel, timestamp,
-                  imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, imuData.quaternion.real);
+  // CSV format: device_id,battery_level,timestamp,imu.quaternion.i,imu.quaternion.j,imu.quaternion.k,imu.quaternion.real,
+  //             imu.euler.roll,imu.euler.pitch,imu.euler.yaw,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
+  //             imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,imu.magnetometer.x,imu.magnetometer.y,imu.magnetometer.z,
+  //             gps.fix,gps.fixType,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                  "\"euler\":{\"roll\":%.2f,\"pitch\":%.2f,\"yaw\":%.2f},", 
-                  imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw);
+  snprintf(csvBuffer, sizeof(csvBuffer), 
+           "%s,%d,%s,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%d,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           DEVICE_ID,
+           batteryLevel,
+           timestamp,
+           imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, imuData.quaternion.real,
+           imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw,
+           imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
+           imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z,
+           imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z,
+           gpsData.hasValidFix ? "true" : "false",
+           gpsData.fixType,
+           gpsData.satellites,
+           gpsData.hasValidFix ? gpsData.latitude : 0.0,
+           gpsData.hasValidFix ? gpsData.longitude : 0.0,
+           gpsData.hasValidFix ? gpsData.altitude : 0.0,
+           gpsData.hasValidFix ? gpsData.speed : 0.0,
+           gpsData.hasValidFix ? gpsData.heading : 0.0,
+           gpsData.hasValidFix ? gpsData.hdop : 0.0
+  );
   
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                  "\"accelerometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
-                  imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z);
-  
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                  "\"gyroscope\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},", 
-                  imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z);
-  
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                  "\"magnetometer\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}},", 
-                  imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z);
-  
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "\"gps\":{\"fix\":%s,\"fixType\":%d,\"satellites\":%d,", 
-                  gpsData.hasValidFix ? "true" : "false", gpsData.fixType, gpsData.satellites);
-  
-  if (gpsData.hasValidFix) {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"latitude\":%.7f,\"longitude\":%.7f,\"altitude\":%.2f,\"speed\":%.2f,\"heading\":%.2f,\"hdop\":%.2f", 
-                    gpsData.latitude, gpsData.longitude, gpsData.altitude, 
-                    gpsData.speed, gpsData.heading, gpsData.hdop);
-  } else {
-    pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, 
-                    "\"latitude\":0,\"longitude\":0,\"altitude\":0,\"speed\":0,\"heading\":0,\"hdop\":0");
-  }
-  
-  pos += snprintf(jsonBuffer + pos, sizeof(jsonBuffer) - pos, "}}");
-  
-  return String(jsonBuffer);
+  return String(csvBuffer);
 }
 
-bool sendDataWithRetryLogic(String jsonData) {
+bool sendDataWithRetryLogic(String csvData) {
   // Use transmission handler to send via WiFi and/or BLE with queue logic
-  return transmissionHandler.handleDataTransmission(jsonData);
+  return transmissionHandler.handleDataTransmission(csvData);
 }
 
 void loop() {
@@ -271,8 +261,8 @@ void loop() {
     gpsSensor.powerOff();
     sensorsOn = false;
     
-    // Create JSON and send with retry logic (LED blinks automatically during transmission)
-    String jsonData = createSensorJSON(imuData, gpsData);
+    // Create CSV and send with retry logic (LED blinks automatically during transmission)
+    String csvData = createSensorCSV(imuData, gpsData);
     
     if (!BLEConfig::isConnected()) {
       // Reconnect WiFi for retry logic and transmission
@@ -280,7 +270,7 @@ void loop() {
       delay(1000); // Wait for WiFi to stabilize
     }
     
-    bool sendSuccess = sendDataWithRetryLogic(jsonData);
+    bool sendSuccess = sendDataWithRetryLogic(csvData);
 
     // After BLE is powered off, check WiFi connection and transmission, then deep sleep
     if (bleJustStopped) {
@@ -299,8 +289,8 @@ void loop() {
         Serial.println("WiFi connected and send successful - Deep sleeping for 30 seconds");
         esp_sleep_enable_timer_wakeup(30 * 1000000ULL); // 30 seconds in microseconds
       } else {
-        Serial.println("WiFi not connected or send failed - Deep sleeping for 5 minutes");
-        esp_sleep_enable_timer_wakeup(5 * 60 * 1000000ULL); // 5 minutes in microseconds
+        Serial.println("WiFi not connected or send failed - Deep sleeping for 1 minute");
+        esp_sleep_enable_timer_wakeup(1 * 60 * 1000000ULL); // 1 minute in microseconds
       }
       
       // Enter deep sleep

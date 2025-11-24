@@ -56,7 +56,7 @@ public:
     return (WiFi.status() == WL_CONNECTED);
   }
   
-  static bool sendSensorData(const String& jsonData) {
+  static bool sendSensorData(const String& csvData) {
     if (WiFi.status() != WL_CONNECTED) {
       return false;
     }
@@ -70,10 +70,10 @@ public:
     HTTPClient http;
     http.setTimeout(REQUEST_TIMEOUT);
     http.begin(SERVER_URL);
-    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Content-Type", "text/csv");
     
     // POST is blocking - LED blinks via Ticker interrupt during transmission
-    int httpResponseCode = http.POST(jsonData);
+    int httpResponseCode = http.POST(csvData);
     // delay(2000); //pura 2s chalu bujban chalu rakhne
     // Stop LED blinking
     if (txLedPin >= 0 && ledTicker != nullptr) {
