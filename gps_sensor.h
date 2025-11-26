@@ -8,8 +8,6 @@
 // GPS pin definitions
 #define GPS_TX_PIN 17      // GPS_TX
 #define GPS_RX_PIN 18      // GPS_RX
-#define GPS_RESET_PIN 15   // GPS_RESET
-#define GPS_INT_PIN 16     // GPS_INT
 
 // Structure to hold GPS data
 struct GPSData {
@@ -34,10 +32,6 @@ public:
   bool begin() {
     // Initialize GPS UART (TinyGPS uses 9600 baud by default for NMEA)
     Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    
-    // Initialize GPS Reset pin
-    pinMode(GPS_RESET_PIN, OUTPUT);
-    digitalWrite(GPS_RESET_PIN, HIGH);
     
     delay(500);
     
@@ -69,16 +63,6 @@ public:
     return data;
   }
   
-  void powerOff() {
-    // Reset GPS to put in low power
-    digitalWrite(GPS_RESET_PIN, LOW);
-  }
-  
-  void powerOn() {
-    // Wake up GPS
-    digitalWrite(GPS_RESET_PIN, HIGH);
-    delay(1000);
-  }
 };
 
 #endif

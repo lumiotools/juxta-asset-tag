@@ -14,8 +14,9 @@
 #include <esp_system.h>
 #include "esp_sleep.h"
 
-// Device ID Configuration (hardcoded to save memory)
+// Device ID and Version Configuration (hardcoded to save memory)
 const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
+const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
 // LED Configuration
 const int WIFI_LED_PIN = 40;
@@ -87,6 +88,7 @@ void setup() {
     Serial.println("Starting BLE (POWER_ON or reset button press)");
     BLEConfig::begin();
     BLEConfig::setDeviceId(DEVICE_ID);
+    BLEConfig::setDeviceVersion(DEVICE_VERSION);
     BLEConfig::setBLELEDPin(BLE_LED_PIN);
     bleStartTime = millis(); // Set BLE start time when BLE begins
   } else {
@@ -150,21 +152,19 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
   int batteryLevel = BatteryMonitor::getBatteryPercentage();
   
-  // CSV format: device_id,battery_level,timestamp,imu.quaternion.i,imu.quaternion.j,imu.quaternion.k,imu.quaternion.real,
-  //             imu.euler.roll,imu.euler.pitch,imu.euler.yaw,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
-  //             imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,imu.magnetometer.x,imu.magnetometer.y,imu.magnetometer.z,
+  // CSV format: device_id,battery_level,timestamp,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
+  //             imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,imu.temperature,
   //             gps.fix,gps.fixType,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%d,%s,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%d,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
            batteryLevel,
            timestamp,
-           imuData.quaternion.i, imuData.quaternion.j, imuData.quaternion.k, imuData.quaternion.real,
-           imuData.euler.roll, imuData.euler.pitch, imuData.euler.yaw,
            imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
            imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z,
-           imuData.magnetometer.x, imuData.magnetometer.y, imuData.magnetometer.z,
+           imuData.temperature,
+           
            gpsData.hasValidFix ? "true" : "false",
            gpsData.fixType,
            gpsData.satellites,
@@ -187,7 +187,7 @@ bool sendDataWithRetryLogic(String csvData) {
 void loop() {
   static unsigned long lastPrintTime = 0;
   static unsigned long lastBatteryUpdate = 0;
-  static bool sensorsOn = true;
+  // sensor power management removed; IMU/GPS remain initialized throughout
   static bool firstRun = true;
   unsigned long currentTime = millis();
   
@@ -224,21 +224,7 @@ void loop() {
   
   // Check if interval has passed or first run
   if (firstRun || (currentTime - lastPrintTime >= READING_INTERVAL)) {
-    // Power on sensors (skip on first run since they're already on)
-    if (!sensorsOn && !firstRun) {
-      Serial.println("imuInitialized: " + String(imuInitialized));
-      Serial.println("gpsInitialized: " + String(gpsInitialized));
-      if (imuInitialized) {
-        imuSensor.powerOn();
-        // Update initialization flag in case powerOn() re-initialized successfully
-        imuInitialized = imuSensor.getInitialized();
-      }
-      if (gpsInitialized) {
-        gpsSensor.powerOn();
-      }
-      sensorsOn = true;
-      delay(2000); // Give sensors time to stabilize
-    }
+    // Sensors remain initialized throughout runtime; no power cycling is performed.
     
     // Update sensors to get fresh data (increased to allow all IMU sensor types to report)
     // Only update if sensors are initialized to avoid crashes
@@ -256,10 +242,7 @@ void loop() {
     IMUData imuData = imuSensor.getIMUData();
     GPSData gpsData = gpsSensor.getGPSData();
 
-    // Power off sensors immediately
-    imuSensor.powerOff();
-    gpsSensor.powerOff();
-    sensorsOn = false;
+    // No power-off calls — sensors remain active and will be updated periodically
     
     // Create CSV and send with retry logic (LED blinks automatically during transmission)
     String csvData = createSensorCSV(imuData, gpsData);

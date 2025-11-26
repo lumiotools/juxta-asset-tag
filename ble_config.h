@@ -22,7 +22,7 @@
 #define CURRENT_SSID_CHAR_UUID "12345678-1234-1234-1234-123456789ac1"
 
 // BLE Device Name
-#define BLE_DEVICE_NAME     "AssetTag-Config"
+#define BLE_DEVICE_NAME "Juxta AssetTag v2.0.0"
 
 class BLEConfig {
 private:
@@ -40,6 +40,7 @@ private:
   static bool credentialsReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
+  static const char* deviceVersion;
   static bool bleDisabled;  // Flag to track if BLE is permanently disabled
   
   // BLE LED Configuration
@@ -76,8 +77,9 @@ private:
       // Get device_id (use stored value or default)
       const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
       
-      // Create JSON string with device_id, timestamp, battery, and currentSSID
-      String data = "{\"device_id\":\"" + String(devId) + "\",\"timestamp\":\"" + String(timestamp) + "\",\"battery\":" + String(batteryLevel) + ",\"currentSSID\":\"" + currentSSID + "\"}";
+      // Create JSON string with device_id, timestamp, battery, currentSSID and device_version
+      const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
+      String data = "{\"device_id\":\"" + String(devId) + "\",\"device_version\":\"" + String(devVer) + "\",\"timestamp\":\"" + String(timestamp) + "\",\"battery\":" + String(batteryLevel) + ",\"currentSSID\":\"" + currentSSID + "\"}";
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
@@ -141,6 +143,10 @@ public:
   // Set Device ID
   static void setDeviceId(const char* id) {
     deviceId = id;
+  }
+  // Set Device Version
+  static void setDeviceVersion(const char* version) {
+    deviceVersion = version;
   }
   
   // Set BLE LED Pin
@@ -389,6 +395,7 @@ String BLEConfig::receivedPassword = "";
 bool BLEConfig::credentialsReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
+const char* BLEConfig::deviceVersion = "v2.0.0";
 int BLEConfig::bleLedPin = -1;
 Ticker* BLEConfig::bleLedTicker = nullptr;
 volatile bool BLEConfig::bleLedState = false;

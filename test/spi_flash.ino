@@ -8,10 +8,10 @@
 #include <SPIMemory.h>
 
 // --- Your wiring on ESP32-S3 DevKitC-1 ---
-static const int PIN_SCK  = 36;   // CLK
-static const int PIN_MISO = 16;   // DO  -> MISO
-static const int PIN_MOSI = 17;   // DI  -> MOSI
-static const int PIN_CS   = 38;   // CS
+static const int PIN_CS   = 10;   // CS
+static const int PIN_MISO = 12;   // DO  -> MISO
+static const int PIN_MOSI = 13;   // DI  -> MOSI
+static const int PIN_SCK  = 14;   // CLK
 
 SPIFlash flash(PIN_CS);
 

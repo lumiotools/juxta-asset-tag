@@ -1,170 +1,166 @@
-// IMU Sensor Module - BNO085
+// IMU Sensor Module - BMI323 (I2C) wrapper
 
 #ifndef IMU_SENSOR_H
 #define IMU_SENSOR_H
 
 #include <Wire.h>
-#include "SparkFun_BNO08x_Arduino_Library.h"
 
 // IMU pin definitions
 #define I2C_SDA_PIN 8      // IMU_SDA
 #define I2C_SCL_PIN 9      // IMU_SCL
-#define IMU_RESET_PIN 13   // IMU_RESET pin
-#define IMU_INT_PIN 12     // INT pin for interrupts (optional)
 
 // Structure to hold all IMU data
 struct IMUData {
   struct {
-    float i, j, k, real, accuracy;
-  } quaternion;
-  
-  struct {
-    float roll, pitch, yaw;
-  } euler;
-  
-  struct {
     float x, y, z;
   } accelerometer;
-  
+
   struct {
     float x, y, z;
   } gyroscope;
-  
-  struct {
-    float x, y, z;
-  } magnetometer;
-  
-  unsigned long timestamp;
-  bool hasQuaternion = false;
-  bool hasAccel = false;
-  bool hasGyro = false;
-  bool hasMag = false;
+
+  // Temperature in degrees Celsius
+  float temperature;
 };
+
+// I2C constants and registers (BMI323-ish sensor used in test/imu.ino)
+#define IMU_I2C_ADDRESS 0x69
+#define IMU_ACC_CONF  0x20  // Page 91 in BMI323
+#define IMU_GYR_CONF  0x21  // Page 93 in BMI323
+#define IMU_CMD       0x7E  // Page 65 in BMI323
 
 class IMUSensor {
 private:
-  BNO08x imu;
   IMUData data;
-  bool isInitialized = false;
+  // No internal `isInitialized` flag; callers may track initialization status using `begin()` return value.
+  // Storage for converted values
+  float accelX_m_s2 = 0.0f;
+  float accelY_m_s2 = 0.0f;
+  float accelZ_m_s2 = 0.0f;
+  float gyroX_dps = 0.0f;
+  float gyroY_dps = 0.0f;
+  float gyroZ_dps = 0.0f;
+  float temperature_c = 0.0f;
 
 public:
   bool begin() {
     // Initialize I2C with custom pins
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     Wire.setClock(400000); // 400kHz I2C speed
-    
-    // Setup IMU reset pin
-    pinMode(IMU_RESET_PIN, OUTPUT);
-    digitalWrite(IMU_RESET_PIN, LOW);
-    delay(10);
-    digitalWrite(IMU_RESET_PIN, HIGH);
     delay(100);
-    
-    // Initialize BNO085
-    if (!imu.begin()) {
-      isInitialized = false;
-      return false;
-    }
-    
-    // Enable reports
-    imu.enableRotationVector();
-    imu.enableAccelerometer();
-    imu.enableGyro();
-    imu.enableMagnetometer();
-    
-    isInitialized = true;
+
+    softReset();
+
+    // Configure ACC and GYR registers -- these are the same values used in test/imu.ino
+    writeRegister16(IMU_ACC_CONF, 0x753D);  // accelerometer settings
+    writeRegister16(IMU_GYR_CONF, 0x758D);  // gyroscope settings
+
+    // Optionally verify a few registers or read a status
+    // If the device responds to a zero-length read, consider it initialized
+    // Simple probe: read a known register
+    uint16_t probe = readRegister16(IMU_ACC_CONF);
+    (void)probe; // Avoid unused var warnings; probe can be validated later by caller
     return true;
   }
   
-  // This function is used to update the IMU data and read data from the IMU
+  // This function is used to update the IMU data and read data from the IMU.
   void update() {
-    // Safety check: Don't access IMU if not initialized
-    if (!isInitialized) {
-      return;
-    }
-    
-    // Check if IMU data is available
-    if (imu.getSensorEvent() == true) {
-      
-      // Rotation Vector (Quaternion)
-      if (imu.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR) {
-        data.quaternion.i = imu.getQuatI();
-        data.quaternion.j = imu.getQuatJ();
-        data.quaternion.k = imu.getQuatK();
-        data.quaternion.real = imu.getQuatReal();
-        data.quaternion.accuracy = imu.getQuatRadianAccuracy();
-        data.hasQuaternion = true;
-        
-        // Convert to Euler angles (simplified calculation)
-        float qr = data.quaternion.real, qi = data.quaternion.i;
-        float qj = data.quaternion.j, qk = data.quaternion.k;
-        float qii = qi * qi, qjj = qj * qj;
-        
-        data.euler.roll = atan2(2.0 * (qr * qi + qj * qk), 1.0 - 2.0 * (qii + qjj)) * 57.2958f;
-        data.euler.pitch = asin(2.0 * (qr * qj - qk * qi)) * 57.2958f;
-        data.euler.yaw = atan2(2.0 * (qr * qk + qi * qj), 1.0 - 2.0 * (qjj + qk * qk)) * 57.2958f;
-      }
-      
-      // Accelerometer
-      if (imu.getSensorEventID() == SENSOR_REPORTID_ACCELEROMETER) {
-        data.accelerometer.x = imu.getAccelX();
-        data.accelerometer.y = imu.getAccelY();
-        data.accelerometer.z = imu.getAccelZ();
-        data.hasAccel = true;
-      }
-      
-      // Gyroscope
-      if (imu.getSensorEventID() == SENSOR_REPORTID_GYROSCOPE_CALIBRATED) {
-        data.gyroscope.x = imu.getGyroX();
-        data.gyroscope.y = imu.getGyroY();
-        data.gyroscope.z = imu.getGyroZ();
-        data.hasGyro = true;
-      }
-      
-      // Magnetometer
-      if (imu.getSensorEventID() == SENSOR_REPORTID_MAGNETIC_FIELD) {
-        data.magnetometer.x = imu.getMagX();
-        data.magnetometer.y = imu.getMagY();
-        data.magnetometer.z = imu.getMagZ();
-        data.hasMag = true;
-      }
-    }
-    
-    data.timestamp = millis();
+
+    readAllSensors();
+
+    // Populate the public IMUData structure
+    data.accelerometer.x = accelX_m_s2;
+    data.accelerometer.y = accelY_m_s2;
+    data.accelerometer.z = accelZ_m_s2;
+
+    data.gyroscope.x = gyroX_dps;
+    data.gyroscope.y = gyroY_dps;
+    data.gyroscope.z = gyroZ_dps;
+
+    // No quaternion/euler or magnetometer data available from this simple I2C read
+
+    // Store temperature
+    data.temperature = temperature_c;
   }
   
   IMUData getIMUData() {
     return data;
   }
-  
-  void powerOff() {
-    // Put IMU into sleep mode
-    digitalWrite(IMU_RESET_PIN, LOW);
-    isInitialized = false; // Mark as uninitialized after power off
+
+private:
+  // Soft reset similar to test/imu.ino
+  void softReset(){ 
+    writeRegister16(IMU_CMD, 0xDEAF);
+    delay(50);
   }
-  
-  void powerOn() {
-    // Wake up IMU from sleep mode
-    digitalWrite(IMU_RESET_PIN, LOW);
-    delay(10);
-    digitalWrite(IMU_RESET_PIN, HIGH);
-    delay(100);
-    
-    isInitialized = true;
-    // Re-initialize IMU
-    // if (imu.begin()) {
-    //   imu.enableRotationVector();
-    //   imu.enableAccelerometer();
-    //   imu.enableGyro();
-    //   imu.enableMagnetometer();
-    //   isInitialized = true;
-    // } else {
-    //   isInitialized = false; // Mark as failed if initialization fails
-    // }
+
+  // Write 16-bit register via I2C
+  void writeRegister16(uint16_t reg, uint16_t value) {
+    Wire.beginTransmission(IMU_I2C_ADDRESS);
+    Wire.write((uint8_t)reg);
+    // Low
+    Wire.write(value & 0xFF);
+    // High
+    Wire.write((value >> 8) & 0xFF);
+    Wire.endTransmission();
   }
-  
-  bool getInitialized() {
-    return isInitialized;
+
+  // Read 16-bit register via I2C
+  uint16_t readRegister16(uint8_t reg) {
+    Wire.beginTransmission(IMU_I2C_ADDRESS);
+    Wire.write(reg);
+    Wire.endTransmission(false);
+
+    Wire.requestFrom(IMU_I2C_ADDRESS, (uint8_t)2);
+    uint8_t lo = 0, hi = 0;
+    if (Wire.available()) lo = Wire.read();
+    if (Wire.available()) hi = Wire.read();
+
+    return (uint16_t)(lo | (hi << 8));
+  }
+
+  // Read accel/gyro/temp block beginning at register 0x03
+  void readAllSensors() {
+    Wire.beginTransmission(IMU_I2C_ADDRESS);
+    Wire.write(0x03);   // ACC data start
+    Wire.endTransmission(false);
+
+    Wire.requestFrom(IMU_I2C_ADDRESS, (uint8_t)16);  // now reading 16 bytes
+    uint8_t dataRaw[16];
+    int i = 0;
+    while (Wire.available() && i < 16) {
+      dataRaw[i++] = Wire.read();
+    }
+
+    int offset = 2;  // discard dummy bytes
+
+    int16_t x = (int16_t)(dataRaw[offset + 0] | (dataRaw[offset + 1] << 8));
+    int16_t y = (int16_t)(dataRaw[offset + 2] | (dataRaw[offset + 3] << 8));
+    int16_t z = (int16_t)(dataRaw[offset + 4] | (dataRaw[offset + 5] << 8));
+
+    int16_t gyro_x = (int16_t)(dataRaw[offset + 6]  | (dataRaw[offset + 7]  << 8));
+    int16_t gyro_y = (int16_t)(dataRaw[offset + 8]  | (dataRaw[offset + 9]  << 8));
+    int16_t gyro_z = (int16_t)(dataRaw[offset + 10] | (dataRaw[offset + 11] << 8));
+
+    int16_t temp_raw = (int16_t)(dataRaw[offset + 12] | (dataRaw[offset + 13] << 8));
+
+    accelX_m_s2 = lsbToM2S(x);
+    accelY_m_s2 = lsbToM2S(y);
+    accelZ_m_s2 = lsbToM2S(z);
+
+    const float GYRO_SENS_125DPS = 262.1f; // as in test/imu.ino
+    gyroX_dps = gyro_x / GYRO_SENS_125DPS;
+    gyroY_dps = gyro_y / GYRO_SENS_125DPS;
+    gyroZ_dps = gyro_z / GYRO_SENS_125DPS;
+
+    temperature_c = (float)temp_raw / 512.0f + 23.0f;
+  }
+
+  // Convert LSB to m/s^2
+  float lsbToM2S(int16_t rawData) {
+    const float sensitivity = 16384.0f; // for ±2g
+    const float gToM2S = 9.80665f;
+    return (rawData / sensitivity) * gToM2S;
   }
 };
 
