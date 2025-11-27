@@ -2,6 +2,7 @@
 
 #include "imu_sensor.h"
 #include "gps_sensor.h"
+#include "spi_flash_handler.h"
 #include "customwifi.h"
 #include "time_sync.h"
 #include "data_queue.h"
@@ -13,25 +14,26 @@
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
+#include <Ticker.h>
 
 // Device ID and Version Configuration (hardcoded to save memory)
 const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
-// LED Configuration
-const int WIFI_LED_PIN = 40;
-
-// BLE LED Configuration
-const int BLE_LED_PIN = 41;
-
 // NeoPixel Status LED Configuration
 const int STATUS_LED_PIN = 48;
-const int STATUS_LED_COUNT = 1;
+const int STATUS_LED_COUNT = 2; // 2 pixels: pixel 0 for device status, pixel 1 for battery status
 
 // Status LED instance
 Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 
-// Battery Indicator LED instance (separate from status LED)
+// Status LED blinking for transmission
+Ticker statusLedTicker;
+volatile bool statusLedBlinkState = false;
+volatile uint8_t blinkR = 0, blinkG = 0, blinkB = 0;
+uint8_t restoreR = 0, restoreG = 255, restoreB = 0; // Default to green
+
+// Battery Indicator LED instance (shares statusLED NeoPixel, uses pixel 1)
 BatteryIndicatorLED batteryIndicatorLED;
 
 // Transmission handler for failed data retry logic
@@ -43,38 +45,102 @@ unsigned long bleStartTime = 0;
 // Create sensor instances
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
+SPIFlashHandler spiFlash;
 
 // Sensor status flags
 bool imuInitialized = false;
 bool gpsInitialized = false;
+bool flashInitialized = false;
 
 // Configuration: Reading interval in milliseconds
 const unsigned long READING_INTERVAL = 30000; // 30000ms = 30 seconds
 
+// USB detection function for ESP32-S3
+// Checks if USB is connected by verifying USB Serial availability
+bool isUSBConnected() {
+  // On ESP32-S3, USB Serial JTAG controller is active when USB is connected
+  // Serial object is available when USB is connected and Serial.begin() has been called
+  // This is a reliable method for ESP32-S3 to detect USB connection
+  return Serial;  // Returns true if USB Serial is available (USB connected)
+}
+
+// Helper function to set pixel color and display
+void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
+  statusLED.setPixelColor(pixel, statusLED.Color(r, g, b));
+  statusLED.show();
+}
 
 void updateStatusLED() {
-  // Green if both IMU and GPS initialized, Red if either failed
-  if (imuInitialized && gpsInitialized) {
-    statusLED.setPixelColor(0, statusLED.Color(0, 255, 0)); // Green
+  // Green if all sensors (IMU, GPS, and Flash) initialized, Red if any failed
+  if (imuInitialized && gpsInitialized && flashInitialized) {
+    restoreR = 0;
+    restoreG = 255;
+    restoreB = 0;
+    setPixelAndShow(0, 0, 255, 0); // Green on pixel 0
   } else {
-    statusLED.setPixelColor(0, statusLED.Color(255, 0, 0)); // Red
+    restoreR = 255;
+    restoreG = 0;
+    restoreB = 0;
+    setPixelAndShow(0, 255, 0, 0); // Red on pixel 0
   }
-  statusLED.show();
+}
+
+// Toggle function for status LED blinking
+void toggleStatusLED() {
+  statusLedBlinkState = !statusLedBlinkState;
+  if (statusLedBlinkState) {
+    setPixelAndShow(0, blinkR, blinkG, blinkB);
+  } else {
+    setPixelAndShow(0, 0, 0, 0); // Off
+  }
+}
+
+// Start blinking status LED with specified color
+void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
+  blinkR = r;
+  blinkG = g;
+  blinkB = b;
+  statusLedBlinkState = false;
+  statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
+}
+
+// Stop blinking and restore to normal status color
+void stopStatusLEDBlink() {
+  statusLedTicker.detach();
+  setPixelAndShow(0, restoreR, restoreG, restoreB);
+}
+
+// Dim status LED to 10% brightness for deep sleep
+void dimStatusLEDTo10Percent() {
+  statusLED.setBrightness(10); // 10% of original 100
+  setPixelAndShow(0, restoreR, restoreG, restoreB);
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  statusLED.setPixelColor(0, statusLED.Color(255, 165, 0)); // Orange
-  statusLED.show();
+  statusLED.begin();  // Initialize NeoPixel first
+  setPixelAndShow(0, 255, 165, 0); // Orange on pixel 0
   delay(1000);
   
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
   
+  // Initialize External SPI Flash
+  Serial.println("Initializing SPI Flash...");
+  flashInitialized = spiFlash.begin();
+  if (flashInitialized) {
+    Serial.println("SPI Flash initialized successfully");
+    Serial.print("Flash Capacity: ");
+    Serial.print(spiFlash.getCapacity());
+    Serial.println(" bytes");
+  } else {
+    Serial.println("SPI Flash initialization failed");
+  }
+
   // Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
   Serial.println("Initializing data queue...");
-  if (!transmissionHandler.begin()) {
+  if (!transmissionHandler.begin(&spiFlash)) {
     Serial.println("Warning: Data queue initialization failed!");
   }
   
@@ -88,9 +154,7 @@ void setup() {
     Serial.println("Starting BLE (POWER_ON or reset button press)");
     BLEConfig::begin();
     BLEConfig::setDeviceId(DEVICE_ID);
-    BLEConfig::setDeviceVersion(DEVICE_VERSION);
-    BLEConfig::setBLELEDPin(BLE_LED_PIN);
-    bleStartTime = millis(); // Set BLE start time when BLE begins
+    BLEConfig::setDeviceVersion(DEVICE_VERSION); // Set BLE start time when BLE begins
   } else {
     Serial.println("BLE not started (reset reason not POWER_ON or reset button)");
   }
@@ -99,19 +163,16 @@ void setup() {
   BatteryMonitor::initializeADC();
   delay(100);
   
-  // Initialize Battery Indicator LED
-  batteryIndicatorLED.begin();
-  batteryIndicatorLED.updateBatteryLED(); // Set initial color based on battery
-  delay(100);
-  
-  // Initialize Status LED
+  // Initialize Status LED first (both pixels on same pin)
   statusLED.begin();  // Initialize GPIO first!
   statusLED.setBrightness(100);
   statusLED.show();
-  updateStatusLED(); // Show red initially (not initialized)
+  updateStatusLED(); // Show red initially on pixel 0 (not initialized)
   
-  // Initialize LED pin and register with WiFi class
-  CustomWiFi::setTxLEDPin(WIFI_LED_PIN);
+  // Initialize Battery Indicator LED (uses shared statusLED instance, pixel 1)
+  batteryIndicatorLED.begin(&statusLED, 1);
+  batteryIndicatorLED.updateBatteryLED(); // Set initial color based on battery on pixel 1
+  delay(100);
   
   // Initialize IMU sensor
   Serial.println("Initializing IMU sensor...");
@@ -131,8 +192,15 @@ void setup() {
     Serial.println("GPS initialization failed - continuing without GPS");
   }
   
+  // Initialize External SPI Flash logic moved up before transmission handler
+
   // Update status LED based on sensor initialization
   updateStatusLED();
+  if(imuInitialized && gpsInitialized && flashInitialized) {
+    bleStartTime = millis();
+  } else {
+    Serial.println("BLE not started (sensors not initialized)");
+  }
   // One-time credential setup (comment out after first upload)
   // NVSConfig::setWiFiSSID("GarageNeo");
   // NVSConfig::setWiFiPassword("G@r@ge#123");
@@ -191,6 +259,10 @@ void loop() {
   static bool firstRun = true;
   unsigned long currentTime = millis();
   
+  // USB connection state tracking
+  static bool lastUSBState = false;
+  static bool usbStateInitialized = false;
+  
   // Only update BLE if it's enabled (saves power after BLE is stopped)
   static bool bleJustStopped = false;
   
@@ -209,17 +281,49 @@ void loop() {
     }
   }
   
+  // Check USB connection status and control battery LED
+  bool currentUSBState = isUSBConnected();
   
-  
-  // Update battery indicator LED every 5 seconds
-  if (currentTime - lastBatteryUpdate >= 5000) {
-    batteryIndicatorLED.updateBatteryLED();
-    lastBatteryUpdate = currentTime;
+  // Initialize USB state on first run
+  if (!usbStateInitialized) {
+    lastUSBState = currentUSBState;
+    usbStateInitialized = true;
     
-    // Critical battery warning
-    if (BatteryMonitor::getBatteryPercentage() < 10) {
-      batteryIndicatorLED.doubleBlink();
+    // Set initial battery LED state based on USB connection
+    if (currentUSBState) {
+      batteryIndicatorLED.disable();
+      Serial.println("USB connected - Battery LED disabled");
+    } else {
+      batteryIndicatorLED.enable();
+      Serial.println("USB disconnected - Battery LED enabled");
     }
+  }
+  
+  // Detect USB connection/disconnection changes
+  if (currentUSBState != lastUSBState) {
+    if (currentUSBState) {
+      // USB connected - disable battery LED
+      batteryIndicatorLED.disable();
+      Serial.println("USB connected - Battery LED disabled");
+    } else {
+      // USB disconnected - enable battery LED
+      batteryIndicatorLED.enable();
+      Serial.println("USB disconnected - Battery LED enabled");
+    }
+    lastUSBState = currentUSBState;
+  }
+  
+  // Update battery indicator LED every 5 seconds (only if enabled)
+  if (currentTime - lastBatteryUpdate >= 5000) {
+    if (batteryIndicatorLED.isEnabled()) {
+      batteryIndicatorLED.updateBatteryLED();
+      
+      // Critical battery warning
+      if (BatteryMonitor::getBatteryPercentage() < 10) {
+        batteryIndicatorLED.doubleBlink();
+      }
+    }
+    lastBatteryUpdate = currentTime;
   }
   
   // Check if interval has passed or first run
@@ -254,6 +358,9 @@ void loop() {
     }
     
     bool sendSuccess = sendDataWithRetryLogic(csvData);
+    
+    // Ensure status LED is restored to green after transmission
+    updateStatusLED();
 
     // After BLE is powered off, check WiFi connection and transmission, then deep sleep
     if (bleJustStopped) {
@@ -262,10 +369,20 @@ void loop() {
       // Check WiFi connection status
       bool wifiConnected = CustomWiFi::isConnected();
       
+      // Force save queue pointers before deep sleep to prevent data loss
+      Serial.println("Preparing for deep sleep - saving queue state...");
+      transmissionHandler.saveQueueState();
+      
       // Disconnect WiFi before deep sleep
       if (wifiConnected) {
         CustomWiFi::disconnectWiFi();
       }
+      
+      // Dim LEDs to 10% brightness before deep sleep
+      Serial.println("Dimming LEDs to 10% for deep sleep...");
+      dimStatusLEDTo10Percent(); // Dims entire strip (both pixels share brightness)
+      batteryIndicatorLED.updateBatteryLED(); // Update battery pixel color with new brightness
+      delay(50);  // Brief delay to ensure LED update completes
       
       // Deep sleep based on WiFi connection and transmission success
       if (wifiConnected && sendSuccess) {
@@ -275,6 +392,9 @@ void loop() {
         Serial.println("WiFi not connected or send failed - Deep sleeping for 1 minute");
         esp_sleep_enable_timer_wakeup(1 * 60 * 1000000ULL); // 1 minute in microseconds
       }
+      
+      // Small delay to allow serial output to complete
+      delay(100);
       
       // Enter deep sleep
       esp_deep_sleep_start();

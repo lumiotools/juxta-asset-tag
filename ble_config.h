@@ -10,8 +10,11 @@
 #include "nvs_config.h"
 #include "battery_monitor.h"
 #include "time_sync.h"
-#include <Ticker.h>
 #include "esp_bt.h"
+
+// Forward declarations for status LED control
+extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+extern void stopStatusLEDBlink();
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -42,18 +45,6 @@ private:
   static const char* deviceId;
   static const char* deviceVersion;
   static bool bleDisabled;  // Flag to track if BLE is permanently disabled
-  
-  // BLE LED Configuration
-  static int bleLedPin;
-  static Ticker* bleLedTicker;
-  static volatile bool bleLedState;
-  
-  static void toggleBLELED() {
-    if (bleLedPin >= 0) {
-      bleLedState = !bleLedState;
-      digitalWrite(bleLedPin, bleLedState);
-    }
-  }
 
   // BLE Server Callbacks
   class MyServerCallbacks: public BLEServerCallbacks {
@@ -95,33 +86,24 @@ private:
   // SSID Characteristic Callbacks
   class SSIDCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
-      // Start LED blinking on receive
-      if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-        bleLedState = false;
-        bleLedTicker->attach_ms(20, toggleBLELED);
-      }
+      // Start blue LED blinking on receive
+      startStatusLEDBlink(0, 0, 255);
       
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
         receivedSSID = value;
       }
       
-      // Stop LED blinking
-      if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-        bleLedTicker->detach();
-        digitalWrite(bleLedPin, LOW);
-      }
+      // Stop LED blinking and restore to green
+      stopStatusLEDBlink();
     }
   };
 
   // Password Characteristic Callbacks
   class PasswordCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
-      // Start LED blinking on receive
-      if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-        bleLedState = false;
-        bleLedTicker->attach_ms(20, toggleBLELED);
-      }
+      // Start blue LED blinking on receive
+      startStatusLEDBlink(0, 0, 255);
       
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
@@ -131,11 +113,8 @@ private:
         }
       }
       
-      // Stop LED blinking
-      if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-        bleLedTicker->detach();
-        digitalWrite(bleLedPin, LOW);
-      }
+      // Stop LED blinking and restore to green
+      stopStatusLEDBlink();
     }
   };
 
@@ -147,16 +126,6 @@ public:
   // Set Device Version
   static void setDeviceVersion(const char* version) {
     deviceVersion = version;
-  }
-  
-  // Set BLE LED Pin
-  static void setBLELEDPin(int pin) {
-    bleLedPin = pin;
-    if (pin >= 0) {
-      pinMode(pin, OUTPUT);
-      digitalWrite(pin, LOW);
-      bleLedTicker = new Ticker();
-    }
   }
   
   // Initialize BLE and start advertising
@@ -285,11 +254,8 @@ public:
   
   // Stop and deinitialize BLE permanently (consumes no power)
   static void stop() {
-    // Stop LED blinking
-    if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-      bleLedTicker->detach();
-      digitalWrite(bleLedPin, LOW);
-    }
+    // Stop LED blinking and restore to green
+    stopStatusLEDBlink();
     
     // Stop advertising first
     if (pServer != nullptr) {
@@ -336,11 +302,8 @@ public:
       return false;
     }
     
-    // Start LED blinking on transmit
-    if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-      bleLedState = false;
-      bleLedTicker->attach_ms(20, toggleBLELED);
-    }
+    // Start blue LED blinking on transmit
+    startStatusLEDBlink(0, 0, 255);
     
     // Calculate safe chunk size (MTU - 3 bytes for ATT header)
     uint16_t maxChunkSize = (mtuSize > 23) ? (mtuSize - 3) : 20;
@@ -370,11 +333,8 @@ public:
       }
     }
     
-    // Stop LED blinking
-    if (bleLedPin >= 0 && bleLedTicker != nullptr) {
-      bleLedTicker->detach();
-      digitalWrite(bleLedPin, LOW);
-    }
+    // Stop LED blinking and restore to green
+    stopStatusLEDBlink();
     
     return true;
   }
@@ -396,9 +356,6 @@ bool BLEConfig::credentialsReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
 const char* BLEConfig::deviceVersion = "v2.0.0";
-int BLEConfig::bleLedPin = -1;
-Ticker* BLEConfig::bleLedTicker = nullptr;
-volatile bool BLEConfig::bleLedState = false;
 bool BLEConfig::bleDisabled = false;
 
 #endif

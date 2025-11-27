@@ -13,6 +13,8 @@ private:
   static const char* FIRSTBOOT_KEY;
   static const char* MAX_QUEUE_SIZE_KEY;
   static const char* QUEUE_DATA_KEY;
+  static const char* QUEUE_WRITE_PTR_KEY;
+  static const char* QUEUE_READ_PTR_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -278,6 +280,88 @@ public:
     return ESTIMATED_AVAILABLE;
   }
 
+  // Get queue write pointer from NVS
+  static uint32_t getQueueWritePtr() {
+    nvs_handle_t nvsHandle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
+    
+    if (err != ESP_OK) {
+      return 0;
+    }
+    
+    uint32_t writePtr = 0;
+    err = nvs_get_u32(nvsHandle, QUEUE_WRITE_PTR_KEY, &writePtr);
+    nvs_close(nvsHandle);
+    
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+      return 0; // Not set yet, start at beginning
+    }
+    
+    return writePtr;
+  }
+
+  // Set queue write pointer in NVS
+  static bool setQueueWritePtr(uint32_t writePtr) {
+    nvs_handle_t nvsHandle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
+    
+    if (err != ESP_OK) {
+      return false;
+    }
+    
+    err = nvs_set_u32(nvsHandle, QUEUE_WRITE_PTR_KEY, writePtr);
+    if (err != ESP_OK) {
+      nvs_close(nvsHandle);
+      return false;
+    }
+    
+    err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    
+    return (err == ESP_OK);
+  }
+
+  // Get queue read pointer from NVS
+  static uint32_t getQueueReadPtr() {
+    nvs_handle_t nvsHandle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
+    
+    if (err != ESP_OK) {
+      return 0;
+    }
+    
+    uint32_t readPtr = 0;
+    err = nvs_get_u32(nvsHandle, QUEUE_READ_PTR_KEY, &readPtr);
+    nvs_close(nvsHandle);
+    
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+      return 0; // Not set yet, start at beginning
+    }
+    
+    return readPtr;
+  }
+
+  // Set queue read pointer in NVS
+  static bool setQueueReadPtr(uint32_t readPtr) {
+    nvs_handle_t nvsHandle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
+    
+    if (err != ESP_OK) {
+      return false;
+    }
+    
+    err = nvs_set_u32(nvsHandle, QUEUE_READ_PTR_KEY, readPtr);
+    if (err != ESP_OK) {
+      nvs_close(nvsHandle);
+      return false;
+    }
+    
+    err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    
+    return (err == ESP_OK);
+  }
+
 };
 
 // Static member definitions
@@ -287,5 +371,7 @@ const char* NVSConfig::WIFI_PASSWORD_KEY = "password";
 const char* NVSConfig::FIRSTBOOT_KEY = "firstboot";
 const char* NVSConfig::MAX_QUEUE_SIZE_KEY = "max_q_size";
 const char* NVSConfig::QUEUE_DATA_KEY = "queue_data";
+const char* NVSConfig::QUEUE_WRITE_PTR_KEY = "q_write_ptr";
+const char* NVSConfig::QUEUE_READ_PTR_KEY = "q_read_ptr";
 
 #endif

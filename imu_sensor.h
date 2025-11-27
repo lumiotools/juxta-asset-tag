@@ -42,24 +42,69 @@ private:
   float gyroZ_dps = 0.0f;
   float temperature_c = 0.0f;
 
+  // Check if IMU device is connected on I2C bus
+  bool checkDeviceConnection() {
+    Wire.beginTransmission(IMU_I2C_ADDRESS);
+    uint8_t error = Wire.endTransmission();
+    
+    if (error == 0) {
+      // Device responded, verify by reading a register
+      uint16_t chipId = readRegister16(0x00); // Try to read chip ID register (if available)
+      // If we got here without I2C error, device is present
+      return true;
+    } else {
+      // Device not found (NACK)
+      return false;
+    }
+  }
+
 public:
   bool begin() {
+    Serial.print("Initializing IMU sensor (I2C address 0x");
+    Serial.print(IMU_I2C_ADDRESS, HEX);
+    Serial.print(", SDA=");
+    Serial.print(I2C_SDA_PIN);
+    Serial.print(", SCL=");
+    Serial.print(I2C_SCL_PIN);
+    Serial.println(")...");
+
     // Initialize I2C with custom pins
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     Wire.setClock(400000); // 400kHz I2C speed
     delay(100);
 
+    // Check if device is connected
+    if (!checkDeviceConnection()) {
+      Serial.println("ERROR: IMU device not detected on I2C bus!");
+      Serial.print("Expected address: 0x");
+      Serial.println(IMU_I2C_ADDRESS, HEX);
+      Serial.println("Check: 1) I2C wiring (SDA/SCL) 2) Power supply 3) Device address");
+      return false;
+    }
+
+    Serial.println("IMU device detected, configuring...");
     softReset();
 
     // Configure ACC and GYR registers -- these are the same values used in test/imu.ino
     writeRegister16(IMU_ACC_CONF, 0x753D);  // accelerometer settings
     writeRegister16(IMU_GYR_CONF, 0x758D);  // gyroscope settings
+    delay(500); 
 
-    // Optionally verify a few registers or read a status
-    // If the device responds to a zero-length read, consider it initialized
-    // Simple probe: read a known register
-    uint16_t probe = readRegister16(IMU_ACC_CONF);
-    (void)probe; // Avoid unused var warnings; probe can be validated later by caller
+    // Verify configuration by reading back
+    uint16_t accConf = readRegister16(IMU_ACC_CONF);
+    uint16_t gyrConf = readRegister16(IMU_GYR_CONF);
+
+    Serial.print("ACC Conf: ");
+    Serial.println(accConf, HEX);
+    Serial.print("GYR Conf: ");
+    Serial.println(gyrConf, HEX);
+
+    // if (accConf == 0x0000 && gyrConf == 0x0000) {
+    //   Serial.println("WARNING: IMU register readback failed - device may not be responding correctly");
+    //   return false;
+    // }
+
+    Serial.println("IMU sensor initialized successfully");
     return true;
   }
   

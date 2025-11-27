@@ -4,34 +4,19 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "nvs_config.h"
-#include <Ticker.h>
+
+// Forward declarations for status LED control
+extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+extern void stopStatusLEDBlink();
 
 // Server Configuration
-const char* SERVER_URL = "http://echo-http-requests.appspot.com/push/juxtatetsing";
+const char* SERVER_URL = "https://236a0b76d7fb.ngrok-free.app/";
 const int REQUEST_TIMEOUT = 5000; // 5 seconds
 
 class CustomWiFi {
 private:
-  static int txLedPin;
-  static Ticker* ledTicker;
-  static volatile bool ledState;
-  
-  static void toggleLED() {
-    if (txLedPin >= 0) {
-      ledState = !ledState;
-      digitalWrite(txLedPin, ledState);
-    }
-  }
   
 public:
-  static void setTxLEDPin(int pin) {
-    txLedPin = pin;
-    if (pin >= 0) {
-      pinMode(pin, OUTPUT);
-      digitalWrite(pin, LOW);
-      ledTicker = new Ticker();
-    }
-  }
   
   static bool connectWiFi() {
     // Read WiFi credentials from NVS
@@ -61,11 +46,9 @@ public:
       return false;
     }
     
-    // Start LED blinking (100ms period = 5Hz)
-    if (txLedPin >= 0 && ledTicker != nullptr) {
-      ledState = false;
-      ledTicker->attach_ms(20, toggleLED);
-    }
+    // Start purple LED blinking for WiFi transmission
+    // Purple = Red + Blue: (128, 0, 255) for bright purple
+    startStatusLEDBlink(128, 0, 255);
     
     HTTPClient http;
     http.setTimeout(REQUEST_TIMEOUT);
@@ -74,12 +57,9 @@ public:
     
     // POST is blocking - LED blinks via Ticker interrupt during transmission
     int httpResponseCode = http.POST(csvData);
-    // delay(2000); //pura 2s chalu bujban chalu rakhne
-    // Stop LED blinking
-    if (txLedPin >= 0 && ledTicker != nullptr) {
-      ledTicker->detach();
-      digitalWrite(txLedPin, LOW);
-    }
+    
+    // Stop LED blinking and restore to green
+    stopStatusLEDBlink();
     
     if (httpResponseCode > 0) {
       http.end();
@@ -98,10 +78,5 @@ public:
     WiFi.disconnect(true); // true = turn off WiFi radio
   }
 };
-
-// Static member definitions
-int CustomWiFi::txLedPin = -1;
-Ticker* CustomWiFi::ledTicker = nullptr;
-volatile bool CustomWiFi::ledState = false;
 
 #endif
