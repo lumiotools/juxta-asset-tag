@@ -10,7 +10,7 @@ extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
 extern void stopStatusLEDBlink();
 
 // Server Configuration
-const char* SERVER_URL = "https://236a0b76d7fb.ngrok-free.app/";
+const char* SERVER_URL = "http://echo-http-requests.appspot.com/push/juxtatetsing";
 const int REQUEST_TIMEOUT = 5000; // 5 seconds
 
 class CustomWiFi {

@@ -58,16 +58,18 @@ public:
   static uint32_t getBatteryColor() {
     int percentage = getBatteryPercentage();
 
-    // Green: > 60%
-    if (percentage > 60) {
+    // Green: 100-75%
+    if (percentage >= 75) {
       return (0xFF << 8) | 0x00; // Green (0x00FF00)
     }
-    // Orange: 20% - 60%
-    else if (percentage >= 20) {
-      // Orange #FFA500 -> R=0xFF, G=0xA5, B=0x00
-      return (0xFF << 16) | (0xA5 << 8);
+    // Yellow: 74-25% (mix of Red and Green)
+    else if (percentage >= 25) {
+      // Interpolate between green and red
+      int greenComponent = (int)(255 * (percentage - 25) / 50);
+      int redComponent = 255 - greenComponent;
+      return (redComponent << 16) | (greenComponent << 8);
     }
-    // Red: < 20%
+    // Red: 24-0%
     else {
       return 0xFF0000; // Red (0xFF0000)
     }
