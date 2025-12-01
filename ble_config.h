@@ -65,16 +65,17 @@ private:
       // Get battery level
       int batteryLevel = BatteryMonitor::getBatteryPercentage();
       
-      // Get device_id (use stored value or default)
       const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
-      
-      // Create JSON string with device_id, timestamp, battery, currentSSID and device_version
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
-      String data = "{\"device_id\":\"" + String(devId) + "\",\"device_version\":\"" + String(devVer) + "\",\"timestamp\":\"" + String(timestamp) + "\",\"battery\":" + String(batteryLevel) + ",\"currentSSID\":\"" + currentSSID + "\"}";
+      
+      char jsonBuffer[256];
+      snprintf(jsonBuffer, sizeof(jsonBuffer), 
+               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\"}",
+               devId, devVer, timestamp, batteryLevel, currentSSID.c_str());
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
-        pCurrentSSIDCharacteristic->setValue(data.c_str());
+        pCurrentSSIDCharacteristic->setValue(jsonBuffer);
       }
     }
 
@@ -262,14 +263,7 @@ public:
       pServer->getAdvertising()->stop();
     }
     
-    // Deinitialize BLE stack completely (true = free memory)
     BLEDevice::deinit(true);
-    
-    // Disable Bluetooth controller to completely power off the radio
-    // esp_bt_controller_disable();
-    
-    // // Deinitialize Bluetooth controller to free resources
-    // esp_bt_controller_deinit();
     
     // Clear all pointers to prevent any accidental access
     pServer = nullptr;

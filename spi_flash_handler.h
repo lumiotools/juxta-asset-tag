@@ -5,10 +5,10 @@
 #include <SPIMemory.h>
 
 // Default pins for ESP32-S3 DevKitC-1 (as used in test/spi_flash.ino)
-#define SPI_FLASH_CS   10
-#define SPI_FLASH_MISO 12
-#define SPI_FLASH_MOSI 13
-#define SPI_FLASH_SCK  14
+#define SPI_FLASH_CS   3
+#define SPI_FLASH_MISO 9
+#define SPI_FLASH_MOSI 10
+#define SPI_FLASH_SCK  8
 
 class SPIFlashHandler {
 private:

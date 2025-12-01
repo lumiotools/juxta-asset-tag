@@ -6,8 +6,8 @@
 #include <Wire.h>
 
 // IMU pin definitions
-#define I2C_SDA_PIN 8      // IMU_SDA
-#define I2C_SCL_PIN 9      // IMU_SCL
+#define I2C_SDA_PIN 4     // IMU_SDA
+#define I2C_SCL_PIN 5     // IMU_SCL
 
 // Structure to hold all IMU data
 struct IMUData {

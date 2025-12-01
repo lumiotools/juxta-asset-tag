@@ -29,338 +29,128 @@ public:
     return (err == ESP_OK);
   }
 
-  // Read WiFi SSID from NVS
-  static String getWiFiSSID() {
+private:
+  static String readStringNVS(const char* key) {
     nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return "";
     
+    size_t len = 0;
+    esp_err_t err = nvs_get_str(nvsHandle, key, nullptr, &len);
     if (err != ESP_OK) {
-      return "";
-    }
-    
-    size_t ssidLen = 0;
-    err = nvs_get_str(nvsHandle, WIFI_SSID_KEY, nullptr, &ssidLen);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND || err != ESP_OK) {
       nvs_close(nvsHandle);
       return "";
     }
     
-    char ssid[ssidLen];
-    nvs_get_str(nvsHandle, WIFI_SSID_KEY, ssid, &ssidLen);
-    nvs_close(nvsHandle);
-    
-    return String(ssid);
-  }
-
-  // Read WiFi Password from NVS
-  static String getWiFiPassword() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return "";
-    }
-    
-    size_t passwordLen = 0;
-    err = nvs_get_str(nvsHandle, WIFI_PASSWORD_KEY, nullptr, &passwordLen);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND || err != ESP_OK) {
+    char* buffer = (char*)malloc(len);
+    if (!buffer) {
       nvs_close(nvsHandle);
       return "";
     }
     
-    char password[passwordLen];
-    nvs_get_str(nvsHandle, WIFI_PASSWORD_KEY, password, &passwordLen);
+    nvs_get_str(nvsHandle, key, buffer, &len);
+    String result(buffer);
+    free(buffer);
     nvs_close(nvsHandle);
-    
-    return String(password);
-  }
-
-  // Write WiFi SSID to NVS
-  static bool setWiFiSSID(const char* ssid) {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_str(nvsHandle, WIFI_SSID_KEY, ssid);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
-
-  // Write WiFi Password to NVS
-  static bool setWiFiPassword(const char* password) {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_str(nvsHandle, WIFI_PASSWORD_KEY, password);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
-
-  // Check if first boot
-  static bool isFirstBoot() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return true; // Assume first boot if NVS can't be opened
-    }
-    
-    uint8_t firstBoot = 1;
-    err = nvs_get_u8(nvsHandle, FIRSTBOOT_KEY, &firstBoot);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_ERR_NVS_NOT_FOUND || firstBoot == 1);
-  }
-
-  // Set first boot flag to false
-  static bool setFirstBootComplete() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_u8(nvsHandle, FIRSTBOOT_KEY, 0);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
-
-  // Get max queue size from NVS
-  static int getMaxQueueSize() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return -1;
-    }
-    
-    uint32_t maxSize = 0;
-    err = nvs_get_u32(nvsHandle, MAX_QUEUE_SIZE_KEY, &maxSize);
-    nvs_close(nvsHandle);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-      return -1; // Not set yet
-    }
-    
-    return (int)maxSize;
-  }
-
-  // Set max queue size in NVS
-  static bool setMaxQueueSize(int maxSize) {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_u32(nvsHandle, MAX_QUEUE_SIZE_KEY, (uint32_t)maxSize);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
-
-  // Get queue data from NVS
-  static String getQueueData() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return "";
-    }
-    
-    size_t dataLen = 0;
-    err = nvs_get_str(nvsHandle, QUEUE_DATA_KEY, nullptr, &dataLen);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND || err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return "";
-    }
-    
-    char* data = (char*)malloc(dataLen);
-    if (data == nullptr) {
-      nvs_close(nvsHandle);
-      return "";
-    }
-    
-    nvs_get_str(nvsHandle, QUEUE_DATA_KEY, data, &dataLen);
-    String result = String(data);
-    free(data);
-    nvs_close(nvsHandle);
-    
     return result;
   }
 
-  // Set queue data in NVS
-  static bool setQueueData(const char* data) {
+  static bool writeStringNVS(const char* key, const char* value) {
     nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
     
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_str(nvsHandle, QUEUE_DATA_KEY, data);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
+    esp_err_t err = nvs_set_str(nvsHandle, key, value);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
     nvs_close(nvsHandle);
-    
     return (err == ESP_OK);
   }
 
-  // Calculate available NVS space and estimate max queue size
-  // Returns available space in bytes
-  // Uses a conservative estimate based on typical ESP32-S3 NVS partition
+  static uint32_t readU32NVS(const char* key, uint32_t defaultVal = 0) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return defaultVal;
+    
+    uint32_t value = defaultVal;
+    nvs_get_u32(nvsHandle, key, &value);
+    nvs_close(nvsHandle);
+    return value;
+  }
+
+  static bool writeU32NVS(const char* key, uint32_t value) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    esp_err_t err = nvs_set_u32(nvsHandle, key, value);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK);
+  }
+
+  static uint8_t readU8NVS(const char* key, uint8_t defaultVal = 0) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return defaultVal;
+    
+    uint8_t value = defaultVal;
+    nvs_get_u8(nvsHandle, key, &value);
+    nvs_close(nvsHandle);
+    return value;
+  }
+
+  static bool writeU8NVS(const char* key, uint8_t value) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    esp_err_t err = nvs_set_u8(nvsHandle, key, value);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK);
+  }
+
+public:
+  static String getWiFiSSID() { return readStringNVS(WIFI_SSID_KEY); }
+  static String getWiFiPassword() { return readStringNVS(WIFI_PASSWORD_KEY); }
+  static bool setWiFiSSID(const char* ssid) { return writeStringNVS(WIFI_SSID_KEY, ssid); }
+  static bool setWiFiPassword(const char* password) { return writeStringNVS(WIFI_PASSWORD_KEY, password); }
+
+  static bool isFirstBoot() {
+    return (readU8NVS(FIRSTBOOT_KEY, 1) == 1);
+  }
+
+  static bool setFirstBootComplete() {
+    return writeU8NVS(FIRSTBOOT_KEY, 0);
+  }
+
+  static int getMaxQueueSize() {
+    uint32_t val = readU32NVS(MAX_QUEUE_SIZE_KEY, 0);
+    return (val == 0) ? -1 : (int)val;
+  }
+
+  static bool setMaxQueueSize(int maxSize) {
+    return writeU32NVS(MAX_QUEUE_SIZE_KEY, (uint32_t)maxSize);
+  }
+
+  static String getQueueData() {
+    return readStringNVS(QUEUE_DATA_KEY);
+  }
+
+  static bool setQueueData(const char* data) {
+    return writeStringNVS(QUEUE_DATA_KEY, data);
+  }
+
   static int getAvailableNVSSpace() {
-    // ESP32-S3 typically has 24KB NVS partition by default
-    // We'll use a conservative estimate of 12KB available for our namespace
-    // This accounts for system usage, other namespaces, and overhead
-    // The actual available space may be more, but we're being conservative
-    const int ESTIMATED_AVAILABLE = 12288; // 12KB (conservative estimate)
-    
-    // Try to get actual stats if possible (using default "nvs" partition)
+    const int ESTIMATED_AVAILABLE = 12288;
     nvs_stats_t nvs_stats;
-    esp_err_t err = nvs_get_stats("nvs", &nvs_stats);
-    
-    if (err == ESP_OK) {
-      // Calculate available space (free entries * entry size)
-      // Each entry is typically 32 bytes, but we'll be conservative
-      // Available space = free_entries * 32 bytes (approximate)
+    if (nvs_get_stats("nvs", &nvs_stats) == ESP_OK) {
       int availableBytes = nvs_stats.free_entries * 32;
-      
-      // Use the smaller of estimated or calculated to be safe
-      // But ensure at least 4KB is available
       if (availableBytes > 0 && availableBytes < ESTIMATED_AVAILABLE) {
         return availableBytes;
       }
     }
-    
-    // Fallback to conservative estimate
     return ESTIMATED_AVAILABLE;
   }
 
-  // Get queue write pointer from NVS
-  static uint32_t getQueueWritePtr() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return 0;
-    }
-    
-    uint32_t writePtr = 0;
-    err = nvs_get_u32(nvsHandle, QUEUE_WRITE_PTR_KEY, &writePtr);
-    nvs_close(nvsHandle);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-      return 0; // Not set yet, start at beginning
-    }
-    
-    return writePtr;
-  }
-
-  // Set queue write pointer in NVS
-  static bool setQueueWritePtr(uint32_t writePtr) {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_u32(nvsHandle, QUEUE_WRITE_PTR_KEY, writePtr);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
-
-  // Get queue read pointer from NVS
-  static uint32_t getQueueReadPtr() {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return 0;
-    }
-    
-    uint32_t readPtr = 0;
-    err = nvs_get_u32(nvsHandle, QUEUE_READ_PTR_KEY, &readPtr);
-    nvs_close(nvsHandle);
-    
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-      return 0; // Not set yet, start at beginning
-    }
-    
-    return readPtr;
-  }
-
-  // Set queue read pointer in NVS
-  static bool setQueueReadPtr(uint32_t readPtr) {
-    nvs_handle_t nvsHandle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle);
-    
-    if (err != ESP_OK) {
-      return false;
-    }
-    
-    err = nvs_set_u32(nvsHandle, QUEUE_READ_PTR_KEY, readPtr);
-    if (err != ESP_OK) {
-      nvs_close(nvsHandle);
-      return false;
-    }
-    
-    err = nvs_commit(nvsHandle);
-    nvs_close(nvsHandle);
-    
-    return (err == ESP_OK);
-  }
+  static uint32_t getQueueWritePtr() { return readU32NVS(QUEUE_WRITE_PTR_KEY, 0); }
+  static bool setQueueWritePtr(uint32_t writePtr) { return writeU32NVS(QUEUE_WRITE_PTR_KEY, writePtr); }
+  static uint32_t getQueueReadPtr() { return readU32NVS(QUEUE_READ_PTR_KEY, 0); }
+  static bool setQueueReadPtr(uint32_t readPtr) { return writeU32NVS(QUEUE_READ_PTR_KEY, readPtr); }
 
 };
 

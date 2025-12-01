@@ -6,8 +6,8 @@
 #include <TinyGPSPlus.h>
 
 // GPS pin definitions
-#define GPS_TX_PIN 17      // GPS_TX
-#define GPS_RX_PIN 18      // GPS_RX
+#define GPS_TX_PIN 7      // GPS_TX
+#define GPS_RX_PIN 6      // GPS_RX
 
 // Structure to hold GPS data
 struct GPSData {
@@ -67,7 +67,6 @@ public:
 
     // Initialize GPS UART (TinyGPS uses 9600 baud by default for NMEA)
     Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    
     delay(500); // Give GPS time to power up
     
     // Check if GPS device is connected and sending data

@@ -20,8 +20,7 @@
 const char* DEVICE_ID = "ASSET_TAG_001";  // Change this for each device
 const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
-// NeoPixel Status LED Configuration
-const int STATUS_LED_PIN = 48;
+const int STATUS_LED_PIN = 1;
 const int STATUS_LED_COUNT = 2; // 2 pixels: pixel 0 for device status, pixel 1 for battery status
 
 // Status LED instance
@@ -165,7 +164,7 @@ void setup() {
   
   // Initialize Status LED first (both pixels on same pin)
   statusLED.begin();  // Initialize GPIO first!
-  statusLED.setBrightness(100);
+  statusLED.setBrightness(70);
   statusLED.show();
   updateStatusLED(); // Show red initially on pixel 0 (not initialized)
   
@@ -192,7 +191,18 @@ void setup() {
     Serial.println("GPS initialization failed - continuing without GPS");
   }
   
-  // Initialize External SPI Flash logic moved up before transmission handler
+  // One-time credential setup (comment out after first upload)
+  // NVSConfig::setWiFiSSID("GarageNeo");
+  // NVSConfig::setWiFiPassword("G@r@ge#123");
+  // Connect to WiFi
+  CustomWiFi::connectWiFi();
+  
+  // Sync time with NTP server
+  if(CustomWiFi::isConnected()) {
+    TimeSync::syncTimeNTP();
+  } else {
+    Serial.println("WiFi not connected, skipping time sync");
+  }
 
   // Update status LED based on sensor initialization
   updateStatusLED();
@@ -201,20 +211,12 @@ void setup() {
   } else {
     Serial.println("BLE not started (sensors not initialized)");
   }
-  // One-time credential setup (comment out after first upload)
-  // NVSConfig::setWiFiSSID("GarageNeo");
-  // NVSConfig::setWiFiPassword("G@r@ge#123");
-  // Connect to WiFi
-  CustomWiFi::connectWiFi();
-  
-  // Sync time with NTP server
-  TimeSync::syncTimeNTP();
   
   delay(100);
 }
 
 String createSensorCSV(IMUData imuData, GPSData gpsData) {
-  static char csvBuffer[500];
+  static char csvBuffer[350];
   char timestamp[20];
   
   TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
@@ -259,54 +261,27 @@ void loop() {
   static bool firstRun = true;
   unsigned long currentTime = millis();
   
-  // USB connection state tracking
-  static bool lastUSBState = false;
-  static bool usbStateInitialized = false;
-  
-  // Only update BLE if it's enabled (saves power after BLE is stopped)
+  static bool lastUSBState = isUSBConnected();
   static bool bleJustStopped = false;
   
   if (BLEConfig::isEnabled()) {
     // Update BLE (handles connections and processes WiFi credentials)
     BLEConfig::update();
-    
     // Check if BLE is disconnected and more than 1 minute has passed since start
-    if (!BLEConfig::isConnected() && bleStartTime > 0) {
-      if (currentTime - bleStartTime >= 60000) { // 60000ms = 1 minute
-        Serial.println("BLE disconnected for more than 1 minute, stopping BLE permanently");
-        BLEConfig::stop();
-        bleStartTime = 0; // Reset to prevent further checks
-        bleJustStopped = true; // Flag to trigger deep sleep check after next transmission
-      }
+    if (!BLEConfig::isConnected() && bleStartTime > 0 && (currentTime - bleStartTime >= 60000)) {
+      Serial.println("BLE disconnected for more than 1 minute, stopping BLE permanently");
+      BLEConfig::stop();
+      bleStartTime = 0;
+      bleJustStopped = true;
     }
   }
   
-  // Check USB connection status and control battery LED
   bool currentUSBState = isUSBConnected();
-  
-  // Initialize USB state on first run
-  if (!usbStateInitialized) {
-    lastUSBState = currentUSBState;
-    usbStateInitialized = true;
-    
-    // Set initial battery LED state based on USB connection
-    if (currentUSBState) {
-      batteryIndicatorLED.disable();
-      Serial.println("USB connected - Battery LED disabled");
-    } else {
-      batteryIndicatorLED.enable();
-      Serial.println("USB disconnected - Battery LED enabled");
-    }
-  }
-  
-  // Detect USB connection/disconnection changes
   if (currentUSBState != lastUSBState) {
     if (currentUSBState) {
-      // USB connected - disable battery LED
       batteryIndicatorLED.disable();
       Serial.println("USB connected - Battery LED disabled");
     } else {
-      // USB disconnected - enable battery LED
       batteryIndicatorLED.enable();
       Serial.println("USB disconnected - Battery LED enabled");
     }

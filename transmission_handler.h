@@ -81,35 +81,6 @@ public:
         // Reset consecutive empty counter on successful read
         consecutiveEmptyReads = 0;
         
-        // Validate batch data before sending
-        bool dataIsValid = false;
-        size_t validCharCount = 0;
-        size_t checkLen = (batchData.length() < 100) ? batchData.length() : 100;
-        
-        for (size_t i = 0; i < checkLen; i++) {
-          char c = batchData[i];
-          if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
-              c == ',' || c == '.' || c == '-' || c == '\n' || c == '_' || c == ':') {
-            validCharCount++;
-          }
-        }
-        
-        dataIsValid = (validCharCount > (checkLen / 2)); // At least 50% valid chars
-        
-        if (!dataIsValid) {
-          Serial.println("TransmissionHandler: ERROR - Batch data validation failed!");
-          Serial.print("TransmissionHandler: Only ");
-          Serial.print(validCharCount);
-          Serial.print(" of ");
-          Serial.print(checkLen);
-          Serial.println(" characters are valid");
-          Serial.println("TransmissionHandler: Skipping transmission of corrupted data");
-          
-          // Commit the read to skip this garbage data
-          dataQueue.commitRead(batchData);
-          continue; // Skip to next batch
-        }
-        
         Serial.print("TransmissionHandler: Sending queued batch (");
         Serial.print(batchData.length());
         Serial.println(" bytes)");
