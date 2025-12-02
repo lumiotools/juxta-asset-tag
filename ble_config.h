@@ -20,6 +20,7 @@ extern void stopStatusLEDBlink();
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
 #define SSID_CHAR_UUID      "12345678-1234-1234-1234-123456789abd"
 #define PASSWORD_CHAR_UUID  "12345678-1234-1234-1234-123456789abe"
+#define DEBUG_MODE_CHAR_UUID "12345678-1234-1234-1234-123456789ac2"
 #define STATUS_CHAR_UUID    "12345678-1234-1234-1234-123456789abf"
 #define DATA_CHAR_UUID      "12345678-1234-1234-1234-123456789ac0"
 #define CURRENT_SSID_CHAR_UUID "12345678-1234-1234-1234-123456789ac1"
@@ -33,6 +34,7 @@ private:
   static BLEService* pService;
   static BLECharacteristic* pSSIDCharacteristic;
   static BLECharacteristic* pPasswordCharacteristic;
+  static BLECharacteristic* pDebugModeCharacteristic;
   static BLECharacteristic* pStatusCharacteristic;
   static BLECharacteristic* pDataCharacteristic;
   static BLECharacteristic* pCurrentSSIDCharacteristic;
@@ -40,6 +42,7 @@ private:
   static bool oldDeviceConnected;
   static String receivedSSID;
   static String receivedPassword;
+  static uint8_t receivedDebugMode;
   static bool credentialsReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
@@ -109,7 +112,29 @@ private:
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
         receivedPassword = value;
-        if (receivedSSID.length() > 0) {
+        // Check if all credentials are received (SSID and password)
+        if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
+          credentialsReceived = true;
+        }
+      }
+      
+      // Stop LED blinking and restore to green
+      stopStatusLEDBlink();
+    }
+  };
+
+  // Debug Mode Characteristic Callbacks
+  class DebugModeCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic* pCharacteristic) {
+      // Start blue LED blinking on receive
+      startStatusLEDBlink(0, 0, 255);
+      
+      std::string value = pCharacteristic->getValue();
+      if (value.length() > 0) {
+        receivedDebugMode = value[0]; // Read first byte (0 or 1)
+        // Check if all credentials are received (SSID and password)
+        // Debug mode can be saved even if WiFi credentials aren't updated
+        if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
           credentialsReceived = true;
         }
       }
@@ -155,6 +180,13 @@ public:
     );
     pPasswordCharacteristic->setCallbacks(new PasswordCallbacks());
     
+    // Create Debug Mode Characteristic
+    pDebugModeCharacteristic = pService->createCharacteristic(
+      DEBUG_MODE_CHAR_UUID,
+      BLECharacteristic::PROPERTY_WRITE
+    );
+    pDebugModeCharacteristic->setCallbacks(new DebugModeCallbacks());
+    
     // Create Status Characteristic (simplified - no notify)
     pStatusCharacteristic = pService->createCharacteristic(
       STATUS_CHAR_UUID,
@@ -194,6 +226,7 @@ public:
     oldDeviceConnected = false;
     receivedSSID = "";
     receivedPassword = "";
+    receivedDebugMode = 0; // Default to 0 (LED off in deep sleep)
     credentialsReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
@@ -225,6 +258,8 @@ public:
       // Save to NVS
       bool ssidSaved = NVSConfig::setWiFiSSID(receivedSSID.c_str());
       bool passwordSaved = NVSConfig::setWiFiPassword(receivedPassword.c_str());
+      // Debug mode is always saved (defaults to 0 if not explicitly set)
+      bool debugModeSaved = NVSConfig::setDebugMode(receivedDebugMode);
       
       // Update current SSID characteristic with the new value
       if (pCurrentSSIDCharacteristic != nullptr && ssidSaved) {
@@ -235,6 +270,7 @@ public:
       credentialsReceived = false;
       receivedSSID = "";
       receivedPassword = "";
+      receivedDebugMode = 0;
     }
   }
   
@@ -270,6 +306,7 @@ public:
     pService = nullptr;
     pSSIDCharacteristic = nullptr;
     pPasswordCharacteristic = nullptr;
+    pDebugModeCharacteristic = nullptr;
     pStatusCharacteristic = nullptr;
     pDataCharacteristic = nullptr;
     pCurrentSSIDCharacteristic = nullptr;
@@ -282,6 +319,7 @@ public:
     // Clear credentials
     receivedSSID = "";
     receivedPassword = "";
+    receivedDebugMode = 0;
     credentialsReceived = false;
   }
   
@@ -339,6 +377,7 @@ BLEServer* BLEConfig::pServer = nullptr;
 BLEService* BLEConfig::pService = nullptr;
 BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
+BLECharacteristic* BLEConfig::pDebugModeCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
@@ -346,6 +385,7 @@ bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
 String BLEConfig::receivedPassword = "";
+uint8_t BLEConfig::receivedDebugMode = 0;
 bool BLEConfig::credentialsReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;

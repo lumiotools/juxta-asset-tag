@@ -263,7 +263,12 @@
                 <h2>📶 WiFi Configuration</h2>
                 <input type="text" id="ssidInput" placeholder="WiFi SSID (Network Name)" />
                 <input type="password" id="passwordInput" placeholder="WiFi Password" />
-                <button id="sendCredsBtn" disabled>Send WiFi Credentials</button>
+                <label style="display: block; margin: 15px 0 10px 0; font-weight: 600; color: #667eea;">Debug Mode:</label>
+                <select id="debugModeInput" style="width: 100%; padding: 12px 15px; margin-bottom: 15px; border: 2px solid #e9ecef; border-radius: 10px; font-size: 1em;">
+                    <option value="0">0 - LED off in deep sleep (0% brightness)</option>
+                    <option value="1">1 - LED dim in deep sleep (10% brightness)</option>
+                </select>
+                <button id="sendCredsBtn" disabled>Send WiFi Credentials & Debug Mode</button>
                 <div id="wifiStatus"></div>
             </div>
             
@@ -307,6 +312,7 @@
         const SERVICE_UUID = '12345678-1234-1234-1234-123456789abc';
         const SSID_CHAR_UUID = '12345678-1234-1234-1234-123456789abd';
         const PASSWORD_CHAR_UUID = '12345678-1234-1234-1234-123456789abe';
+        const DEBUG_MODE_CHAR_UUID = '12345678-1234-1234-1234-123456789ac2';
         const STATUS_CHAR_UUID = '12345678-1234-1234-1234-123456789abf';
         const DATA_CHAR_UUID = '12345678-1234-1234-1234-123456789ac0';
 
@@ -332,6 +338,7 @@
         const wifiStatus = document.getElementById('wifiStatus');
         const ssidInput = document.getElementById('ssidInput');
         const passwordInput = document.getElementById('passwordInput');
+        const debugModeInput = document.getElementById('debugModeInput');
         const lastUpdate = document.getElementById('lastUpdate');
         const gpsInfo = document.getElementById('gpsInfo');
         const batteryInfo = document.getElementById('batteryInfo');
@@ -401,6 +408,7 @@
         sendCredsBtn.addEventListener('click', async () => {
             const ssid = ssidInput.value.trim();
             const password = passwordInput.value.trim();
+            const debugMode = debugModeInput.value;
 
             if (!ssid || !password) {
                 alert('Please enter both SSID and password');
@@ -411,6 +419,7 @@
                 // Get characteristics
                 const ssidChar = await bleService.getCharacteristic(SSID_CHAR_UUID);
                 const passwordChar = await bleService.getCharacteristic(PASSWORD_CHAR_UUID);
+                const debugModeChar = await bleService.getCharacteristic(DEBUG_MODE_CHAR_UUID);
 
                 // Encode and write SSID
                 const ssidEncoder = new TextEncoder();
@@ -420,14 +429,18 @@
                 const passwordEncoder = new TextEncoder();
                 await passwordChar.writeValue(passwordEncoder.encode(password));
 
+                // Write debug mode (0 or 1 as single byte)
+                const debugModeValue = parseInt(debugMode);
+                await debugModeChar.writeValue(new Uint8Array([debugModeValue]));
+
                 // Show success message
-                wifiStatus.innerHTML = '<div class="alert alert-success"><strong>Success!</strong> WiFi credentials sent to device.</div>';
+                wifiStatus.innerHTML = '<div class="alert alert-success"><strong>Success!</strong> WiFi credentials and debug mode sent to device.</div>';
                 
                 // Clear inputs
                 ssidInput.value = '';
                 passwordInput.value = '';
 
-                console.log('WiFi credentials sent successfully');
+                console.log('WiFi credentials and debug mode sent successfully');
 
                 // Clear success message after 5 seconds
                 setTimeout(() => {

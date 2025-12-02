@@ -10,6 +10,7 @@ private:
   static const char* NVS_NAMESPACE;
   static const char* WIFI_SSID_KEY;
   static const char* WIFI_PASSWORD_KEY;
+  static const char* DEBUG_MODE_KEY;
   static const char* FIRSTBOOT_KEY;
   static const char* MAX_QUEUE_SIZE_KEY;
   static const char* QUEUE_DATA_KEY;
@@ -110,6 +111,9 @@ public:
   static bool setWiFiSSID(const char* ssid) { return writeStringNVS(WIFI_SSID_KEY, ssid); }
   static bool setWiFiPassword(const char* password) { return writeStringNVS(WIFI_PASSWORD_KEY, password); }
 
+  static uint8_t getDebugMode() { return readU8NVS(DEBUG_MODE_KEY, 0); } // Default to 0
+  static bool setDebugMode(uint8_t debugMode) { return writeU8NVS(DEBUG_MODE_KEY, debugMode); }
+
   static bool isFirstBoot() {
     return (readU8NVS(FIRSTBOOT_KEY, 1) == 1);
   }
@@ -158,6 +162,7 @@ public:
 const char* NVSConfig::NVS_NAMESPACE = "wifi_config";
 const char* NVSConfig::WIFI_SSID_KEY = "ssid";
 const char* NVSConfig::WIFI_PASSWORD_KEY = "password";
+const char* NVSConfig::DEBUG_MODE_KEY = "debug_mode";
 const char* NVSConfig::FIRSTBOOT_KEY = "firstboot";
 const char* NVSConfig::MAX_QUEUE_SIZE_KEY = "max_q_size";
 const char* NVSConfig::QUEUE_DATA_KEY = "queue_data";

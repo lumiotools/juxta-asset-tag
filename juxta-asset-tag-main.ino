@@ -109,10 +109,19 @@ void stopStatusLEDBlink() {
   setPixelAndShow(0, restoreR, restoreG, restoreB);
 }
 
-// Dim status LED to 10% brightness for deep sleep
-void dimStatusLEDTo10Percent() {
-  statusLED.setBrightness(10); // 10% of original 100
-  setPixelAndShow(0, restoreR, restoreG, restoreB);
+// Dim status LED based on debug mode for deep sleep
+// If debug mode is 0: LED brightness = 0% (off)
+// If debug mode is 1: LED brightness = 10%
+void dimStatusLEDForDeepSleep() {
+  uint8_t debugMode = NVSConfig::getDebugMode();
+  if (debugMode == 1) {
+    statusLED.setBrightness(10); // 10% of original 100
+    setPixelAndShow(0, restoreR, restoreG, restoreB);
+  } else {
+    statusLED.setBrightness(0); // 0% - LED off
+    setPixelAndShow(0, 0, 0, 0); // Apply brightness change
+    setPixelAndShow(1, 0, 0, 0); // Turn off battery LED
+  }
 }
 
 void setup() {
@@ -353,10 +362,17 @@ void loop() {
         CustomWiFi::disconnectWiFi();
       }
       
-      // Dim LEDs to 10% brightness before deep sleep
-      Serial.println("Dimming LEDs to 10% for deep sleep...");
-      dimStatusLEDTo10Percent(); // Dims entire strip (both pixels share brightness)
-      batteryIndicatorLED.updateBatteryLED(); // Update battery pixel color with new brightness
+      // Dim LEDs based on debug mode before deep sleep
+      uint8_t debugMode = NVSConfig::getDebugMode();
+      if (debugMode == 1) {
+        Serial.println("Debug mode enabled - Dimming LEDs to 10% for deep sleep...");
+      } else {
+        Serial.println("Debug mode disabled - Turning LEDs off for deep sleep...");
+      }
+      dimStatusLEDForDeepSleep(); // Sets brightness based on debug mode (0% or 10%)
+      if (debugMode == 1) {
+        batteryIndicatorLED.updateBatteryLED(); // Update battery pixel color with new brightness (only if LED is on)
+      }
       delay(50);  // Brief delay to ensure LED update completes
       
       // Deep sleep based on WiFi connection and transmission success
