@@ -6,14 +6,8 @@
 class BatteryMonitor {
 private:
   static const int BATTERY_ADC_PIN = 0;
-  static const int ADC_MAX_VALUE = 4095; // ESP32-S3 has 12-bit ADC
-  static constexpr float ADC_VOLTAGE_REF = 3.3f; // ADC reference voltage
-  static constexpr float VOLTAGE_DIVIDER_RATIO = 4.235f; // R11(220K) + R12(68K) / R12(68K) = 288/68 ≈ 4.235
-  // Note: R68(1K) and C26(100nF) form RC filter but don't affect divider ratio due to high ADC impedance
-  
   static constexpr float BATTERY_MAX_VOLTAGE = 4.2f;
   static constexpr float BATTERY_MIN_VOLTAGE = 3.0f;
-  static constexpr float BATTERY_NOMINAL_VOLTAGE = 3.7f;
 
 public:
   static void initializeADC() {
@@ -22,10 +16,14 @@ public:
   }
 
   static float readBatteryVoltage() {
-    int rawADC = analogRead(BATTERY_ADC_PIN);
-    float adcVoltage = (rawADC / (float)ADC_MAX_VALUE) * ADC_VOLTAGE_REF;
-    float batteryVoltage = adcVoltage * VOLTAGE_DIVIDER_RATIO;
-    return batteryVoltage;
+    uint32_t Vbatt = 0;
+    
+    for(int i = 0; i < 16; i++) {
+      Vbatt = Vbatt + analogReadMilliVolts(A0); // ADC with correction
+    }
+    
+    float Vbattf = 2 * Vbatt / 16 / 1000.0; // attenuation ratio 1/2, mV --> V
+    return Vbattf;
   }
 
   static int getBatteryPercentage() {

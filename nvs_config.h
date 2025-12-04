@@ -16,6 +16,14 @@ private:
   static const char* QUEUE_DATA_KEY;
   static const char* QUEUE_WRITE_PTR_KEY;
   static const char* QUEUE_READ_PTR_KEY;
+  static const char* GPS_LAT_KEY;
+  static const char* GPS_LON_KEY;
+  static const char* GPS_ALT_KEY;
+  static const char* GPS_SPEED_KEY;
+  static const char* GPS_HEADING_KEY;
+  static const char* GPS_SAT_KEY;
+  static const char* GPS_HDOP_KEY;
+  static const char* GPS_HAS_FIX_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -156,6 +164,124 @@ public:
   static uint32_t getQueueReadPtr() { return readU32NVS(QUEUE_READ_PTR_KEY, 0); }
   static bool setQueueReadPtr(uint32_t readPtr) { return writeU32NVS(QUEUE_READ_PTR_KEY, readPtr); }
 
+  // GPS Last Known Location Storage (for persistence across deep sleep)
+  static bool saveLastKnownGPS(double lat, double lon, double alt, float speed, float heading, int satellites, float hdop, bool hasFix) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    bool success = true;
+    // Store doubles as strings to preserve precision
+    char latStr[32], lonStr[32], altStr[32];
+    snprintf(latStr, sizeof(latStr), "%.7f", lat);
+    snprintf(lonStr, sizeof(lonStr), "%.7f", lon);
+    snprintf(altStr, sizeof(altStr), "%.2f", alt);
+    
+    success &= (nvs_set_str(nvsHandle, GPS_LAT_KEY, latStr) == ESP_OK);
+    success &= (nvs_set_str(nvsHandle, GPS_LON_KEY, lonStr) == ESP_OK);
+    success &= (nvs_set_str(nvsHandle, GPS_ALT_KEY, altStr) == ESP_OK);
+    success &= (nvs_set_blob(nvsHandle, GPS_SPEED_KEY, &speed, sizeof(float)) == ESP_OK);
+    success &= (nvs_set_blob(nvsHandle, GPS_HEADING_KEY, &heading, sizeof(float)) == ESP_OK);
+    success &= (nvs_set_u32(nvsHandle, GPS_SAT_KEY, (uint32_t)satellites) == ESP_OK);
+    success &= (nvs_set_blob(nvsHandle, GPS_HDOP_KEY, &hdop, sizeof(float)) == ESP_OK);
+    success &= (nvs_set_u8(nvsHandle, GPS_HAS_FIX_KEY, hasFix ? 1 : 0) == ESP_OK);
+    
+    if (success) {
+      nvs_commit(nvsHandle);
+    }
+    nvs_close(nvsHandle);
+    return success;
+  }
+  
+  static bool getLastKnownGPS(double* lat, double* lon, double* alt, float* speed, float* heading, int* satellites, float* hdop, bool* hasFix) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return false;
+    
+    bool success = true;
+    size_t required_size;
+    
+    // Read latitude
+    size_t len = 0;
+    if (nvs_get_str(nvsHandle, GPS_LAT_KEY, nullptr, &len) == ESP_OK && len > 0) {
+      char* buffer = (char*)malloc(len);
+      if (buffer) {
+        nvs_get_str(nvsHandle, GPS_LAT_KEY, buffer, &len);
+        *lat = String(buffer).toDouble();
+        free(buffer);
+      } else {
+        success = false;
+      }
+    } else {
+      success = false;
+    }
+    
+    // Read longitude
+    len = 0;
+    if (success && nvs_get_str(nvsHandle, GPS_LON_KEY, nullptr, &len) == ESP_OK && len > 0) {
+      char* buffer = (char*)malloc(len);
+      if (buffer) {
+        nvs_get_str(nvsHandle, GPS_LON_KEY, buffer, &len);
+        *lon = String(buffer).toDouble();
+        free(buffer);
+      } else {
+        success = false;
+      }
+    } else {
+      success = false;
+    }
+    
+    // Read altitude
+    len = 0;
+    if (success && nvs_get_str(nvsHandle, GPS_ALT_KEY, nullptr, &len) == ESP_OK && len > 0) {
+      char* buffer = (char*)malloc(len);
+      if (buffer) {
+        nvs_get_str(nvsHandle, GPS_ALT_KEY, buffer, &len);
+        *alt = String(buffer).toDouble();
+        free(buffer);
+      } else {
+        success = false;
+      }
+    } else {
+      success = false;
+    }
+    
+    // Read speed
+    required_size = sizeof(float);
+    if (success && nvs_get_blob(nvsHandle, GPS_SPEED_KEY, speed, &required_size) != ESP_OK) {
+      success = false;
+    }
+    
+    // Read heading
+    required_size = sizeof(float);
+    if (success && nvs_get_blob(nvsHandle, GPS_HEADING_KEY, heading, &required_size) != ESP_OK) {
+      success = false;
+    }
+    
+    // Read satellites
+    uint32_t sat = 0;
+    if (success && nvs_get_u32(nvsHandle, GPS_SAT_KEY, &sat) == ESP_OK) {
+      *satellites = (int)sat;
+    } else {
+      success = false;
+    }
+    
+    // Read HDOP
+    required_size = sizeof(float);
+    if (success && nvs_get_blob(nvsHandle, GPS_HDOP_KEY, hdop, &required_size) != ESP_OK) {
+      success = false;
+    }
+    
+    // Read hasFix
+    uint8_t fix = 0;
+    if (success && nvs_get_u8(nvsHandle, GPS_HAS_FIX_KEY, &fix) == ESP_OK) {
+      *hasFix = (fix == 1);
+    } else {
+      success = false;
+    }
+    
+    nvs_close(nvsHandle);
+    return success;
+  }
+
 };
 
 // Static member definitions
@@ -168,5 +294,13 @@ const char* NVSConfig::MAX_QUEUE_SIZE_KEY = "max_q_size";
 const char* NVSConfig::QUEUE_DATA_KEY = "queue_data";
 const char* NVSConfig::QUEUE_WRITE_PTR_KEY = "q_write_ptr";
 const char* NVSConfig::QUEUE_READ_PTR_KEY = "q_read_ptr";
+const char* NVSConfig::GPS_LAT_KEY = "gps_lat";
+const char* NVSConfig::GPS_LON_KEY = "gps_lon";
+const char* NVSConfig::GPS_ALT_KEY = "gps_alt";
+const char* NVSConfig::GPS_SPEED_KEY = "gps_speed";
+const char* NVSConfig::GPS_HEADING_KEY = "gps_heading";
+const char* NVSConfig::GPS_SAT_KEY = "gps_sat";
+const char* NVSConfig::GPS_HDOP_KEY = "gps_hdop";
+const char* NVSConfig::GPS_HAS_FIX_KEY = "gps_has_fix";
 
 #endif

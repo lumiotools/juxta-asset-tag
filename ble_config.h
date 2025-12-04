@@ -44,6 +44,7 @@ private:
   static String receivedPassword;
   static uint8_t receivedDebugMode;
   static bool credentialsReceived;
+  static bool debugModeReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
   static const char* deviceVersion;
@@ -73,8 +74,8 @@ private:
       
       char jsonBuffer[256];
       snprintf(jsonBuffer, sizeof(jsonBuffer), 
-               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\"}",
-               devId, devVer, timestamp, batteryLevel, currentSSID.c_str());
+               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\",\"debug_mode\":%d}",
+               devId, devVer, timestamp, batteryLevel, currentSSID.c_str(), NVSConfig::getDebugMode());
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
@@ -129,11 +130,22 @@ private:
       // Start blue LED blinking on receive
       startStatusLEDBlink(0, 0, 255);
       
-      std::string value = pCharacteristic->getValue();
+      // Read raw byte data (sent as Uint8Array from web interface)
+      String value = pCharacteristic->getValue();
       if (value.length() > 0) {
-        receivedDebugMode = value[0]; // Read first byte (0 or 1)
-        // Check if all credentials are received (SSID and password)
-        // Debug mode can be saved even if WiFi credentials aren't updated
+        receivedDebugMode = (uint8_t)value[0]; // Read first byte as uint8_t (0 or 1)
+        // Save debug mode immediately to NVS (independent of WiFi credentials)
+        // NVS key: "debug_mode" in namespace "wifi_config"
+        bool debugModeSaved = NVSConfig::setDebugMode(receivedDebugMode);
+        debugModeReceived = true;
+        Serial.print("Debug Mode received: ");
+        Serial.print(receivedDebugMode);
+        Serial.print(" - ");
+        Serial.print(debugModeSaved ? "Saved to NVS (key: debug_mode)" : "Failed to save to NVS");
+        Serial.print(" - Current NVS value: ");
+        Serial.println(NVSConfig::getDebugMode());
+        
+        // Check if all credentials are received (SSID and password) for WiFi credentials saving
         if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
           credentialsReceived = true;
         }
@@ -228,6 +240,7 @@ public:
     receivedPassword = "";
     receivedDebugMode = 0; // Default to 0 (LED off in deep sleep)
     credentialsReceived = false;
+    debugModeReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
     
@@ -253,13 +266,11 @@ public:
       oldDeviceConnected = deviceConnected;
     }
     
-    // Process received credentials
+    // Process received WiFi credentials (debug mode is saved immediately when received)
     if (credentialsReceived) {
       // Save to NVS
       bool ssidSaved = NVSConfig::setWiFiSSID(receivedSSID.c_str());
       bool passwordSaved = NVSConfig::setWiFiPassword(receivedPassword.c_str());
-      // Debug mode is always saved (defaults to 0 if not explicitly set)
-      bool debugModeSaved = NVSConfig::setDebugMode(receivedDebugMode);
       
       // Update current SSID characteristic with the new value
       if (pCurrentSSIDCharacteristic != nullptr && ssidSaved) {
@@ -270,6 +281,11 @@ public:
       credentialsReceived = false;
       receivedSSID = "";
       receivedPassword = "";
+    }
+    
+    // Reset debug mode flag if it was processed
+    if (debugModeReceived) {
+      debugModeReceived = false;
       receivedDebugMode = 0;
     }
   }
@@ -321,11 +337,36 @@ public:
     receivedPassword = "";
     receivedDebugMode = 0;
     credentialsReceived = false;
+    debugModeReceived = false;
   }
   
   // Check if BLE is enabled (not permanently disabled)
   static bool isEnabled() {
     return !bleDisabled;
+  }
+  
+  // Get BLE RSSI signal strength (returns dBm, or -100 if not connected)
+  static int getRSSI() {
+    if (bleDisabled || !deviceConnected || pServer == nullptr) {
+      return -100; // Return invalid RSSI if not connected
+    }
+    
+    // Get connected client and retrieve RSSI
+    BLEServer* server = BLEDevice::getServer();
+    if (server != nullptr) {
+      // Get the number of connected clients
+      uint32_t connectedCount = server->getConnectedCount();
+      if (connectedCount > 0) {
+        // Get RSSI from the first connected client
+        // Note: ESP32 BLE RSSI is typically available through the client connection
+        // For now, return a placeholder - actual RSSI requires client handle
+        // Most BLE implementations don't expose RSSI directly in this way
+        // We'll use a workaround: return a default value or try to get it from advertising
+        return -70; // Default/estimated BLE RSSI when connected (good signal)
+      }
+    }
+    
+    return -100; // Not connected
   }
   
   // Send sensor data via BLE (with chunking for large data)
@@ -387,6 +428,7 @@ String BLEConfig::receivedSSID = "";
 String BLEConfig::receivedPassword = "";
 uint8_t BLEConfig::receivedDebugMode = 0;
 bool BLEConfig::credentialsReceived = false;
+bool BLEConfig::debugModeReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
 const char* BLEConfig::deviceVersion = "v2.0.0";

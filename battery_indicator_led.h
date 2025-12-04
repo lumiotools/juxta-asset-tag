@@ -65,6 +65,8 @@ public:
       setColor(0, 0, 0);
       delay(100);
     }
+    // Restore battery color after blinking
+    updateBatteryLED();
   }
 
   void dimTo10Percent() {

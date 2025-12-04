@@ -350,7 +350,6 @@
             try {
                 console.log('Requesting Bluetooth Device...');
                 bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'AssetTag-Config' }],
                     optionalServices: [SERVICE_UUID]
                 });
 

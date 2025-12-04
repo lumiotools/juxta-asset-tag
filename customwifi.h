@@ -46,9 +46,9 @@ public:
       return false;
     }
     
-    // Start purple LED blinking for WiFi transmission
-    // Purple = Red + Blue: (128, 0, 255) for bright purple
-    startStatusLEDBlink(128, 0, 255);
+    // Start orange LED blinking for WiFi transmission
+    // Orange = (255, 165, 0)
+    startStatusLEDBlink(255, 165, 0);
     
     HTTPClient http;
     http.setTimeout(REQUEST_TIMEOUT);
@@ -72,6 +72,14 @@ public:
   
   static bool isConnected() {
     return WiFi.isConnected();
+  }
+  
+  // Get WiFi RSSI signal strength (returns dBm, or -100 if not connected)
+  static int getRSSI() {
+    if (WiFi.status() != WL_CONNECTED) {
+      return -100; // Return invalid RSSI if not connected
+    }
+    return WiFi.RSSI();
   }
   
   static void disconnectWiFi() {
