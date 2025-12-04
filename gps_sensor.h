@@ -4,6 +4,7 @@
 #define GPS_SENSOR_H
 
 #include "time_sync.h"
+#include "nvs_config.h"
 
 // GPS pin definitions
 #define GPS_TX_PIN D7      // GPS_TX connects to ESP32 RX
@@ -29,6 +30,63 @@ private:
   GPSData lastKnownData;  // Store last known values when fix is lost
   String nmeaSentence = "";
   bool configured = false;
+  
+  // Convert decimal degrees to DDMM.MMMM format for NMEA
+  String formatCoordinateToNMEA(double coord, bool isLatitude) {
+    char dir = isLatitude ? (coord >= 0 ? 'N' : 'S') : (coord >= 0 ? 'E' : 'W');
+    coord = fabs(coord);
+    
+    int degrees = (int)coord;
+    double minutes = (coord - degrees) * 60.0;
+    
+    char buffer[20];
+    if (isLatitude) {
+      snprintf(buffer, sizeof(buffer), "%02d%07.4f", degrees, minutes);
+    } else {
+      snprintf(buffer, sizeof(buffer), "%03d%07.4f", degrees, minutes);
+    }
+    
+    return String(buffer) + "," + String(dir);
+  }
+  
+  // Calculate NMEA checksum
+  uint8_t calculateNMEAChecksum(const char* sentence) {
+    uint8_t checksum = 0;
+    // Start after $, end before *
+    for (int i = 1; sentence[i] != '\0' && sentence[i] != '*'; i++) {
+      checksum ^= sentence[i];
+    }
+    return checksum;
+  }
+  
+  // Send hot start command to GPS with last known position
+  void sendHotStartCommand(double latitude, double longitude, double altitude) {
+    // AT6558 position initialization command
+    // Format: $PCAS10,lat,lon,alt*checksum
+    // Coordinates in decimal degrees
+    char cmd[100];
+    snprintf(cmd, sizeof(cmd), "$PCAS10,%.7f,%.7f,%.2f", latitude, longitude, altitude);
+    
+    // Calculate checksum
+    uint8_t checksum = calculateNMEAChecksum(cmd);
+    char checksumStr[3];
+    snprintf(checksumStr, sizeof(checksumStr), "%02X", checksum);
+    
+    // Send command
+    Serial1.print(cmd);
+    Serial1.print("*");
+    Serial1.println(checksumStr);
+    
+    Serial.print("GPS Hot Start: Sending position (");
+    Serial.print(latitude, 7);
+    Serial.print(", ");
+    Serial.print(longitude, 7);
+    Serial.print(", ");
+    Serial.print(altitude, 2);
+    Serial.println(")");
+    
+    delay(100); // Give GPS time to process
+  }
   
   // Convert DDMM.MMMM format to decimal degrees
   double formatCoordinate(String coord) {
@@ -109,6 +167,9 @@ private:
       // Store as last known values
       lastKnownData = data;
       
+      // Save to NVS for hot start on next boot
+      NVSConfig::saveLastGPSLocation(data.latitude, data.longitude, data.altitude);
+      
     } else {
       // NO FIX - use last known values
       data.hasValidFix = false;
@@ -157,8 +218,6 @@ public:
     Serial1.begin(115200, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
     
     Serial.println("Configuration complete!");
-    Serial.println("Waiting for GPS fix...\n");
-    configured = true;
     
     // Initialize data structures
     data.hasValidFix = false;
@@ -172,7 +231,25 @@ public:
     data.hdop = 0.0;
     TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
     
-    lastKnownData = data;
+    // Load last known location from NVS and send hot start command
+    double savedLat = 0.0, savedLon = 0.0, savedAlt = 0.0;
+    if (NVSConfig::loadLastGPSLocation(savedLat, savedLon, savedAlt)) {
+      Serial.println("Found last known GPS location in NVS");
+      // Update lastKnownData with saved values
+      lastKnownData.hasValidFix = true;
+      lastKnownData.latitude = savedLat;
+      lastKnownData.longitude = savedLon;
+      lastKnownData.altitude = savedAlt;
+      
+      // Send hot start command to GPS module for faster fix
+      sendHotStartCommand(savedLat, savedLon, savedAlt);
+    } else {
+      Serial.println("No saved GPS location found");
+      lastKnownData = data;
+    }
+    
+    Serial.println("Waiting for GPS fix...\n");
+    configured = true;
     
     return true;
   }
@@ -209,6 +286,14 @@ public:
   
   GPSData getGPSData() {
     return data;
+  }
+  
+  // Public method to send hot start command if last known location exists
+  void sendHotStartIfAvailable() {
+    // Only send hot start if we have last known location and don't currently have a fix
+    if (lastKnownData.hasValidFix && !data.hasValidFix) {
+      sendHotStartCommand(lastKnownData.latitude, lastKnownData.longitude, lastKnownData.altitude);
+    }
   }
   
 };

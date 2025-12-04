@@ -16,6 +16,10 @@ private:
   static const char* QUEUE_DATA_KEY;
   static const char* QUEUE_WRITE_PTR_KEY;
   static const char* QUEUE_READ_PTR_KEY;
+  static const char* GPS_LAST_LAT_KEY;
+  static const char* GPS_LAST_LON_KEY;
+  static const char* GPS_LAST_ALT_KEY;
+  static const char* GPS_LAST_FIX_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -156,6 +160,45 @@ public:
   static uint32_t getQueueReadPtr() { return readU32NVS(QUEUE_READ_PTR_KEY, 0); }
   static bool setQueueReadPtr(uint32_t readPtr) { return writeU32NVS(QUEUE_READ_PTR_KEY, readPtr); }
 
+  // GPS last known location storage (using strings to handle negative coordinates)
+  static bool saveLastGPSLocation(double latitude, double longitude, double altitude) {
+    bool success = true;
+    success &= writeU32NVS(GPS_LAST_FIX_KEY, 1); // Mark as having valid fix
+    
+    // Store coordinates as strings to preserve precision and handle negative values
+    char latStr[20], lonStr[20], altStr[20];
+    snprintf(latStr, sizeof(latStr), "%.7f", latitude);
+    snprintf(lonStr, sizeof(lonStr), "%.7f", longitude);
+    snprintf(altStr, sizeof(altStr), "%.2f", altitude);
+    
+    success &= writeStringNVS(GPS_LAST_LAT_KEY, latStr);
+    success &= writeStringNVS(GPS_LAST_LON_KEY, lonStr);
+    success &= writeStringNVS(GPS_LAST_ALT_KEY, altStr);
+    return success;
+  }
+
+  static bool loadLastGPSLocation(double& latitude, double& longitude, double& altitude) {
+    uint32_t hasFix = readU32NVS(GPS_LAST_FIX_KEY, 0);
+    if (hasFix == 0) return false; // No saved location
+    
+    String latStr = readStringNVS(GPS_LAST_LAT_KEY);
+    String lonStr = readStringNVS(GPS_LAST_LON_KEY);
+    String altStr = readStringNVS(GPS_LAST_ALT_KEY);
+    
+    if (latStr.length() == 0 || lonStr.length() == 0 || altStr.length() == 0) {
+      return false; // Invalid data
+    }
+    
+    latitude = latStr.toFloat();
+    longitude = lonStr.toFloat();
+    altitude = altStr.toFloat();
+    return true;
+  }
+
+  static bool hasLastGPSLocation() {
+    return (readU32NVS(GPS_LAST_FIX_KEY, 0) == 1);
+  }
+
 };
 
 // Static member definitions
@@ -168,5 +211,9 @@ const char* NVSConfig::MAX_QUEUE_SIZE_KEY = "max_q_size";
 const char* NVSConfig::QUEUE_DATA_KEY = "queue_data";
 const char* NVSConfig::QUEUE_WRITE_PTR_KEY = "q_write_ptr";
 const char* NVSConfig::QUEUE_READ_PTR_KEY = "q_read_ptr";
+const char* NVSConfig::GPS_LAST_LAT_KEY = "gps_last_lat";
+const char* NVSConfig::GPS_LAST_LON_KEY = "gps_last_lon";
+const char* NVSConfig::GPS_LAST_ALT_KEY = "gps_last_alt";
+const char* NVSConfig::GPS_LAST_FIX_KEY = "gps_last_fix";
 
 #endif

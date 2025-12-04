@@ -333,6 +333,12 @@ void loop() {
     
     // Update sensors to get fresh data (increased to allow all IMU sensor types to report)
     // Only update if sensors are initialized to avoid crashes
+    
+    // Send hot start command to GPS if we have last known location (before update loop)
+    if (gpsInitialized) {
+      gpsSensor.sendHotStartIfAvailable();
+    }
+    
     for (int i = 0; i < 50; i++) {
       if (imuInitialized) {
         imuSensor.update();
