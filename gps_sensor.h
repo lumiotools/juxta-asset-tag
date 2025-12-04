@@ -4,7 +4,6 @@
 #define GPS_SENSOR_H
 
 #include "time_sync.h"
-#include "nvs_config.h"
 
 // GPS pin definitions
 #define GPS_TX_PIN D7      // GPS_TX connects to ESP32 RX
@@ -42,39 +41,6 @@ private:
     String minutes = coord.substring(dotPos - 2);
     
     return degrees.toFloat() + minutes.toFloat() / 60.0;
-  }
-  
-  // Convert decimal degrees to DDMM.MMMM format (NMEA format)
-  String formatCoordinateToNMEA(double coord, bool isLatitude) {
-    char dir = (coord >= 0) ? (isLatitude ? 'N' : 'E') : (isLatitude ? 'S' : 'W');
-    coord = abs(coord);
-    
-    int degrees = (int)coord;
-    double minutes = (coord - degrees) * 60.0;
-    
-    char buffer[16];
-    if (isLatitude) {
-      snprintf(buffer, sizeof(buffer), "%02d%07.4f", degrees, minutes);
-    } else {
-      snprintf(buffer, sizeof(buffer), "%03d%07.4f", degrees, minutes);
-    }
-    
-    return String(buffer);
-  }
-  
-  // Calculate NMEA checksum (XOR of all characters between $ and *)
-  uint8_t calculateNMEAChecksum(String sentence) {
-    uint8_t checksum = 0;
-    int start = sentence.indexOf('$');
-    int end = sentence.indexOf('*');
-    
-    if (start < 0 || end < 0) return 0;
-    
-    for (int i = start + 1; i < end; i++) {
-      checksum ^= sentence.charAt(i);
-    }
-    
-    return checksum;
   }
   
   // Parse RMC sentence: $GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A
@@ -179,8 +145,7 @@ public:
     Serial.println("\nConfiguring GPS...");
     Serial1.println("$PCAS03,0,0,0,0,1,0,0,0*03"); // RMC only
     delay(100);
-    // Switch to GPS + GLONASS (Recommended for USA)
-    Serial1.println("$PCAS04,5*1C");
+    Serial1.println("$PCAS04,1*18"); // GPS only
     delay(100);
     Serial1.println("$PCAS01,5*19"); // 115200 baud
     delay(100);
@@ -207,13 +172,7 @@ public:
     data.hdop = 0.0;
     TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
     
-    // Try to restore last known location from NVS (persistent across deep sleep)
-    if (restoreLastKnownLocation()) {
-      Serial.println("Last known GPS location restored from NVS");
-    } else {
-      // No saved location, initialize to defaults
-      lastKnownData = data;
-    }
+    lastKnownData = data;
     
     return true;
   }
@@ -250,109 +209,6 @@ public:
   
   GPSData getGPSData() {
     return data;
-  }
-  
-  // Save location to GPS module flash memory using PCAS command
-  // This pushes the last known location to the GPS module's internal flash
-  bool saveLocationToGPSModule() {
-    if (!lastKnownData.hasValidFix || !configured) {
-      return false;
-    }
-    
-    // Convert coordinates to NMEA format (DDMM.MMMM)
-    String latNMEA = formatCoordinateToNMEA(lastKnownData.latitude, true);
-    String lonNMEA = formatCoordinateToNMEA(lastKnownData.longitude, false);
-    
-    // Determine direction
-    char latDir = (lastKnownData.latitude >= 0) ? 'N' : 'S';
-    char lonDir = (lastKnownData.longitude >= 0) ? 'E' : 'W';
-    
-    // AT6558 PCAS command to set initial position for faster acquisition
-    // Format: $PCAS11,lat,lat_dir,lon,lon_dir*checksum
-    // This helps with faster Time To First Fix (TTFF) and stores position in module flash
-    String command = "$PCAS11,";
-    command += latNMEA;
-    command += ",";
-    command += latDir;
-    command += ",";
-    command += lonNMEA;
-    command += ",";
-    command += lonDir;
-    
-    // Calculate and append checksum
-    uint8_t checksum = calculateNMEAChecksum(command);
-    char checksumStr[3];
-    snprintf(checksumStr, sizeof(checksumStr), "%02X", checksum);
-    command += "*";
-    command += checksumStr;
-    
-    // Send command to GPS module
-    Serial1.println(command);
-    delay(100);
-    
-    // Save configuration to flash
-    Serial1.println("$PCAS00*01"); // Save config to flash
-    delay(200);
-    
-    Serial.print("Location saved to GPS module flash: ");
-    Serial.print(lastKnownData.latitude, 7);
-    Serial.print(", ");
-    Serial.println(lastKnownData.longitude, 7);
-    
-    return true;
-  }
-  
-  // Save last known location to NVS (call before deep sleep)
-  bool saveLastKnownLocation() {
-    if (lastKnownData.hasValidFix) {
-      return NVSConfig::saveLastKnownGPS(
-        lastKnownData.latitude,
-        lastKnownData.longitude,
-        lastKnownData.altitude,
-        lastKnownData.speed,
-        lastKnownData.heading,
-        lastKnownData.satellites,
-        lastKnownData.hdop,
-        lastKnownData.hasValidFix
-      );
-    }
-    return false; // No valid location to save
-  }
-  
-  // Restore last known location from NVS (call after wake from deep sleep)
-  bool restoreLastKnownLocation() {
-    double lat, lon, alt;
-    float speed, heading, hdop;
-    int satellites;
-    bool hasFix;
-    
-    if (NVSConfig::getLastKnownGPS(&lat, &lon, &alt, &speed, &heading, &satellites, &hdop, &hasFix)) {
-      lastKnownData.latitude = lat;
-      lastKnownData.longitude = lon;
-      lastKnownData.altitude = alt;
-      lastKnownData.speed = speed;
-      lastKnownData.heading = heading;
-      lastKnownData.satellites = satellites;
-      lastKnownData.hdop = hdop;
-      lastKnownData.hasValidFix = hasFix;
-      TimeSync::getCurrentTimeString(lastKnownData.timestamp, sizeof(lastKnownData.timestamp));
-      
-      // Also update current data if we don't have a fix yet
-      if (!data.hasValidFix) {
-        data.latitude = lat;
-        data.longitude = lon;
-        data.altitude = alt;
-        data.speed = speed;
-        data.heading = heading;
-        data.satellites = satellites;
-        data.hdop = hdop;
-        data.hasValidFix = false; // Mark as stale
-        TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
-      }
-      
-      return true;
-    }
-    return false; // No saved location found
   }
   
 };

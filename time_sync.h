@@ -6,12 +6,6 @@
 
 class TimeSync {
 public:
-  // Check if system time has been synced (time > Jan 1, 1970)
-  static bool isTimeSynced() {
-    time_t now = time(nullptr);
-    return (now > 24 * 3600); // More than 24 hours after epoch (Jan 1, 1970)
-  }
-  
   // Synchronize system time with NTP server (simplified)
   static bool syncTimeNTP() {
     configTime(0, 0, "pool.ntp.org");

@@ -1,14 +1,14 @@
-# ESP32-C3 (XIAO ESP32C3) Asset Tracking System - Complete Overview (v2)
+# ESP32C6 Asset Tracking System - Complete Overview (v2)
 
 ## Executive Summary
 
-The ESP32-C3 (XIAO ESP32C3) Asset Tracking System (v2) is an autonomous IoT device designed to continuously monitor and transmit location, orientation, and motion data from mobile assets. The system combines a high-precision 6-axis inertial measurement unit (IMU) for motion tracking with a professional-grade GPS receiver for global positioning, all powered by a rechargeable 2200mAh Li-Po battery. The device operates on a power-efficient 15-minute duty cycle, automatically waking from deep sleep, collecting comprehensive motion and location data, attempting transmission via BLE (with 60-second advertising on first cycle, 4-second on normal cycles) or WiFi, and then returning to deep sleep to maximize battery life. With intelligent retry logic and data queuing stored on external flash, the system ensures reliable data transmission even during network outages, while visual LED indicators provide real-time status and battery level feedback. The system also includes Bluetooth Low Energy (BLE) functionality for wireless WiFi credential configuration, allowing easy setup without physical access to the device.
+The ESP32C6 Asset Tracking System (v2) is an autonomous IoT device designed to continuously monitor and transmit location, orientation, and motion data from mobile assets. The system combines a high-precision 6-axis inertial measurement unit (IMU) for motion tracking with a professional-grade GPS receiver for global positioning, all powered by a rechargeable 2200mAh Li-Po battery. The device operates on a power-efficient 30-second duty cycle, automatically waking up sensors, collecting comprehensive motion and location data, transmitting via WiFi, and then powering down to conserve energy. With intelligent retry logic and data queuing stored on external flash, the system ensures reliable data transmission even during network outages, while visual LED indicators provide real-time status and battery level feedback. The system also includes Bluetooth Low Energy (BLE) functionality for wireless WiFi credential configuration, allowing easy setup without physical access to the device.
 
-The system transmits data as CSV (Comma-Separated Values) format over HTTP (WiFi) or BLE to a remote server, with each transmission including unique device identification (hardcoded device ID), time-synchronized timestamps, battery level, and comprehensive sensor data. The device implements sophisticated power management strategies, including sensor sleep modes, WiFi power cycling, continuous battery monitoring, and BLE advertising for credential setup (only on power-on or reset button press, auto-stops after 1 minute if disconnected), resulting in approximately 1.2 days (28.6 hours) of continuous operation per charge cycle. Visual feedback is provided through four LED indicators: a status LED (GPIO 48) showing sensor initialization state, a battery level LED (GPIO 38) with color-coded charge indication, a WiFi TX pulse LED (GPIO 40) that activates during WiFi transmissions, and a BLE LED (GPIO 41) that indicates BLE activity.
+The system transmits data as structured JSON payloads over HTTP (WiFi) or BLE to a remote server, with each transmission including unique device identification (hardcoded device ID), time-synchronized timestamps, battery level, and comprehensive sensor data. The device implements sophisticated power management strategies, including sensor sleep modes, WiFi power cycling, continuous battery monitoring, and BLE advertising for credential setup (only on power-on or reset button press, auto-stops after 1 minute if disconnected), resulting in approximately 1.2 days (28.6 hours) of continuous operation per charge cycle. Visual feedback is provided through four LED indicators: a status LED (GPIO 48) showing sensor initialization state, a battery level LED (GPIO 38) with color-coded charge indication, a WiFi TX pulse LED (GPIO 40) that activates during WiFi transmissions, and a BLE LED (GPIO 41) that indicates BLE activity.
 
 ### System Operation Overview
 
-The device operates through a well-defined sequence of initialization and continuous monitoring cycles. Upon power-on, the system performs a comprehensive self-check, initializes all sensors and communication systems, and enters a single-cycle execution mode. The 15-minute operational cycle is carefully orchestrated to maximize battery life, with the device spending 99.9% of its time in deep sleep. Each cycle wakes from deep sleep, collects sensor data, attempts transmission via BLE (prioritized) or WiFi, and returns to deep sleep. During each cycle, the system collects multiple samples from both orientation and GPS sensors over a 1-second period, ensuring accurate and stable readings before powering down. The transmission system includes intelligent retry logic that automatically queues failed transmissions and batches them for retry, with alerts when persistent network failures require alternative communication methods.
+The device operates through a well-defined sequence of initialization and continuous monitoring cycles. Upon power-on, the system performs a comprehensive self-check, initializes all sensors and communication systems, establishes network connectivity, synchronizes time with internet time servers, and enters a continuous autonomous operation mode. The 30-second operational cycle is carefully orchestrated to balance data freshness with power efficiency, with sensors active for only 6-7 seconds per cycle. During each cycle, the system collects multiple samples from both orientation and GPS sensors over a 1-second period, ensuring accurate and stable readings before powering down. The transmission system includes intelligent retry logic that automatically queues failed transmissions and batches them for retry, with alerts when persistent network failures require alternative communication methods.
 
 ### Key Operational Steps
 
@@ -26,74 +26,56 @@ The device operates through a well-defined sequence of initialization and contin
 - Status indicator confirms successful sensor initialization (green = ready, red = error)
 - System enters autonomous operation mode (BLE stops after 1 minute if disconnected, then enters deep sleep)
 
-**Continuous Monitoring Cycle (Repeats every 15 minutes):**
-- System automatically wakes from deep sleep (15-minute timer)
-- Collects sensor data (IMU and GPS updated 50 times over 1 second)
+**Continuous Monitoring Cycle (Repeats every 30 seconds):**
+- System automatically wakes from low-power idle state
+- Orientation and GPS sensors powered on and allowed to stabilize
+- WiFi connection re-established for data transmission
 - Comprehensive sensor data collection performed:
   - Motion data: acceleration (x, y, z), rotation rate (gyroscope x, y, z), temperature
   - Location data: GPS coordinates (latitude/longitude), altitude, speed, heading, satellite count, fix quality
-  - Last known GPS location restored from NVS if GPS fix unavailable
 - Battery level measured and included in data packet
-- Current timestamp (time sync verified/attempted if WiFi available)
+- Current timestamp synchronized with network time
 - Unique device identifier included for tracking
 - Data packet prepared for transmission
 
-**Data Transmission and Retry Logic (Priority-Based):**
-- **Step 1: Try BLE Transmission**
-  - BLE starts fresh each cycle (turned on)
-  - First cycle: Advertises for 60 seconds, waits for connection
-  - Normal cycles: Advertises for 4 seconds, waits for connection
-  - If connected within timeout: Send data via BLE → Stop BLE → Skip WiFi → Deep sleep
-  - If timeout reached: Stop BLE → Proceed to WiFi
-- **Step 2: Try WiFi Transmission (if BLE failed)**
-  - Check if WiFi credentials exist in NVS
-  - If credentials exist: Turn on WiFi → Connect → Send data → Disconnect WiFi
-  - If no credentials or connection fails: Proceed to queue
-- **Step 3: Queue Data (if both BLE and WiFi failed)**
-  - Current sensor data added to queue (stored in external SPI flash)
-  - Queue persists across power cycles
-  - Maximum queue capacity calculated dynamically based on available flash space (typically 3-10 items)
-  - Queue automatically cleared when successful transmission occurs
-- **After Transmission:**
-  - Last known GPS location saved to NVS (if valid fix exists)
-  - Queue state saved to flash
-  - BLE and WiFi turned off
-  - Deep sleep for 15 minutes
+**Data Transmission and Retry Logic:**
+- Current sensor data is always added to queue first
+- System attempts to transmit all queued data as JSON array (single item or multiple items) via WiFi or BLE
+- Transmission handler tries BLE first if connected, then WiFi if BLE not available
+- If transmission succeeds: queue cleared, cycle continues normally
+- If transmission fails: data remains in queue for next cycle retry
+- Queue persists to external SPI flash (W25Q128), survives power cycles
+- Maximum queue capacity calculated dynamically based on available flash space (typically 3-10 items)
+- Queue automatically clears when successful transmission occurs
 
-**Power Conservation Phase (Deep Sleep Preparation):**
-- Last known GPS location saved to NVS (if valid fix exists)
-- Queue state saved to external flash
-- BLE completely stopped and deinitialized (zero power consumption)
-- WiFi radio completely turned off (zero power consumption)
-- LEDs dimmed based on debug mode (0% brightness if debug mode off, 10% if debug mode on)
-- System enters deep sleep for exactly 15 minutes (900 seconds)
-- Device spends 99.9% of time in deep sleep (~10-20 µA power consumption)
-- Wake occurs automatically after 15 minutes via timer
+**Power Conservation Phase:**
+- Sensors immediately powered down after data collection
+- WiFi radio completely disabled to conserve energy
+- If BLE was stopped (disconnected for >1 minute): System enters deep sleep (30 seconds if WiFi connected and transmission successful, 5 minutes if WiFi failed)
+- If BLE still active: System enters low-power idle state
+- Battery monitoring continues at reduced frequency (every 5 seconds)
+- Visual indicators remain active for status feedback
+- System remains in idle for approximately 23 seconds until next cycle (or deep sleep if BLE stopped)
 
-**Cycle Execution Pattern:**
-- Single-cycle execution: Loop runs once per wake, then deep sleep
-- No continuous background monitoring during cycle (maximizes battery life)
-- Battery level measured once per cycle and included in data packet
-- Status LED shows sensor initialization state (green = operational, red = error)
-- Battery LED shows charge level (updated once per cycle)
-- All monitoring occurs during active cycle phase (~5-10 seconds)
+**Continuous Background Monitoring:**
+- Battery level indicator updates every 5 seconds with color-coded status
+  - Green: Excellent charge (75-100%)
+  - Yellow: Low charge (25-75%)
+  - Red: Critical charge (0-24%)
+- Critical battery warning activates when charge drops below 10% (visual alert)
+- Transmission indicator briefly flashes during each WiFi data transmission
+- Status indicator continuously displays sensor health (green = operational, red = error)
+- System continuously monitors for next cycle trigger
 
-**Power Management Features (Optimized for Battery Life):**
-- **Deep Sleep Dominance:** Device spends 99.9% of time in deep sleep (~10-20 µA)
-- **Fixed 15-Minute Cycle:** Consistent deep sleep duration regardless of transmission success
-- **BLE Power Management:**
-  - Starts fresh each cycle (turned on)
-  - First cycle: 60-second advertising window
-  - Normal cycles: 4-second advertising window (minimal power usage)
-  - Completely deinitialized between cycles (zero power consumption)
-- **WiFi Power Management:**
-  - Turned on only when needed (after BLE fails)
-  - Completely powered off between cycles (zero power consumption)
-  - Only connects if credentials exist
-- **Sensor Power:** Sensors remain initialized but only active during data collection (~1 second per cycle)
-- **LED Power:** Dimmed to 0% (debug mode off) or 10% (debug mode on) during deep sleep
-- **Average Power Consumption:** ~0.1-0.2 mA (estimated, dominated by deep sleep)
-- **Estimated Runtime:** Significantly extended due to deep sleep optimization (weeks to months depending on usage)
+**Power Management Features:**
+- Sensors automatically enter sleep mode during idle periods (reduces power by ~33mA)
+- WiFi radio completely powered off between cycles (reduces power by ~115mA)
+- BLE only active on power-on or reset button press, auto-stops after 1 minute if disconnected (saves ~5mA)
+- After BLE stops, system enters deep sleep mode (reduces power to ~0.01mA during sleep)
+- Battery monitoring operates at minimal frequency (every 5 seconds) to reduce overhead
+- Visual indicators optimized for power efficiency (battery LED at 78% brightness, status LED at 100%)
+- Average power consumption: ~77.6mA (including BLE when active and battery monitoring LED)
+- Estimated runtime: ~24 hours (realistic) per full charge cycle with 2200mAh battery
 
 ## Table of Contents
 1. [System Architecture](#system-architecture)
@@ -113,7 +95,7 @@ The device operates through a well-defined sequence of initialization and contin
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              ESP32-C3 (XIAO ESP32C3) Microcontroller      │
+│                    ESP32C6 Microcontroller                 │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
@@ -123,14 +105,14 @@ The device operates through a well-defined sequence of initialization and contin
 │  └──────────────┘  └──────────────┘  └──────────────┘     │
 │        ↓                ↓                    ↓               │
 │  ┌────────────────────────────────────────────────────┐    │
-│  │     Sensor Data Collection & CSV Creation          │    │
+│  │     Sensor Data Collection & JSON Creation        │    │
 │  │  (Every 30 seconds, ~6-7 seconds active time)     │    │
 │  └────────────────────────────────────────────────────┘    │
 │        ↓                                                    │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │     Transmission Handler with Retry Logic         │    │
 │  │  • Queue management (dynamic max size, flash backed) │    │
-│  │  • Sends as CSV format                            │    │
+│  │  • Always sends as JSON array (1+ items)          │    │
 │  │  • Tries BLE first, then WiFi                     │    │
 │  │  • Queue persists to external SPI flash (W25Q128) │    │
 │  └────────────────────────────────────────────────────┘    │
@@ -170,9 +152,9 @@ The device operates through a well-defined sequence of initialization and contin
 ## Hardware Components
 
 ### Core Processor
-- **ESP32-C3 (XIAO ESP32C3)**
+- **ESP32C6**
   - Single-core RISC-V 160 MHz processor
-  - 400KB SRAM, 4MB Flash (on-chip)
+  - 512KB SRAM, 4MB Flash (on-chip)
   - Built-in WiFi (802.11 b/g/n)
   - Built-in Bluetooth 5.0 (BLE)
   - ADC, GPIO, UART, I2C, SPI
@@ -198,9 +180,8 @@ The device operates through a well-defined sequence of initialization and contin
 - **W25Q128 SPI Flash**
   - Capacity: 16MB (128 Mbit)
   - Interface: SPI (GPIO 10 CS, GPIO 12 MISO, GPIO 13 MOSI, GPIO 14 SCK)
-  - Purpose: WiFi credentials storage, data queue persistence, and GPS location persistence
+  - Purpose: WiFi credentials storage and data queue persistence
   - Queue persistence: Survives power cycles, loaded on boot
-  - GPS location persistence: Last known GPS location saved to NVS (accessed via external flash), restored after wake
 
 ### Power & Battery
 - **3.7V 2200mAh Li-Po Battery**
@@ -249,140 +230,130 @@ The device operates through a well-defined sequence of initialization and contin
 
 ## Operating Cycle
 
-### 15-Minute Main Cycle (Deep Sleep Based)
+### 30-Second Main Cycle
 
 ```
-WAKE: 0s (from 15-minute deep sleep)
-├─ Restore last known GPS location from NVS (if available)
-├─ Collect sensor data (50 updates × 20ms = 1 second)
+TIME: 0s
+├─ Wake from idle
+├─ Power on IMU and GPS
+├─ Wait 2 seconds (sensor stabilization)
+├─
+TIME: 2s
+├─ Reconnect WiFi
+├─ Wait 1 second (WiFi stabilization)
+├─
+TIME: 3s
+├─ Collect sensor data (20 updates × 50ms)
 │  ├─ Read IMU: acceleration, gyroscope, temperature
 │  └─ Read GPS: position, speed, satellites, etc.
-│     └─ If no fix: Use last known location from NVS
 ├─
-TIME: ~1s
-├─ Create CSV payload with:
+TIME: 4s
+├─ Create JSON payload with:
 │  ├─ device_id (hardcoded)
 │  ├─ battery_level (percentage from BatteryMonitor)
-│  ├─ timestamp (NTP synced if available)
+│  ├─ timestamp (NTP synced Unix epoch)
 │  ├─ imu data (accelerometer, gyroscope, temperature)
 │  └─ gps data (fix, coordinates, altitude, speed, heading, satellites)
 ├─
-TIME: ~1.1s
-├─ STEP 1: Try BLE Transmission
-│  ├─ Start BLE (begin + startAdvertising)
-│  ├─ Determine timeout:
-│  │  ├─ First cycle: 60 seconds
-│  │  └─ Normal cycles: 4 seconds
-│  ├─ Wait for connection (with timeout)
-│  ├─ If connected: Send data → Stop BLE → Skip WiFi → Deep sleep
-│  └─ If timeout: Stop BLE → Proceed to WiFi
+TIME: 4.1s
+├─ Add current data to queue
+├─ Create JSON array from all queued items (always array format)
+├─ Attempt transmission via BLE (if connected) or WiFi (if connected)
+│  ├─ If success: Clear queue, continue
+│  └─ If failure: Data remains in queue for next cycle
 ├─
-TIME: ~2-65s (depends on BLE timeout)
-├─ STEP 2: Try WiFi Transmission (if BLE failed)
-│  ├─ Check if WiFi credentials exist
-│  ├─ If credentials exist:
-│  │  ├─ Turn on WiFi → Connect
-│  │  ├─ Verify/attempt time sync (if not already synced)
-│  │  ├─ Send data via WiFi
-│  │  └─ Disconnect WiFi
-│  └─ If no credentials or connection fails: Proceed to queue
+TIME: 6-7s (WiFi dependent)
+├─ Power off IMU
+├─ Power off GPS
+├─ Disconnect and power off WiFi
 ├─
-TIME: ~3-66s
-├─ STEP 3: Queue Data (if both BLE and WiFi failed)
-│  └─ Add current data to queue (stored in external flash)
-├─
-TIME: ~3-66s
-├─ STEP 4: Prepare for Deep Sleep
-│  ├─ Save last known GPS location to NVS (if valid fix)
-│  ├─ Save queue state to flash
-│  ├─ Ensure BLE is stopped
-│  ├─ Ensure WiFi is off
-│  ├─ Dim LEDs (based on debug mode)
-│  └─ Set deep sleep timer: 15 minutes (900 seconds)
-├─
-TIME: ~4-67s
-└─ Enter deep sleep → Sleep for 15 minutes → Wake and repeat
+TIME: 7s onwards
+├─ If BLE stopped (>1 min disconnected): Enter deep sleep
+│  ├─ 30 seconds if WiFi connected and transmission successful
+│  └─ 5 minutes if WiFi failed or not connected
+├─ If BLE still active: Idle until next 30-second mark
+├─ LED updates (every 5 seconds)
+└─ Loop continues
 ```
 
 ### Energy Timeline per Cycle
 
 | Phase | Duration | Power Draw | Energy |
 |-------|----------|-----------|--------|
-| Data collection | 1 sec | 140 mA | 0.039 mWh |
-| BLE advertising (first cycle) | 60 sec | 5 mA | 0.083 mWh |
-| BLE advertising (normal cycle) | 4 sec | 5 mA | 0.006 mWh |
-| WiFi connect (if needed) | 1-2 sec | 130 mA | 0.036 mWh |
-| WiFi transmission (if needed) | 1-2 sec | 140 mA | 0.039 mWh |
-| Deep sleep | 15 min | 0.01-0.02 mA | 0.002-0.004 mWh |
-| **Total per 15min (first cycle)** | **~62 sec active** | **~0.15 mA avg** | **~0.16 mWh** |
-| **Total per 15min (normal cycle)** | **~6 sec active** | **~0.02 mA avg** | **~0.08 mWh** |
+| Sensor warmup | 2 sec | 110 mA | 0.061 mWh |
+| WiFi connect | 1-2 sec | 130 mA | 0.072 mWh |
+| Data collection | 1 sec | 140 mA | 0.051 mWh |
+| WiFi transmission | 1-2 sec | 140 mA | 0.077 mWh |
+| Idle/sleep | 23-24 sec | 15 mA | 0.097 mWh |
+| **Total per 30s** | **30 sec** | **~54 mA avg** | **0.358 mWh** |
 
 ---
 
 ## Data Flow
 
-### CSV Payload Structure
+### JSON Payload Structure
 
-**Transmission Format (CSV - Comma-Separated Values):**
+**Transmission Format (Always JSON Array):**
 
-Single data record:
-```csv
-ASSET_TAG_007,85,2024:11:15 10:30:00,0.123,-0.234,9.810,0.012,-0.034,0.001,25.50,true,3	2024:11:15 10:30:00,12,37.7749000,-122.4194000,45.30,0.50,123.45,1.20
+Single item (queue had only current data):
+```json
+[
+  {
+    "device_id": "ASSET_TAG_001",
+    "battery_level": 85,
+    "timestamp": "2024-11-15T10:30:00Z",
+    "imu": {
+      "accelerometer": { "x": 0.123, "y": -0.234, "z": 9.81 },
+      "gyroscope": { "x": 0.012, "y": -0.034, "z": 0.001 },
+      "temperature": 25.5
+    },
+    "gps": {
+      "fix": true,
+      "fixType": 3,
+      "satellites": 12,
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "altitude": 45.3,
+      "speed": 0.5,
+      "heading": 123.45,
+      "hdop": 1.2
+    }
+  }
+]
 ```
 
-**CSV Column Format:**
-```
-device_id,battery_level,timestamp,
-imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
-imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,
-imu.temperature,
-gps.fix,gps.fixType,gps.satellites,
-gps.latitude,gps.longitude,gps.altitude,
-gps.speed,gps.heading,gps.hdop
+Multiple items (queue had previous failed data):
+```json
+[
+  { "device_id": "ASSET_TAG_001", "battery_level": 85, "timestamp": "2024-11-15T10:29:30Z", "imu": {...}, "gps": {...} },
+  { "device_id": "ASSET_TAG_001", "battery_level": 84, "timestamp": "2024-11-15T10:30:00Z", "imu": {...}, "gps": {...} }
+]
 ```
 
-**Field Details:**
-- `device_id`: Hardcoded device identifier (e.g., "ASSET_TAG_007")
-- `battery_level`: Battery percentage (0-100)
-- `timestamp`: Formatted as "yyyy:mm:dd hh:mm:ss"
-- `imu.accelerometer.x/y/z`: Acceleration in m/s² (3 decimal places)
-- `imu.gyroscope.x/y/z`: Rotation rate in rad/s (3 decimal places)
-- `imu.temperature`: Temperature in °C (2 decimal places)
-- `gps.fix`: "true" or "false" (string)
-- `gps.fixType`: Fix type (0=no fix, 2=2D, 3=3D) + timestamp (tab-separated)
-- `gps.satellites`: Number of satellites (integer)
-- `gps.latitude/longitude`: Coordinates in decimal degrees (7 decimal places)
-- `gps.altitude`: Altitude in meters (2 decimal places)
-- `gps.speed`: Speed in m/s (2 decimal places)
-- `gps.heading`: Heading in degrees (2 decimal places)
-- `gps.hdop`: Horizontal Dilution of Precision (2 decimal places)
-
-**Note:** Device ID is hardcoded in code (change `DEVICE_ID` constant for each device), not MAC address.
+**Note:** Device ID is hardcoded as "ASSET_TAG_001" (change in code for each device), not MAC address.
 
 **Note:** BMI323 IMU provides accelerometer, gyroscope, and temperature data only (no quaternion, euler angles, or magnetometer).
-
-**Note:** Queue system may store data in different format internally, but transmission is always CSV.
 
 ### Data Queue Lifecycle
 
 ```
 Cycle 1 (WiFi/BLE OK):
-  Queue: EMPTY → Add CSV1 → Send CSV1 via WiFi/BLE ✓ → Queue: EMPTY
+  Queue: EMPTY → Add JSON1 → Create [JSON1] → Send via WiFi/BLE ✓ → Queue: EMPTY
 
 Cycle 2 (WiFi/BLE fails):
-  Queue: EMPTY → Add CSV2 → Send ✗ → Queue: [CSV2] (saved to external flash)
+  Queue: EMPTY → Add JSON2 → Create [JSON2] → Send ✗ → Queue: [JSON2] (saved to external flash)
 
 Cycle 3 (WiFi/BLE still down):
-  Queue: [CSV2] → Add CSV3 → Send ✗ → Queue: [CSV2, CSV3] (saved to external flash)
+  Queue: [JSON2] → Add JSON3 → Create [JSON2, JSON3] → Send ✗ → Queue: [JSON2, JSON3] (saved to external flash)
 
 Cycle 4 (WiFi/BLE recovered):
-  Queue: [CSV2, CSV3] → Add CSV4 → Send all queued data via WiFi/BLE ✓ → Queue: EMPTY
+  Queue: [JSON2, JSON3] → Add JSON4 → Create [JSON2, JSON3, JSON4] → Send via WiFi/BLE ✓ → Queue: EMPTY
 
 Cycle 5+ (Queue persists across power cycles):
   Queue loaded from external flash (W25Q128) on boot → Continues from where it left off
 ```
 
-**Note:** Queue data persists to external SPI flash (W25Q128), so failed transmissions survive power cycles and are retried on next boot. Queue may store data in batch format internally, but individual transmissions are CSV format.
+**Note:** Queue data persists to external SPI flash (W25Q128), so failed transmissions survive power cycles and are retried on next boot.
 
 ---
 
@@ -392,7 +363,7 @@ Cycle 5+ (Queue persists across power cycles):
 
 | Component | Active | Sleep | Idle |
 |-----------|--------|-------|------|
-| ESP32-C3 | 100 mA | N/A | 15 mA |
+| ESP32C6 | 100 mA | N/A | 15 mA |
 | IMU (BMI323) | 3.5 mA | 0.005 mA | - |
 | GPS (AT6558) | 30 mA | 0.05 mA | - |
 | WiFi | 115+ mA | 0 mA | 0 mA |
@@ -413,57 +384,31 @@ Cycle 5+ (Queue persists across power cycles):
 
 ## Communication & Retry Logic
 
-### Cycle-Based Transmission Workflow
-
-```
-WAKE FROM DEEP SLEEP (15 minutes elapsed)
-│
-├─ STEP 1: Collect Sensor Data
-│  └─ IMU and GPS data collected (50 updates over 1 second)
-│
-├─ STEP 2: Try BLE Transmission (Priority 1)
-│  ├─ Start BLE advertising
-│  ├─ First cycle: Wait 60 seconds for connection
-│  ├─ Normal cycles: Wait 4 seconds for connection
-│  ├─ If connected: Send data → Stop BLE → Deep sleep
-│  └─ If timeout: Stop BLE → Proceed to WiFi
-│
-├─ STEP 3: Try WiFi Transmission (Priority 2, if BLE failed)
-│  ├─ Check if WiFi credentials exist
-│  ├─ If credentials exist:
-│  │  ├─ Turn on WiFi → Connect
-│  │  ├─ Verify/attempt time sync
-│  │  ├─ Send data via WiFi
-│  │  └─ Disconnect WiFi
-│  └─ If no credentials or connection fails: Proceed to queue
-│
-├─ STEP 4: Queue Data (if both BLE and WiFi failed)
-│  └─ Add current data to queue (stored in external flash)
-│
-└─ STEP 5: Prepare for Deep Sleep
-   ├─ Save last known GPS location to NVS
-   ├─ Save queue state to flash
-   ├─ Turn off BLE and WiFi
-   └─ Deep sleep for 15 minutes
-```
-
-### Transmission Handler (Internal)
-
-The transmission handler manages queued data and transmission attempts:
+### Transmission Handler Workflow
 
 ```
 START: New sensor data arrives
 
-STEP 1: SEND QUEUED DATA FIRST
-├─ Read queued data from external flash
-├─ Attempt transmission via BLE or WiFi
-├─ If success: Remove from queue
-└─ If failure: Keep in queue for next cycle
+STEP 1: ADD TO QUEUE
+├─ Always add current data to queue first
+├─ Queue persists to external flash (W25Q128) after each change
 │
-STEP 2: SEND CURRENT DATA
-├─ Attempt direct transmission (without writing to flash)
-├─ If success: Skip flash write, return success
-└─ If failure: Add to queue (writes to flash)
+STEP 2: CHECK CONNECTIONS
+├─ WiFi connected? → Can try WiFi transmission
+├─ BLE connected? → Can try BLE transmission
+├─ Neither connected? → Save to queue, return (no transmission attempt)
+│
+STEP 3: CREATE JSON ARRAY
+├─ Convert entire queue to JSON array format
+├─ Array contains 1 or more items (always array, never single object)
+│
+STEP 4: ATTEMPT TRANSMISSION
+├─ Try BLE first (if connected)
+│  ├─ Success? → Clear queue, return true
+│  └─ Failure? → Continue to WiFi
+├─ Try WiFi (if connected and BLE failed)
+│  ├─ Success? → Clear queue, return true
+│  └─ Failure? → Keep data in queue, return false
 │
 END: Queue persists to external flash, will retry next cycle
 ```
@@ -494,25 +439,19 @@ END: Queue persists to external flash, will retry next cycle
 
 ### BLE Behavior
 
-- **Starts:** Every cycle (turned on fresh each wake from deep sleep)
-- **First Cycle:** Advertises for 60 seconds (allows time for initial setup)
-- **Normal Cycles:** Advertises for 4 seconds (minimal power usage)
-- **Connection Handling:** If connected within timeout, sends data and stops immediately
-- **Timeout Handling:** If no connection within timeout, stops and proceeds to WiFi
-- **Power Management:** Completely deinitialized between cycles (zero power consumption)
-- **Purpose:** WiFi credential setup and data transmission (prioritized over WiFi)
+- **Starts:** Only on POWER_ON reset or reset button press (ESP_RST_EXT)
+- **Stops:** Automatically after 1 minute if disconnected (saves power)
+- **After Stop:** Device enters deep sleep (30 seconds if WiFi OK, 5 minutes if WiFi failed)
+- **Purpose:** WiFi credential setup and data transmission fallback
 - **LED Indicator:** GPIO 41 blinks during BLE activity
 
 ### Time Synchronization
 
 - **Protocol:** NTP (Network Time Protocol)
-- **Servers:** pool.ntp.org
-- **Timing:** Attempted when WiFi is connected (not limited to first cycle)
-- **Verification:** System checks if time is already synced before attempting
-- **Retry Logic:** If sync fails, will retry in next cycle when WiFi is available
+- **Servers:** pool.ntp.org, time.nist.gov
+- **Timing:** Once at startup, synced via WiFi
 - **Timestamp:** Unix epoch (seconds since 1970-01-01)
-- **Status Check:** `TimeSync::isTimeSynced()` verifies if time > Jan 1, 1970
-- **Update Frequency:** Device time drifts during deep sleep, NTP provides accurate sync when WiFi available
+- **Update Frequency:** Device time drifts, NTP provides accurate sync
 
 ---
 
@@ -592,23 +531,20 @@ juxta-asset-tag-main.ino
 │  ├─ WiFi connect
 │  └─ Time sync
 │
-├── loop()                    # Single-cycle execution (runs once per wake)
-│  ├─ Collect sensor data (50 updates × 20ms)
-│  ├─ Try BLE transmission
-│  │  ├─ Start BLE (begin + advertising)
-│  │  ├─ Wait for connection (60s first cycle, 4s normal)
-│  │  ├─ If connected: Send data → Stop BLE → Deep sleep
-│  │  └─ If timeout: Stop BLE → Try WiFi
-│  ├─ Try WiFi transmission (if BLE failed)
-│  │  ├─ Check credentials exist
-│  │  ├─ Connect WiFi → Verify/attempt time sync
-│  │  ├─ Send data → Disconnect WiFi
-│  │  └─ If failed: Queue data
-│  ├─ Queue data (if transmission failed)
-│  ├─ Save last known GPS location to NVS
-│  ├─ Save queue state
-│  ├─ Turn off BLE and WiFi
-│  └─ Deep sleep for 15 minutes
+├── loop()                    # Main 30-second cycle
+│  ├─ BLE update (if enabled, handles connections)
+│  ├─ BLE auto-stop check (after 1 minute if disconnected)
+│  ├─ Battery update (every 5s)
+│  ├─ Interval check (every 30s)
+│  │  ├─ Power on sensors
+│  │  ├─ Connect WiFi (if not connected)
+│  │  ├─ Collect data (50 updates × 20ms)
+│  │  ├─ Power down sensors
+│  │  ├─ Create JSON
+│  │  ├─ Send with retry logic (always array format)
+│  │  ├─ Deep sleep check (if BLE stopped)
+│  │  └─ Disconnect WiFi
+│  └─ Delay 100ms
 │
 ├── createSensorCSV()         # Format sensor data as CSV
 ├── sendDataWithRetryLogic()  # Use transmission handler
@@ -625,7 +561,7 @@ docs/
 │  ├── BATTERY_MONITORING.md
 │  ├── TRANSMISSION_SYSTEM_DOCS.md
 │  └── SYSTEM_OVERVIEW.md
-└── v2/                       # Version 2 documentation (ESP32-C3, BMI323, AT6558, W25Q128)
+└── v2/                       # Version 2 documentation (ESP32C6, BMI323, AT6558, W25Q128)
    ├── BATTERY_ANALYSIS.md
    ├── BATTERY_MONITORING.md
    ├── TRANSMISSION_SYSTEM_DOCS.md
@@ -685,19 +621,14 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 13. IMU sensor begin() → sets imuInitialized flag
     ↓
 14. GPS sensor begin() → sets gpsInitialized flag
-    ├─ Restores last known GPS location from NVS (if available)
     ↓
 15. Update Status LED → Green if both initialized, else Red
     ↓
-16. Determine cycle type (first cycle if POWER_ON/reset button, else normal cycle)
+16. WiFi connect (read credentials from external flash)
     ↓
-17. Enter main loop (single-cycle execution)
-    ├─ Collect sensor data
-    ├─ Try BLE transmission (60s first cycle, 4s normal)
-    ├─ Try WiFi transmission (if BLE failed)
-    ├─ Queue data (if both failed)
-    ├─ Save last known GPS location to NVS
-    └─ Deep sleep for 15 minutes → Wake and repeat
+17. NTP time sync (sets system clock)
+    ↓
+18. Enter main loop (30-second cycles begin, BLE stops after 1 min if disconnected)
 ```
 
 ---
@@ -708,11 +639,11 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 
 1. **WiFi Network**
    - SSID and password (stored in external flash on first boot)
-   - 2.4GHz frequency (ESP32-C3 supports 2.4GHz)
+   - 2.4GHz frequency (ESP32C6 supports 2.4GHz)
 
 2. **Remote Server**
    - URL configured in `customwifi.h` → `SERVER_URL`
-   - Accepts HTTP POST with CSV payload (Content-Type: text/csv)
+   - Accepts HTTP POST with JSON payload
    - Returns 200 OK for success
 
 3. **Battery**
@@ -727,7 +658,7 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 
 ```
 1. Edit customwifi.h → Update SERVER_URL
-2. Upload sketch to ESP32-C3 (XIAO ESP32C3)
+2. Upload sketch to ESP32C6
 3. Uncomment credential setup lines
 4. Upload again with WiFi SSID/password
 5. Comment out credential setup
@@ -824,7 +755,7 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 | Operation | Time | Notes |
 |-----------|------|-------|
 | Sensor data collection | 1 second | 20 × 50ms updates |
-| CSV creation | ~10-50ms | Depends on data volume |
+| JSON creation | ~50-100ms | Depends on data volume |
 | WiFi connect | 1-2 seconds | Depends on signal |
 | HTTP POST | 1-3 seconds | Depends on server response |
 | Battery read & calculate | <1ms | ADC only |
@@ -836,9 +767,9 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 |-----------|-----|-------|
 | IMU data | ~50 bytes | Single reading structure (BMI323 - no quaternion/euler) |
 | GPS data | ~100 bytes | Single reading structure |
-| CSV string | ~300-350 bytes | Formatted payload (compact CSV format) |
+| JSON string | 300-500 bytes | Formatted payload (smaller than v1 due to no quaternion/euler) |
 | Queue (max 10 items) | ~5KB | JSON strings |
-| **Total** | **~6KB active** | Out of 400KB ESP32-C3 RAM |
+| **Total** | **~6KB active** | Out of 512KB ESP32C6 RAM |
 
 ---
 
@@ -847,22 +778,22 @@ The system includes BLE (Bluetooth Low Energy) functionality for WiFi credential
 ### HTTP POST Format
 
 ```
-POST /push/juxtatetsing HTTP/1.1
-Host: echo-http-requests.appspot.com
-Content-Type: text/csv
-Content-Length: 350
+POST /api/sensor-data HTTP/1.1
+Host: your-server.com
+Content-Type: application/json
+Content-Length: 450
 
-ASSET_TAG_007,85,2024:11:15 10:30:00,0.123,-0.234,9.810,0.012,-0.034,0.001,25.50,true,3	2024:11:15 10:30:00,12,37.7749000,-122.4194000,45.30,0.50,123.45,1.20
+{...JSON payload...}
 ```
 
 ### Expected Response
 
 ```
 HTTP/1.1 200 OK
-Content-Type: text/html
-Content-Length: <varies>
+Content-Type: application/json
+Content-Length: 20
 
-<server response>
+{"status":"received"}
 ```
 
 ### Timeout Behavior
@@ -886,7 +817,7 @@ Content-Length: <varies>
 ### Data Privacy
 
 - **Device ID:** Included in payload (can identify device)
-- **Location:** GPS data exposed in CSV
+- **Location:** GPS data exposed in JSON
 - **Timestamps:** UTC epoch visible to anyone with server access
 
 **Recommendations:**
@@ -896,44 +827,13 @@ Content-Length: <varies>
 
 ---
 
-## GPS Location Persistence
-
-### Last Known Location Storage
-
-The system implements persistent storage for the last known GPS location to ensure location data is available even when GPS fix is temporarily unavailable (e.g., indoors, during deep sleep).
-
-**Storage Mechanism:**
-- **Location:** NVS (Non-Volatile Storage) via `nvs_config.h`
-- **Data Saved:** Latitude, longitude, altitude, speed, heading, satellites, HDOP, fix status
-- **When Saved:** Before each deep sleep cycle (if valid GPS fix exists)
-- **When Restored:** After wake from deep sleep, during GPS sensor initialization
-
-**Implementation:**
-- `GPSSensor::saveLastKnownLocation()` - Saves current lastKnownData to NVS
-- `GPSSensor::restoreLastKnownLocation()` - Restores lastKnownData from NVS after wake
-- Automatically called in `GPS sensor begin()` to restore location
-- Automatically called before deep sleep in main loop
-
-**Benefits:**
-- Provides fallback location when GPS fix is unavailable
-- Survives deep sleep and power cycles
-- Automatic operation (no manual intervention)
-- Efficient storage (only saves when valid fix exists)
-
-**Usage:**
-- If GPS has no fix, system uses last known location from NVS
-- Location marked as stale (hasValidFix = false) but coordinates preserved
-- Timestamp updated to current time to indicate staleness
-
----
-
 ## Version Differences (v1 vs v2)
 
 ### Hardware Changes
 
 | Component | v1 | v2 |
 |-----------|----|----|
-| **Microcontroller** | ESP32-S3 (Dual-core 240MHz) | ESP32-C3 (Single-core RISC-V 160MHz) |
+| **Microcontroller** | ESP32-S3 (Dual-core 240MHz) | ESP32C6 (Single-core RISC-V 160MHz) |
 | **IMU** | BNO085 (9-axis with quaternion/euler) | BMI323 (6-axis accelerometer + gyroscope) |
 | **GPS** | NEO-M9N (UBX protocol, 38400 baud) | AT6558 (NMEA protocol, 9600 baud) |
 | **Storage** | Internal NVS flash | External W25Q128 SPI flash (16MB) |
@@ -945,7 +845,7 @@ The system implements persistent storage for the last known GPS location to ensu
 - **IMU Data:** v2 provides accelerometer, gyroscope, and temperature only (no quaternion, euler angles, or magnetometer)
 - **GPS Protocol:** v2 uses NMEA instead of UBX
 - **Storage:** v2 uses external SPI flash for credentials and queue persistence instead of internal NVS
-- **Data Format:** v2 uses CSV format (more compact than JSON) with reduced IMU data fields
+- **JSON Payload:** v2 payload is smaller due to reduced IMU data fields
 
 ---
 
