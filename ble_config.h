@@ -356,12 +356,24 @@ public:
     // Stop LED blinking and restore to green
     stopStatusLEDBlink();
     
-    // Stop advertising first
-    if (pServer != nullptr) {
-      pServer->getAdvertising()->stop();
+    // Disconnect any connected clients first (prevents heap corruption)
+    if (pServer != nullptr && deviceConnected) {
+      Serial.println("Disconnecting BLE client...");
+      pServer->disconnect(pServer->getConnId());
+      delay(500); // Wait for graceful disconnect
     }
     
+    // Stop advertising
+    if (pServer != nullptr) {
+      pServer->getAdvertising()->stop();
+      delay(100); // Let advertising stop complete
+    }
+    
+    // Now safe to deinitialize
     BLEDevice::deinit(true);
+    
+    // Small delay after deinit
+    delay(100);
     
     // Clear all pointers to prevent any accidental access
     pServer = nullptr;

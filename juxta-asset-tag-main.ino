@@ -445,9 +445,9 @@ void loop() {
       // DON'T send data here - data was already sent after 5-second delay
       // Sending data immediately before BLE stop causes heap corruption
       
-      // Wait 3 seconds to let any pending BLE operations complete
-      Serial.println("Waiting 3 seconds before BLE shutdown...");
-      delay(3000);
+      // Wait 2 seconds to let any pending BLE operations complete
+      Serial.println("Waiting 2 seconds before BLE shutdown...");
+      delay(2000);
       
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
@@ -455,15 +455,7 @@ void loop() {
       // Turn off BLE
       if (BLEConfig::isEnabled()) {
         Serial.println("Turning off BLE...");
-        
-        // Gracefully stop advertising first
-        delay(100);
-        
-        BLEConfig::stop();
-        
-        // Wait for deinit to complete
-        delay(500);
-        
+        BLEConfig::stop(); // Now handles graceful disconnect internally
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
@@ -581,12 +573,12 @@ void loop() {
         delay(3000);
       }
       
-      // DON'T send data here - data was already sent earlier
+      // DON'T send data here - data was already sent after 5-second delay
       // Sending data immediately before BLE stop causes heap corruption
       
-      // Wait 3 seconds to let any pending BLE operations complete
-      Serial.println("Waiting 3 seconds before BLE shutdown...");
-      delay(3000);
+      // Wait 2 seconds to let any pending BLE operations complete
+      Serial.println("Waiting 2 seconds before BLE shutdown...");
+      delay(2000);
       
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
@@ -595,15 +587,7 @@ void loop() {
       if (!waitingForOneMinute) {
         if (BLEConfig::isEnabled()) {
           Serial.println("Turning off BLE...");
-          
-          // Gracefully stop advertising first
-          delay(100);
-          
-          BLEConfig::stop();
-          
-          // Wait for deinit to complete
-          delay(500);
-          
+          BLEConfig::stop(); // Now handles graceful disconnect internally
           bleStartTime = 0;
           firstBleConnectionTime = 0;
           firstBleConnectionTracked = false;
@@ -734,24 +718,16 @@ void loop() {
     // DON'T send data here - data was already sent in cycle logic
     // Sending data immediately before BLE stop causes heap corruption
     
-    // Wait 3 seconds to let any pending BLE operations complete
-    Serial.println("Waiting 3 seconds before BLE shutdown...");
-    delay(3000);
+    // Wait 2 seconds to let any pending BLE operations complete
+    Serial.println("Waiting 2 seconds before BLE shutdown...");
+    delay(2000);
     
     // Turn off BLE now that advertising period is complete and transmission attempted
     // (only if 1-minute wait completed)
     if (!waitingForOneMinute) {
       if (BLEConfig::isEnabled()) {
         Serial.println("BLE advertising period complete - turning off BLE...");
-        
-        // Gracefully stop advertising first
-        delay(100);
-        
-        BLEConfig::stop();
-        
-        // Wait for deinit to complete
-        delay(500);
-        
+        BLEConfig::stop(); // Now handles graceful disconnect internally
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
