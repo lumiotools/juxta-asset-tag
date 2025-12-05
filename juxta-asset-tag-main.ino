@@ -321,6 +321,7 @@ void loop() {
   static bool earlyBleAttempted = false; // Track if we already tried early BLE transmission
   unsigned long currentTime = millis();
   static bool lastUSBState = isUSBConnected();
+  bool bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
   
   // Determine if this is first cycle (power-on or reset button) vs subsequent (deep sleep wake-up)
   // Only check once per cycle
@@ -442,8 +443,6 @@ void loop() {
   // This is used for cycle logic gate, not for the wait loop
   if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0 && !waitingForOneMinute) {
     bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
-  } else {
-    bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
   }
   
   // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, try to send data immediately
