@@ -311,6 +311,7 @@ void attemptTimeSyncIfNeeded() {
 void loop() {
   static unsigned long lastBatteryUpdate = 0;
   static bool cycleStarted = false; // Track if cycle logic has started
+  static bool earlyBleAttempted = false; // Track if we already tried early BLE transmission
   unsigned long currentTime = millis();
   static bool lastUSBState = isUSBConnected();
   
@@ -338,9 +339,11 @@ void loop() {
     BLEConfig::setDeviceVersion(DEVICE_VERSION);
     bleStartTime = millis();
     cycleStarted = false; // Reset cycle flag
+    earlyBleAttempted = false; // Reset early BLE attempt flag for new cycle
   } else if (BLEConfig::isEnabled() && bleStartTime == 0) {
     // BLE is enabled but start time not set (shouldn't happen, but safety check)
     bleStartTime = millis();
+    earlyBleAttempted = false; // Reset early BLE attempt flag
   }
   
   // USB state monitoring
@@ -377,6 +380,91 @@ void loop() {
   // Check if BLE advertising period has elapsed
   bool bleAdvertiseTimeElapsed = (bleStartTime > 0 && (currentTime - bleStartTime >= bleAdvertiseDuration));
   
+  // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, try to send data immediately
+  // This allows the device to enter deep sleep as soon as data is transmitted, without waiting for full advertising period
+  if (!cycleStarted && !earlyBleAttempted && BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+    earlyBleAttempted = true; // Mark that we've attempted early BLE transmission
+    // Collect sensor data
+    // Send hot start command to GPS if we have last known location
+    if (gpsInitialized) {
+      gpsSensor.sendHotStartIfAvailable();
+    }
+    
+    // Update sensors to get fresh data
+    for (int i = 0; i < 50; i++) {
+      if (imuInitialized) {
+        imuSensor.update();
+      }
+      if (gpsInitialized) {
+        gpsSensor.update();
+      }
+      delay(20);
+    }
+    
+    // Get data from sensors
+    IMUData imuData = imuSensor.getIMUData();
+    GPSData gpsData = gpsSensor.getGPSData();
+    String csvData = createSensorCSV(imuData, gpsData);
+    
+    // Try BLE transmission immediately
+    Serial.println("BLE connected - attempting early data transmission...");
+    bool dataSent = sendDataWithRetryLogic(csvData);
+    
+    if (dataSent) {
+      Serial.println("Data sent successfully via BLE - entering deep sleep immediately");
+      cycleStarted = true; // Mark cycle as started to prevent re-execution
+      
+      // Turn off BLE
+      if (BLEConfig::isEnabled()) {
+        Serial.println("Turning off BLE...");
+        BLEConfig::stop();
+        bleStartTime = 0;
+      }
+      
+      // Ensure status LED is restored
+      updateStatusLED();
+      
+      // Prepare for deep sleep
+      Serial.println("Preparing for deep sleep - saving queue state...");
+      transmissionHandler.saveQueueState();
+      
+      // Dim LEDs based on debug mode before deep sleep
+      uint8_t debugMode = NVSConfig::getDebugMode();
+      if (debugMode == 1) {
+        Serial.println("Debug mode enabled - Dimming LEDs to 10% for deep sleep...");
+      } else {
+        Serial.println("Debug mode disabled - Turning LEDs off for deep sleep...");
+      }
+      dimStatusLEDForDeepSleep();
+      if (debugMode == 1) {
+        batteryIndicatorLED.updateBatteryLED();
+      }
+      delay(50);
+      
+      // Get cycle time from NVS (default: 900 seconds = 15 minutes)
+      uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
+      unsigned long cycleTimeMicroseconds = (unsigned long)cycleTimeSeconds * 1000000ULL;
+      
+      // Always deep sleep for configured cycle time
+      Serial.print("Deep sleeping for ");
+      Serial.print(cycleTimeSeconds);
+      Serial.println(" seconds...");
+      esp_sleep_enable_timer_wakeup(cycleTimeMicroseconds);
+      
+      // Small delay to allow serial output to complete
+      delay(100);
+      
+      // Enter deep sleep immediately
+      esp_deep_sleep_start();
+      return; // This should never be reached, but added for safety
+    } else {
+      Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
+      // Reset early attempt flag so cycle logic can try again if still connected
+      earlyBleAttempted = false;
+      // Continue to normal cycle logic below
+    }
+  }
+  
   // CYCLE LOGIC: Execute once per cycle AFTER BLE advertising period completes
   // Only turn off BLE and switch to WiFi after the full advertising time has elapsed
   if (bleAdvertiseTimeElapsed && !cycleStarted) {
@@ -412,7 +500,8 @@ void loop() {
     bool shouldEnterStorageMode = false;
     
     // STEP 1: Try BLE transmission if connected (after advertising period completed)
-    if (bleConnected) {
+    // Only try if we haven't already attempted early transmission or if early attempt failed
+    if (bleConnected && !earlyBleAttempted) {
       Serial.println("BLE connected - attempting data transmission...");
       dataSent = sendDataWithRetryLogic(csvData);
       
@@ -421,6 +510,8 @@ void loop() {
       } else {
         Serial.println("Data transmission failed via BLE");
       }
+    } else if (bleConnected && earlyBleAttempted) {
+      Serial.println("BLE still connected but early transmission already attempted - skipping BLE retry, will try WiFi");
     }
     
     // Turn off BLE now that advertising period is complete and transmission attempted
