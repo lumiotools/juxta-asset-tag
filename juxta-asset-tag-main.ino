@@ -414,6 +414,10 @@ void loop() {
       Serial.println("Data sent successfully via BLE - entering deep sleep immediately");
       cycleStarted = true; // Mark cycle as started to prevent re-execution
       
+      // Wait 5 seconds before disconnecting BLE
+      Serial.println("Waiting 5 seconds before disconnecting BLE...");
+      delay(5000);
+      
       // Turn off BLE
       if (BLEConfig::isEnabled()) {
         Serial.println("Turning off BLE...");
@@ -513,6 +517,10 @@ void loop() {
     } else if (bleConnected && earlyBleAttempted) {
       Serial.println("BLE still connected but early transmission already attempted - skipping BLE retry, will try WiFi");
     }
+    
+    // Wait 5 seconds before disconnecting BLE
+    Serial.println("Waiting 5 seconds before disconnecting BLE...");
+    delay(5000);
     
     // Turn off BLE now that advertising period is complete and transmission attempted
     if (BLEConfig::isEnabled()) {
