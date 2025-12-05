@@ -290,6 +290,43 @@ bool sendDataWithRetryLogic(String csvData) {
   return transmissionHandler.handleDataTransmission(csvData);
 }
 
+// Helper function: Collect fresh sensor data
+String collectSensorData() {
+  // Send hot start command to GPS if we have last known location
+  if (gpsInitialized) {
+    gpsSensor.sendHotStartIfAvailable();
+  }
+  
+  // Update sensors to get fresh data (50 samples over 1 second)
+  for (int i = 0; i < 50; i++) {
+    if (imuInitialized) {
+      imuSensor.update();
+    }
+    if (gpsInitialized) {
+      gpsSensor.update();
+    }
+    delay(20);
+  }
+  
+  // Get data from sensors
+  IMUData imuData = imuSensor.getIMUData();
+  GPSData gpsData = gpsSensor.getGPSData();
+  
+  // Create and return CSV data
+  return createSensorCSV(imuData, gpsData);
+}
+
+// Helper function: Collect sensor data and send via BLE
+bool collectAndSendData(const char* messagePrefix) {
+  Serial.println(messagePrefix);
+  
+  // Collect sensor data
+  String csvData = collectSensorData();
+  
+  // Send data
+  return sendDataWithRetryLogic(csvData);
+}
+
 // Helper function to check if time is already synced
 bool isTimeSynced() {
   time_t now = time(nullptr);
@@ -319,6 +356,7 @@ void loop() {
   static unsigned long lastBatteryUpdate = 0;
   static bool cycleStarted = false; // Track if cycle logic has started
   static bool earlyBleAttempted = false; // Track if we already tried early BLE transmission
+  static bool earlyBleSucceeded = false; // Track if early BLE transmission was successful
   unsigned long currentTime = millis();
   static bool lastUSBState = isUSBConnected();
   bool bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
@@ -348,6 +386,7 @@ void loop() {
     bleStartTime = millis();
     cycleStarted = false; // Reset cycle flag
     earlyBleAttempted = false; // Reset early BLE attempt flag for new cycle
+    earlyBleSucceeded = false; // Reset early BLE success flag for new cycle
     firstBleConnectionTime = 0; // Reset first connection tracking for new cycle
     firstBleConnectionTracked = false;
     waitingForOneMinute = false; // Reset 1-minute wait flag
@@ -356,6 +395,7 @@ void loop() {
     // BLE is enabled but start time not set (shouldn't happen, but safety check)
     bleStartTime = millis();
     earlyBleAttempted = false; // Reset early BLE attempt flag
+    earlyBleSucceeded = false; // Reset early BLE success flag
     firstBleConnectionTime = 0; // Reset first connection tracking
     firstBleConnectionTracked = false;
     waitingForOneMinute = false; // Reset 1-minute wait flag
@@ -445,39 +485,23 @@ void loop() {
     bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
   }
   
-  // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, try to send data immediately
-  // This allows the device to enter deep sleep as soon as data is transmitted, without waiting for full advertising period
+  // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, wait delay then send data
   // Skip if we're already waiting for 1-minute requirement
   if (!cycleStarted && !earlyBleAttempted && !waitingForOneMinute && BLEConfig::isEnabled() && BLEConfig::isConnected()) {
-    earlyBleAttempted = true; // Mark that we've attempted early BLE transmission
-    // Collect sensor data
-    // Send hot start command to GPS if we have last known location
-    if (gpsInitialized) {
-      gpsSensor.sendHotStartIfAvailable();
-    }
+    // Check if 5 seconds have passed since connection (hardcoded delay)
+    unsigned long timeSinceConnection = currentTime - firstBleConnectionTime;
     
-    // Update sensors to get fresh data
-    for (int i = 0; i < 50; i++) {
-      if (imuInitialized) {
-        imuSensor.update();
-      }
-      if (gpsInitialized) {
-        gpsSensor.update();
-      }
-      delay(20);
-    }
-    
-    // Get data from sensors
-    IMUData imuData = imuSensor.getIMUData();
-    GPSData gpsData = gpsSensor.getGPSData();
-    String csvData = createSensorCSV(imuData, gpsData);
-    
-    // Try BLE transmission immediately
-    Serial.println("BLE connected - attempting early data transmission...");
-    bool dataSent = sendDataWithRetryLogic(csvData);
-    
-    if (dataSent) {
-      Serial.println("Data sent successfully via BLE");
+    if (timeSinceConnection >= 5000) {
+      // 5 second delay has passed - send data now (before sleep)
+      earlyBleAttempted = true; // Mark that we've attempted early BLE transmission
+      
+      // Collect and send sensor data
+      bool dataSent = collectAndSendData("BLE connected - sending data after 5 second delay (before sleep)...");
+      
+      if (dataSent) {
+        Serial.println("Data sent successfully via BLE");
+        earlyBleSucceeded = true; // Mark that early BLE transmission succeeded
+        cycleStarted = true; // Mark cycle as started immediately to prevent cycle logic from running
       
       // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
       if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
@@ -494,10 +518,19 @@ void loop() {
       }
       
       Serial.println("Preparing to enter deep sleep");
-      cycleStarted = true; // Mark cycle as started to prevent re-execution
       
       // Turn off BLE (only if 1-minute wait completed)
       if (!waitingForOneMinute) {
+        // Send data before sleep even if first transmission was successful
+        if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+          bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if first transmission succeeded)...");
+          if (dataSentBeforeSleep) {
+            Serial.println("Data sent successfully before sleep");
+          } else {
+            Serial.println("Data transmission failed before sleep");
+          }
+        }
+        
         if (BLEConfig::isEnabled()) {
           Serial.println("Turning off BLE...");
           BLEConfig::stop();
@@ -547,11 +580,16 @@ void loop() {
       // Enter deep sleep immediately
       esp_deep_sleep_start();
       return; // This should never be reached, but added for safety
+      } else {
+        Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
+        earlyBleSucceeded = false; // Mark that early BLE transmission failed
+        // Reset early attempt flag so cycle logic can try again if still connected
+        earlyBleAttempted = false;
+        // Continue to normal cycle logic below
+      }
     } else {
-      Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
-      // Reset early attempt flag so cycle logic can try again if still connected
-      earlyBleAttempted = false;
-      // Continue to normal cycle logic below
+      // Delay hasn't passed yet - wait for next loop iteration
+      // Don't set earlyBleAttempted yet, will retry when delay passes
     }
   }
   
@@ -573,33 +611,18 @@ void loop() {
     bool bleConnected = BLEConfig::isEnabled() && BLEConfig::isConnected();
     
     // Collect sensor data
-    // Send hot start command to GPS if we have last known location
-    if (gpsInitialized) {
-      gpsSensor.sendHotStartIfAvailable();
-    }
-    
-    // Update sensors to get fresh data
-    for (int i = 0; i < 50; i++) {
-      if (imuInitialized) {
-        imuSensor.update();
-      }
-      if (gpsInitialized) {
-        gpsSensor.update();
-      }
-      delay(20);
-    }
-    
-    // Get data from sensors
-    IMUData imuData = imuSensor.getIMUData();
-    GPSData gpsData = gpsSensor.getGPSData();
-    String csvData = createSensorCSV(imuData, gpsData);
+    String csvData = collectSensorData();
     
     bool dataSent = false;
     bool shouldEnterStorageMode = false;
     
     // STEP 1: Try BLE transmission if connected (after advertising period completed)
-    // Only try if we haven't already attempted early transmission or if early attempt failed
-    if (bleConnected && !earlyBleAttempted) {
+    // Only try if we haven't already attempted early transmission, or if early attempt failed
+    // If early attempt succeeded, skip BLE and WiFi (data already sent)
+    if (earlyBleSucceeded) {
+      Serial.println("Early BLE transmission already succeeded - skipping retry and WiFi");
+      dataSent = true; // Mark as sent to prevent WiFi attempt
+    } else if (bleConnected && !earlyBleAttempted) {
       Serial.println("BLE connected - attempting data transmission...");
       dataSent = sendDataWithRetryLogic(csvData);
       
@@ -608,8 +631,20 @@ void loop() {
       } else {
         Serial.println("Data transmission failed via BLE");
       }
-    } else if (bleConnected && earlyBleAttempted) {
-      Serial.println("BLE still connected but early transmission already attempted - skipping BLE retry, will try WiFi");
+    } else if (bleConnected && earlyBleAttempted && !earlyBleSucceeded) {
+      // Early attempt was made but failed - retry BLE transmission
+      Serial.println("BLE still connected - retrying BLE transmission after early attempt failed...");
+      dataSent = sendDataWithRetryLogic(csvData);
+      
+      if (dataSent) {
+        Serial.println("Data sent successfully via BLE (retry)");
+      } else {
+        Serial.println("Data transmission failed via BLE (retry)");
+      }
+    } else if (bleConnected && earlyBleAttempted && earlyBleSucceeded) {
+      // This shouldn't happen if cycle logic is properly gated, but safety check
+      Serial.println("BLE connected and early transmission succeeded - data already sent");
+      dataSent = true;
     }
     
     // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
@@ -703,6 +738,16 @@ void loop() {
     
     // Ensure status LED is restored
     updateStatusLED();
+    
+    // Send data before sleep even if transmission was already successful
+    if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+      bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if transmission already succeeded)...");
+      if (dataSentBeforeSleep) {
+        Serial.println("Data sent successfully before sleep");
+      } else {
+        Serial.println("Data transmission failed before sleep");
+      }
+    }
     
     // Prepare for deep sleep
     Serial.println("Preparing for deep sleep - saving queue state...");
