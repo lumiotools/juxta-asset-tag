@@ -41,6 +41,11 @@ TransmissionHandler transmissionHandler;
 // BLE start time tracking
 unsigned long bleStartTime = 0;
 
+// First BLE connection time tracking (for 1-minute connection requirement)
+unsigned long firstBleConnectionTime = 0;
+bool firstBleConnectionTracked = false;
+const unsigned long BLE_MIN_CONNECTION_DURATION_MS = 60000; // 1 minute
+
 // Create sensor instances
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
@@ -340,10 +345,14 @@ void loop() {
     bleStartTime = millis();
     cycleStarted = false; // Reset cycle flag
     earlyBleAttempted = false; // Reset early BLE attempt flag for new cycle
+    firstBleConnectionTime = 0; // Reset first connection tracking for new cycle
+    firstBleConnectionTracked = false;
   } else if (BLEConfig::isEnabled() && bleStartTime == 0) {
     // BLE is enabled but start time not set (shouldn't happen, but safety check)
     bleStartTime = millis();
     earlyBleAttempted = false; // Reset early BLE attempt flag
+    firstBleConnectionTime = 0; // Reset first connection tracking
+    firstBleConnectionTracked = false;
   }
   
   // USB state monitoring
@@ -375,10 +384,29 @@ void loop() {
   // Keep BLE running during the full advertising period
   if (BLEConfig::isEnabled()) {
     BLEConfig::update();
+    
+    // Track first BLE connection time in reset cycle (only on first cycle)
+    if (isFirstCycle && !firstBleConnectionTracked && BLEConfig::isConnected()) {
+      firstBleConnectionTime = currentTime;
+      firstBleConnectionTracked = true;
+      Serial.println("First BLE connection detected - will maintain connection for 1 minute");
+    }
   }
   
   // Check if BLE advertising period has elapsed
   bool bleAdvertiseTimeElapsed = (bleStartTime > 0 && (currentTime - bleStartTime >= bleAdvertiseDuration));
+  
+  // Check if 1 minute has passed since first BLE connection (only applies to first cycle)
+  bool bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
+  if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
+    bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
+    if (!bleMinConnectionTimeElapsed) {
+      unsigned long remainingTime = BLE_MIN_CONNECTION_DURATION_MS - (currentTime - firstBleConnectionTime);
+      Serial.print("Maintaining BLE connection - ");
+      Serial.print(remainingTime / 1000);
+      Serial.println(" seconds remaining");
+    }
+  }
   
   // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, try to send data immediately
   // This allows the device to enter deep sleep as soon as data is transmitted, without waiting for full advertising period
@@ -411,18 +439,55 @@ void loop() {
     bool dataSent = sendDataWithRetryLogic(csvData);
     
     if (dataSent) {
-      Serial.println("Data sent successfully via BLE - entering deep sleep immediately");
-      cycleStarted = true; // Mark cycle as started to prevent re-execution
+      Serial.println("Data sent successfully via BLE");
       
-      // Wait 5 seconds before disconnecting BLE
-      Serial.println("Waiting 5 seconds before disconnecting BLE...");
-      delay(5000);
+      // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
+      if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
+        // Wait until 1 minute has passed since first connection (COMPULSORY - no early exit)
+        Serial.println("First cycle: Compulsory 1-minute BLE connection period started");
+        while (true) {
+          currentTime = millis();
+          bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
+          
+          if (bleMinConnectionTimeElapsed) {
+            Serial.println("1-minute connection requirement satisfied");
+            break;
+          }
+          
+          // Keep BLE active and update it (allows reconnection if dropped)
+          if (BLEConfig::isEnabled()) {
+            BLEConfig::update();
+          }
+          
+          bool currentlyConnected = BLEConfig::isEnabled() && BLEConfig::isConnected();
+          unsigned long remainingTime = BLE_MIN_CONNECTION_DURATION_MS - (currentTime - firstBleConnectionTime);
+          
+          if (currentlyConnected) {
+            Serial.print("Maintaining BLE connection - ");
+          } else {
+            Serial.print("BLE disconnected, but waiting full 1 minute - ");
+          }
+          Serial.print(remainingTime / 1000);
+          Serial.println(" seconds remaining");
+          
+          delay(1000); // Check every second
+        }
+      } else {
+        // Wait 3 seconds before disconnecting BLE (for subsequent cycles or if not first connection)
+        Serial.println("Waiting 3 seconds before disconnecting BLE...");
+        delay(3000);
+      }
+      
+      Serial.println("Preparing to enter deep sleep");
+      cycleStarted = true; // Mark cycle as started to prevent re-execution
       
       // Turn off BLE
       if (BLEConfig::isEnabled()) {
         Serial.println("Turning off BLE...");
         BLEConfig::stop();
         bleStartTime = 0;
+        firstBleConnectionTime = 0;
+        firstBleConnectionTracked = false;
       }
       
       // Ensure status LED is restored
@@ -471,7 +536,15 @@ void loop() {
   
   // CYCLE LOGIC: Execute once per cycle AFTER BLE advertising period completes
   // Only turn off BLE and switch to WiFi after the full advertising time has elapsed
-  if (bleAdvertiseTimeElapsed && !cycleStarted) {
+  // Note: For first cycle, we'll wait for 1-minute connection requirement before disconnecting BLE
+  // On first cycle, also ensure 1-minute connection requirement is met before starting cycle logic
+  bool canStartCycle = bleAdvertiseTimeElapsed;
+  if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
+    // On first cycle, don't start cycle logic until 1 minute has passed since first connection
+    canStartCycle = canStartCycle && bleMinConnectionTimeElapsed;
+  }
+  
+  if (canStartCycle && !cycleStarted) {
     cycleStarted = true; // Mark cycle as started to prevent re-execution
     Serial.println("BLE advertising period elapsed, executing cycle logic...");
     
@@ -518,15 +591,50 @@ void loop() {
       Serial.println("BLE still connected but early transmission already attempted - skipping BLE retry, will try WiFi");
     }
     
-    // Wait 5 seconds before disconnecting BLE
-    Serial.println("Waiting 5 seconds before disconnecting BLE...");
-    delay(5000);
+    // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
+    if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
+      // Wait until 1 minute has passed since first connection (COMPULSORY - no early exit)
+      Serial.println("First cycle: Compulsory 1-minute BLE connection period started");
+      while (true) {
+        currentTime = millis();
+        bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
+        
+        if (bleMinConnectionTimeElapsed) {
+          Serial.println("1-minute connection requirement satisfied");
+          break;
+        }
+        
+        // Keep BLE active and update it (allows reconnection if dropped)
+        if (BLEConfig::isEnabled()) {
+          BLEConfig::update();
+        }
+        
+        bool currentlyConnected = BLEConfig::isEnabled() && BLEConfig::isConnected();
+        unsigned long remainingTime = BLE_MIN_CONNECTION_DURATION_MS - (currentTime - firstBleConnectionTime);
+        
+        if (currentlyConnected) {
+          Serial.print("Maintaining BLE connection - ");
+        } else {
+          Serial.print("BLE disconnected, but waiting full 1 minute - ");
+        }
+        Serial.print(remainingTime / 1000);
+        Serial.println(" seconds remaining");
+        
+        delay(1000); // Check every second
+      }
+    } else {
+      // Wait 3 seconds before disconnecting BLE (for subsequent cycles or if not first connection)
+      Serial.println("Waiting 3 seconds before disconnecting BLE...");
+      delay(3000);
+    }
     
     // Turn off BLE now that advertising period is complete and transmission attempted
     if (BLEConfig::isEnabled()) {
       Serial.println("BLE advertising period complete - turning off BLE...");
       BLEConfig::stop();
       bleStartTime = 0;
+      firstBleConnectionTime = 0;
+      firstBleConnectionTracked = false;
     }
     
     if (dataSent) {
