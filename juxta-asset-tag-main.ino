@@ -441,7 +441,66 @@ void loop() {
       // 1 minute requirement satisfied
       Serial.println("1-minute connection requirement satisfied");
       waitingForOneMinute = false;
-      // Continue with normal flow (will proceed to turn off BLE and deep sleep)
+      
+      // Proceed to deep sleep sequence immediately
+      Serial.println("Preparing to enter deep sleep");
+      
+      // Send data before sleep even if first transmission was successful
+      if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+        bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if first transmission succeeded)...");
+        if (dataSentBeforeSleep) {
+          Serial.println("Data sent successfully before sleep");
+        } else {
+          Serial.println("Data transmission failed before sleep");
+        }
+      }
+      
+      // Turn off BLE
+      if (BLEConfig::isEnabled()) {
+        Serial.println("Turning off BLE...");
+        BLEConfig::stop();
+        bleStartTime = 0;
+        firstBleConnectionTime = 0;
+        firstBleConnectionTracked = false;
+        waitingForOneMinute = false;
+      }
+      
+      // Ensure status LED is restored
+      updateStatusLED();
+      
+      // Prepare for deep sleep
+      Serial.println("Preparing for deep sleep - saving queue state...");
+      transmissionHandler.saveQueueState();
+      
+      // Dim LEDs based on debug mode before deep sleep
+      uint8_t debugMode = NVSConfig::getDebugMode();
+      if (debugMode == 1) {
+        Serial.println("Debug mode enabled - Dimming LEDs to 10% for deep sleep...");
+      } else {
+        Serial.println("Debug mode disabled - Turning LEDs off for deep sleep...");
+      }
+      dimStatusLEDForDeepSleep();
+      if (debugMode == 1) {
+        batteryIndicatorLED.updateBatteryLED();
+      }
+      delay(50);
+      
+      // Get cycle time from NVS (default: 900 seconds = 15 minutes)
+      uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
+      unsigned long cycleTimeMicroseconds = (unsigned long)cycleTimeSeconds * 1000000ULL;
+      
+      // Always deep sleep for configured cycle time
+      Serial.print("Deep sleeping for ");
+      Serial.print(cycleTimeSeconds);
+      Serial.println(" seconds...");
+      esp_sleep_enable_timer_wakeup(cycleTimeMicroseconds);
+      
+      // Small delay to allow serial output to complete
+      delay(100);
+      
+      // Enter deep sleep immediately
+      esp_deep_sleep_start();
+      return; // This should never be reached, but added for safety
     } else {
       // Still waiting - print countdown every second
       if (currentTime - lastCountdownPrint >= 1000) {
