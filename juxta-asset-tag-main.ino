@@ -442,12 +442,20 @@ void loop() {
       Serial.println("1-minute connection requirement satisfied");
       waitingForOneMinute = false;
       
-      // DON'T send data here - data was already sent after 5-second delay
-      // Sending data immediately before BLE stop causes heap corruption
+      // Send data before deep sleep (if BLE still connected)
+      if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+        Serial.println("Sending final data before deep sleep...");
+        bool dataSentBeforeSleep = collectAndSendData("Final data transmission before deep sleep");
+        if (dataSentBeforeSleep) {
+          Serial.println("Final data sent successfully");
+        } else {
+          Serial.println("Final data transmission failed");
+        }
+      }
       
-      // Wait 2 seconds to let any pending BLE operations complete
-      Serial.println("Waiting 2 seconds before BLE shutdown...");
-      delay(2000);
+      // Wait 5 seconds to let BLE complete transmission before stopping
+      Serial.println("Waiting 5 seconds for BLE to complete transmission...");
+      delay(5000);
       
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
@@ -541,21 +549,22 @@ void loop() {
     bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
   }
   
-  // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, wait delay then send data
+  // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, send data after 5 seconds
   // Skip if we're already waiting for 1-minute requirement
   if (!cycleStarted && !earlyBleAttempted && !waitingForOneMinute && BLEConfig::isEnabled() && BLEConfig::isConnected()) {
     // Check if 5 seconds have passed since connection (hardcoded delay)
     unsigned long timeSinceConnection = currentTime - firstBleConnectionTime;
     
     if (timeSinceConnection >= 5000) {
-      // 5 second delay has passed - send data now (before sleep)
+      // 5 second delay has passed - send data now (FIRST transmission)
       earlyBleAttempted = true; // Mark that we've attempted early BLE transmission
       
       // Collect and send sensor data
-      bool dataSent = collectAndSendData("BLE connected - sending data after 5 second delay (before sleep)...");
+      Serial.println("BLE connected - sending data after 5 second delay (FIRST transmission)...");
+      bool dataSent = collectAndSendData("Data transmission 5 seconds after connection");
     
-    if (dataSent) {
-        Serial.println("Data sent successfully via BLE");
+      if (dataSent) {
+        Serial.println("Data sent successfully via BLE (FIRST transmission)");
         earlyBleSucceeded = true; // Mark that early BLE transmission succeeded
         cycleStarted = true; // Mark cycle as started immediately to prevent cycle logic from running
       
@@ -573,12 +582,20 @@ void loop() {
         delay(3000);
       }
       
-      // DON'T send data here - data was already sent after 5-second delay
-      // Sending data immediately before BLE stop causes heap corruption
+      // Send data before deep sleep (if BLE still connected)
+      if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+        Serial.println("Sending final data before deep sleep...");
+        bool dataSentBeforeSleep = collectAndSendData("Final data transmission before deep sleep");
+        if (dataSentBeforeSleep) {
+          Serial.println("Final data sent successfully");
+        } else {
+          Serial.println("Final data transmission failed");
+        }
+      }
       
-      // Wait 2 seconds to let any pending BLE operations complete
-      Serial.println("Waiting 2 seconds before BLE shutdown...");
-      delay(2000);
+      // Wait 5 seconds to let BLE complete transmission before stopping
+      Serial.println("Waiting 5 seconds for BLE to complete transmission...");
+      delay(5000);
       
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
@@ -715,12 +732,20 @@ void loop() {
       delay(3000);
     }
     
-    // DON'T send data here - data was already sent in cycle logic
-    // Sending data immediately before BLE stop causes heap corruption
+    // Send data before deep sleep (if BLE still connected)
+    if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+      Serial.println("Sending final data before deep sleep...");
+      bool dataSentBeforeSleep = collectAndSendData("Final data transmission before deep sleep");
+      if (dataSentBeforeSleep) {
+        Serial.println("Final data sent successfully");
+      } else {
+        Serial.println("Final data transmission failed");
+      }
+    }
     
-    // Wait 2 seconds to let any pending BLE operations complete
-    Serial.println("Waiting 2 seconds before BLE shutdown...");
-    delay(2000);
+    // Wait 5 seconds to let BLE complete transmission before stopping
+    Serial.println("Waiting 5 seconds for BLE to complete transmission...");
+    delay(5000);
     
     // Turn off BLE now that advertising period is complete and transmission attempted
     // (only if 1-minute wait completed)
@@ -800,8 +825,20 @@ void loop() {
     // Ensure status LED is restored
     updateStatusLED();
     
-    // DON'T send data before sleep - data was already sent after connection
-    // Sending data immediately before BLE stop causes heap corruption
+    // Send data before deep sleep (if BLE still connected)
+    if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+      Serial.println("Sending final data before deep sleep...");
+      bool dataSentBeforeSleep = collectAndSendData("Final data transmission before deep sleep");
+      if (dataSentBeforeSleep) {
+        Serial.println("Final data sent successfully");
+      } else {
+        Serial.println("Final data transmission failed");
+      }
+    }
+    
+    // Wait 5 seconds to let BLE complete transmission before stopping
+    Serial.println("Waiting 5 seconds for BLE to complete transmission...");
+    delay(5000);
     
     // Prepare for deep sleep
     Serial.println("Preparing for deep sleep - saving queue state...");
