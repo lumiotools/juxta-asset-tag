@@ -51,9 +51,9 @@ bool imuInitialized = false;
 bool gpsInitialized = false;
 bool flashInitialized = false;
 
-// Configuration: Cycle duration in minutes
-const unsigned long CYCLE_DURATION_MINUTES = 15; // 15 minutes per cycle
-const unsigned long CYCLE_DURATION_MICROSECONDS = CYCLE_DURATION_MINUTES * 60 * 1000000ULL;
+// Configuration: Cycle duration is now configurable via BLE and stored in NVS
+// Default is 900 seconds (15 minutes) if not set via BLE
+// Cycle duration is stored in seconds in NVS
 
 // BLE advertising durations
 const unsigned long BLE_ADVERTISE_FIRST_CYCLE_MS = 60000; // 60 seconds for first cycle (power-on/reset)
@@ -509,11 +509,15 @@ void loop() {
     }
     delay(50);
     
-    // Always deep sleep for 15 minutes
+    // Get cycle time from NVS (default: 900 seconds = 15 minutes)
+    uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
+    unsigned long cycleTimeMicroseconds = (unsigned long)cycleTimeSeconds * 1000000ULL;
+    
+    // Always deep sleep for configured cycle time
     Serial.print("Deep sleeping for ");
-    Serial.print(CYCLE_DURATION_MINUTES);
-    Serial.println(" minutes...");
-    esp_sleep_enable_timer_wakeup(CYCLE_DURATION_MICROSECONDS);
+    Serial.print(cycleTimeSeconds);
+    Serial.println(" seconds...");
+    esp_sleep_enable_timer_wakeup(cycleTimeMicroseconds);
     
     // Small delay to allow serial output to complete
     delay(100);

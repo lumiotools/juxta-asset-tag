@@ -88,6 +88,78 @@ private:
     delay(100); // Give GPS time to process
   }
   
+  // Detect which baud rate is working (9600 or 115200)
+  // Returns the baud rate that receives valid NMEA data, or 0 if neither works
+  uint32_t detectBaudRate() {
+    uint32_t baudRates[] = {9600, 115200};
+    const int detectionTimeout = 1000; // 1 second to detect data
+    const int minValidChars = 10; // Minimum characters to consider valid data
+    
+    for (int i = 0; i < 2; i++) {
+      uint32_t testBaud = baudRates[i];
+      Serial.print("Testing baud rate: ");
+      Serial.println(testBaud);
+      
+      // End current serial connection
+      Serial1.end();
+      delay(100);
+      
+      // Start at test baud rate
+      Serial1.begin(testBaud, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+      delay(200); // Give serial time to initialize
+      
+      // Clear any existing data
+      while (Serial1.available() > 0) {
+        Serial1.read();
+      }
+      
+      // Try to receive data for detection timeout
+      unsigned long startTime = millis();
+      String testSentence = "";
+      bool foundValidData = false;
+      
+      while (millis() - startTime < detectionTimeout) {
+        if (Serial1.available() > 0) {
+          char c = Serial1.read();
+          
+          // Check for NMEA sentence start
+          if (c == '$') {
+            testSentence = "$";
+            foundValidData = true;
+          } else if (foundValidData && c != '\r' && c != '\n') {
+            testSentence += c;
+            
+            // If we have enough characters and it looks like NMEA, this baud rate works
+            if (testSentence.length() >= minValidChars) {
+              // Check if it's a valid NMEA sentence (contains common NMEA identifiers)
+              if (testSentence.indexOf("GPRMC") >= 0 || 
+                  testSentence.indexOf("GNRMC") >= 0 ||
+                  testSentence.indexOf("GPGGA") >= 0 ||
+                  testSentence.indexOf("GNGGA") >= 0) {
+                Serial.print("Valid NMEA data detected at ");
+                Serial.print(testBaud);
+                Serial.println(" baud");
+                return testBaud;
+              }
+            }
+          } else if (c == '\n') {
+            // End of sentence, reset
+            testSentence = "";
+            foundValidData = false;
+          }
+        }
+        delay(10);
+      }
+      
+      Serial.print("No valid data at ");
+      Serial.print(testBaud);
+      Serial.println(" baud");
+    }
+    
+    Serial.println("Warning: Could not detect valid baud rate, defaulting to 115200");
+    return 115200; // Default to 115200 if detection fails
+  }
+  
   // Convert DDMM.MMMM format to decimal degrees
   double formatCoordinate(String coord) {
     if (coord.length() < 4) return 0.0;
@@ -213,10 +285,18 @@ public:
     Serial1.println("$PCAS00*01"); // Save config
     delay(300);
     
-    // Switch to 115200 baud
-    Serial1.end();
-    Serial1.begin(115200, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+    // Detect which baud rate is working (9600 or 115200)
+    Serial.println("\nDetecting GPS baud rate...");
+    uint32_t detectedBaud = detectBaudRate();
     
+    // Switch to detected baud rate
+    Serial1.end();
+    delay(100);
+    Serial1.begin(detectedBaud, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+    delay(200);
+    
+    Serial.print("Using baud rate: ");
+    Serial.println(detectedBaud);
     Serial.println("Configuration complete!");
     
     // Initialize data structures

@@ -20,6 +20,7 @@ private:
   static const char* GPS_LAST_LON_KEY;
   static const char* GPS_LAST_ALT_KEY;
   static const char* GPS_LAST_FIX_KEY;
+  static const char* CYCLE_TIME_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -118,6 +119,9 @@ public:
   static uint8_t getDebugMode() { return readU8NVS(DEBUG_MODE_KEY, 0); } // Default to 0
   static bool setDebugMode(uint8_t debugMode) { return writeU8NVS(DEBUG_MODE_KEY, debugMode); }
 
+  static uint32_t getCycleTime() { return readU32NVS(CYCLE_TIME_KEY, 900); } // Default to 900 seconds (15 minutes)
+  static bool setCycleTime(uint32_t cycleTimeSeconds) { return writeU32NVS(CYCLE_TIME_KEY, cycleTimeSeconds); }
+
   static bool isFirstBoot() {
     return (readU8NVS(FIRSTBOOT_KEY, 1) == 1);
   }
@@ -215,5 +219,6 @@ const char* NVSConfig::GPS_LAST_LAT_KEY = "gps_last_lat";
 const char* NVSConfig::GPS_LAST_LON_KEY = "gps_last_lon";
 const char* NVSConfig::GPS_LAST_ALT_KEY = "gps_last_alt";
 const char* NVSConfig::GPS_LAST_FIX_KEY = "gps_last_fix";
+const char* NVSConfig::CYCLE_TIME_KEY = "cycle_time";
 
 #endif

@@ -21,6 +21,7 @@ extern void stopStatusLEDBlink();
 #define SSID_CHAR_UUID      "12345678-1234-1234-1234-123456789abd"
 #define PASSWORD_CHAR_UUID  "12345678-1234-1234-1234-123456789abe"
 #define DEBUG_MODE_CHAR_UUID "12345678-1234-1234-1234-123456789ac2"
+#define CYCLE_TIME_CHAR_UUID "12345678-1234-1234-1234-123456789ac3"
 #define STATUS_CHAR_UUID    "12345678-1234-1234-1234-123456789abf"
 #define DATA_CHAR_UUID      "12345678-1234-1234-1234-123456789ac0"
 #define CURRENT_SSID_CHAR_UUID "12345678-1234-1234-1234-123456789ac1"
@@ -35,6 +36,7 @@ private:
   static BLECharacteristic* pSSIDCharacteristic;
   static BLECharacteristic* pPasswordCharacteristic;
   static BLECharacteristic* pDebugModeCharacteristic;
+  static BLECharacteristic* pCycleTimeCharacteristic;
   static BLECharacteristic* pStatusCharacteristic;
   static BLECharacteristic* pDataCharacteristic;
   static BLECharacteristic* pCurrentSSIDCharacteristic;
@@ -43,8 +45,10 @@ private:
   static String receivedSSID;
   static String receivedPassword;
   static uint8_t receivedDebugMode;
+  static uint32_t receivedCycleTime;
   static bool credentialsReceived;
   static bool debugModeReceived;
+  static bool cycleTimeReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
   static const char* deviceVersion;
@@ -74,8 +78,8 @@ private:
       
       char jsonBuffer[256];
       snprintf(jsonBuffer, sizeof(jsonBuffer), 
-               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\",\"debug_mode\":%d}",
-               devId, devVer, timestamp, batteryLevel, currentSSID.c_str(), NVSConfig::getDebugMode());
+               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\",\"debug_mode\":%d,\"cycle_time\":%d}",
+               devId, devVer, timestamp, batteryLevel, currentSSID.c_str(), NVSConfig::getDebugMode(), NVSConfig::getCycleTime());
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
@@ -156,6 +160,33 @@ private:
     }
   };
 
+  // Cycle Time Characteristic Callbacks
+  class CycleTimeCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic* pCharacteristic) {
+      // Start blue LED blinking on receive
+      startStatusLEDBlink(0, 0, 255);
+      
+      // Read cycle time as string (sent as string from web interface, value in seconds)
+      String value = pCharacteristic->getValue();
+      if (value.length() > 0) {
+        receivedCycleTime = value.toInt(); // Convert string to uint32_t (seconds)
+        // Save cycle time immediately to NVS (independent of WiFi credentials)
+        // NVS key: "cycle_time" in namespace "wifi_config"
+        bool cycleTimeSaved = NVSConfig::setCycleTime(receivedCycleTime);
+        cycleTimeReceived = true;
+        Serial.print("Cycle Time received: ");
+        Serial.print(receivedCycleTime);
+        Serial.print(" seconds - ");
+        Serial.print(cycleTimeSaved ? "Saved to NVS (key: cycle_time)" : "Failed to save to NVS");
+        Serial.print(" - Current NVS value: ");
+        Serial.println(NVSConfig::getCycleTime());
+      }
+      
+      // Stop LED blinking and restore to green
+      stopStatusLEDBlink();
+    }
+  };
+
 public:
   // Set Device ID
   static void setDeviceId(const char* id) {
@@ -199,6 +230,13 @@ public:
     );
     pDebugModeCharacteristic->setCallbacks(new DebugModeCallbacks());
     
+    // Create Cycle Time Characteristic
+    pCycleTimeCharacteristic = pService->createCharacteristic(
+      CYCLE_TIME_CHAR_UUID,
+      BLECharacteristic::PROPERTY_WRITE
+    );
+    pCycleTimeCharacteristic->setCallbacks(new CycleTimeCallbacks());
+    
     // Create Status Characteristic (simplified - no notify)
     pStatusCharacteristic = pService->createCharacteristic(
       STATUS_CHAR_UUID,
@@ -239,8 +277,10 @@ public:
     receivedSSID = "";
     receivedPassword = "";
     receivedDebugMode = 0; // Default to 0 (LED off in deep sleep)
+    receivedCycleTime = 900; // Default to 900 seconds (15 minutes)
     credentialsReceived = false;
     debugModeReceived = false;
+    cycleTimeReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
     
@@ -288,6 +328,12 @@ public:
       debugModeReceived = false;
       receivedDebugMode = 0;
     }
+    
+    // Reset cycle time flag if it was processed
+    if (cycleTimeReceived) {
+      cycleTimeReceived = false;
+      receivedCycleTime = 900;
+    }
   }
   
   // Check if BLE is connected
@@ -323,6 +369,7 @@ public:
     pSSIDCharacteristic = nullptr;
     pPasswordCharacteristic = nullptr;
     pDebugModeCharacteristic = nullptr;
+    pCycleTimeCharacteristic = nullptr;
     pStatusCharacteristic = nullptr;
     pDataCharacteristic = nullptr;
     pCurrentSSIDCharacteristic = nullptr;
@@ -336,8 +383,10 @@ public:
     receivedSSID = "";
     receivedPassword = "";
     receivedDebugMode = 0;
+    receivedCycleTime = 900;
     credentialsReceived = false;
     debugModeReceived = false;
+    cycleTimeReceived = false;
   }
   
   // Check if BLE is enabled (not permanently disabled)
@@ -416,6 +465,7 @@ BLEService* BLEConfig::pService = nullptr;
 BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pDebugModeCharacteristic = nullptr;
+BLECharacteristic* BLEConfig::pCycleTimeCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
@@ -424,8 +474,10 @@ bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
 String BLEConfig::receivedPassword = "";
 uint8_t BLEConfig::receivedDebugMode = 0;
+uint32_t BLEConfig::receivedCycleTime = 900;
 bool BLEConfig::credentialsReceived = false;
 bool BLEConfig::debugModeReceived = false;
+bool BLEConfig::cycleTimeReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
 const char* BLEConfig::deviceVersion = "v2.0.0";
