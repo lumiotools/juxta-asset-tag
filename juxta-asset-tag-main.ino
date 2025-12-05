@@ -824,15 +824,8 @@ void loop() {
     // Ensure status LED is restored
     updateStatusLED();
     
-    // Send data before sleep even if transmission was already successful
-    if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
-      bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if transmission already succeeded)...");
-      if (dataSentBeforeSleep) {
-        Serial.println("Data sent successfully before sleep");
-      } else {
-        Serial.println("Data transmission failed before sleep");
-      }
-    }
+    // DON'T send data before sleep - data was already sent after connection
+    // Sending data immediately before BLE stop causes heap corruption
     
     // Prepare for deep sleep
     Serial.println("Preparing for deep sleep - saving queue state...");
