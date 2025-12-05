@@ -453,12 +453,23 @@ void loop() {
         } else {
           Serial.println("Data transmission failed before sleep");
         }
+        
+        // Give BLE stack time to complete transmission and cleanup
+        delay(500);
       }
       
       // Turn off BLE
       if (BLEConfig::isEnabled()) {
         Serial.println("Turning off BLE...");
+        
+        // Give BLE time to finish any pending operations before deinit
+        delay(200);
+        
         BLEConfig::stop();
+        
+        // Give time for BLE deinit to complete before proceeding
+        delay(200);
+        
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
@@ -588,11 +599,22 @@ void loop() {
           } else {
             Serial.println("Data transmission failed before sleep");
           }
+          
+          // Give BLE stack time to complete transmission and cleanup
+          delay(500);
         }
         
         if (BLEConfig::isEnabled()) {
           Serial.println("Turning off BLE...");
+          
+          // Give BLE time to finish any pending operations before deinit
+          delay(200);
+          
           BLEConfig::stop();
+          
+          // Give time for BLE deinit to complete before proceeding
+          delay(200);
+          
           bleStartTime = 0;
           firstBleConnectionTime = 0;
           firstBleConnectionTracked = false;
@@ -725,7 +747,15 @@ void loop() {
     if (!waitingForOneMinute) {
       if (BLEConfig::isEnabled()) {
         Serial.println("BLE advertising period complete - turning off BLE...");
+        
+        // Give BLE time to finish any pending operations before deinit
+        delay(200);
+        
         BLEConfig::stop();
+        
+        // Give time for BLE deinit to complete before proceeding
+        delay(200);
+        
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
