@@ -442,34 +442,32 @@ void loop() {
       Serial.println("1-minute connection requirement satisfied");
       waitingForOneMinute = false;
       
-      // Proceed to deep sleep sequence immediately
-      Serial.println("Preparing to enter deep sleep");
-      
-      // Send data before sleep even if first transmission was successful
+      // Send data 5 seconds before deep sleep to avoid heap corruption
+      Serial.println("Sending final data before sleep (5 seconds before BLE shutdown)...");
       if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
-        bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if first transmission succeeded)...");
+        bool dataSentBeforeSleep = collectAndSendData("Final data transmission before sleep...");
         if (dataSentBeforeSleep) {
-          Serial.println("Data sent successfully before sleep");
+          Serial.println("Final data sent successfully");
         } else {
-          Serial.println("Data transmission failed before sleep");
+          Serial.println("Final data transmission failed");
         }
-        
-        // Give BLE stack time to complete transmission and cleanup
-        delay(500);
       }
+      
+      // Wait 5 seconds to let BLE complete all operations
+      Serial.println("Waiting 5 seconds for BLE operations to complete...");
+      for (int i = 5; i > 0; i--) {
+        Serial.print(i);
+        Serial.println(" seconds remaining...");
+        delay(1000);
+      }
+      
+      // Now safe to turn off BLE
+      Serial.println("Preparing to enter deep sleep");
       
       // Turn off BLE
       if (BLEConfig::isEnabled()) {
         Serial.println("Turning off BLE...");
-        
-        // Give BLE time to finish any pending operations before deinit
-        delay(200);
-        
         BLEConfig::stop();
-        
-        // Give time for BLE deinit to complete before proceeding
-        delay(200);
-        
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
@@ -567,8 +565,8 @@ void loop() {
       
       // Collect and send sensor data
       bool dataSent = collectAndSendData("BLE connected - sending data after 5 second delay (before sleep)...");
-      
-      if (dataSent) {
+    
+    if (dataSent) {
         Serial.println("Data sent successfully via BLE");
         earlyBleSucceeded = true; // Mark that early BLE transmission succeeded
         cycleStarted = true; // Mark cycle as started immediately to prevent cycle logic from running
@@ -587,34 +585,33 @@ void loop() {
         delay(3000);
       }
       
+      // Send data 5 seconds before deep sleep to avoid heap corruption
+      Serial.println("Sending final data before sleep (5 seconds before BLE shutdown)...");
+      if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+        bool dataSentBeforeSleep = collectAndSendData("Final data transmission before sleep...");
+        if (dataSentBeforeSleep) {
+          Serial.println("Final data sent successfully");
+        } else {
+          Serial.println("Final data transmission failed");
+        }
+      }
+      
+      // Wait 5 seconds to let BLE complete all operations
+      Serial.println("Waiting 5 seconds for BLE operations to complete...");
+      for (int i = 5; i > 0; i--) {
+        Serial.print(i);
+        Serial.println(" seconds remaining...");
+        delay(1000);
+      }
+      
+      // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
       
       // Turn off BLE (only if 1-minute wait completed)
       if (!waitingForOneMinute) {
-        // Send data before sleep even if first transmission was successful
-        if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
-          bool dataSentBeforeSleep = collectAndSendData("Sending data before sleep (even if first transmission succeeded)...");
-          if (dataSentBeforeSleep) {
-            Serial.println("Data sent successfully before sleep");
-          } else {
-            Serial.println("Data transmission failed before sleep");
-          }
-          
-          // Give BLE stack time to complete transmission and cleanup
-          delay(500);
-        }
-        
         if (BLEConfig::isEnabled()) {
           Serial.println("Turning off BLE...");
-          
-          // Give BLE time to finish any pending operations before deinit
-          delay(200);
-          
           BLEConfig::stop();
-          
-          // Give time for BLE deinit to complete before proceeding
-          delay(200);
-          
           bleStartTime = 0;
           firstBleConnectionTime = 0;
           firstBleConnectionTracked = false;
@@ -661,12 +658,12 @@ void loop() {
       // Enter deep sleep immediately
       esp_deep_sleep_start();
       return; // This should never be reached, but added for safety
-      } else {
-        Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
+    } else {
+      Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
         earlyBleSucceeded = false; // Mark that early BLE transmission failed
-        // Reset early attempt flag so cycle logic can try again if still connected
-        earlyBleAttempted = false;
-        // Continue to normal cycle logic below
+      // Reset early attempt flag so cycle logic can try again if still connected
+      earlyBleAttempted = false;
+      // Continue to normal cycle logic below
       }
     } else {
       // Delay hasn't passed yet - wait for next loop iteration
@@ -719,7 +716,7 @@ void loop() {
       
       if (dataSent) {
         Serial.println("Data sent successfully via BLE (retry)");
-      } else {
+    } else {
         Serial.println("Data transmission failed via BLE (retry)");
       }
     } else if (bleConnected && earlyBleAttempted && earlyBleSucceeded) {
@@ -742,20 +739,31 @@ void loop() {
       delay(3000);
     }
     
+    // Send data 5 seconds before turning off BLE to avoid heap corruption
+    if (BLEConfig::isEnabled() && BLEConfig::isConnected()) {
+      Serial.println("Sending final data before sleep (5 seconds before BLE shutdown)...");
+      bool dataSentBeforeSleep = collectAndSendData("Final data transmission before sleep...");
+      if (dataSentBeforeSleep) {
+        Serial.println("Final data sent successfully");
+      } else {
+        Serial.println("Final data transmission failed");
+      }
+      
+      // Wait 5 seconds to let BLE complete all operations
+      Serial.println("Waiting 5 seconds for BLE operations to complete...");
+      for (int i = 5; i > 0; i--) {
+        Serial.print(i);
+        Serial.println(" seconds remaining...");
+        delay(1000);
+      }
+    }
+    
     // Turn off BLE now that advertising period is complete and transmission attempted
     // (only if 1-minute wait completed)
     if (!waitingForOneMinute) {
       if (BLEConfig::isEnabled()) {
         Serial.println("BLE advertising period complete - turning off BLE...");
-        
-        // Give BLE time to finish any pending operations before deinit
-        delay(200);
-        
         BLEConfig::stop();
-        
-        // Give time for BLE deinit to complete before proceeding
-        delay(200);
-        
         bleStartTime = 0;
         firstBleConnectionTime = 0;
         firstBleConnectionTracked = false;
