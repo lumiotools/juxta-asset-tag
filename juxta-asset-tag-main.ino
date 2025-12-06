@@ -225,18 +225,12 @@ void setup() {
   updateStatusLED();
   delay(200);
 
-  // Initialize BLE on first cycle (power-on or reset button press)
-  // On subsequent cycles, BLE will be started in the loop
-  if (isFirstCycle) {
-    Serial.println("First cycle detected (POWER_ON or reset button press)");
-    BLEConfig::begin();
-    BLEConfig::setDeviceId(DEVICE_ID);
-    BLEConfig::setDeviceVersion(DEVICE_VERSION);
-    bleStartTime = millis();
-  } else {
-    Serial.println("Subsequent cycle detected (deep sleep wake-up)");
-    // BLE will be started in loop() for subsequent cycles
-  }
+  // Initialize BLE for both first and subsequent cycles
+  Serial.println("Initializing BLE...");
+  BLEConfig::begin();
+  BLEConfig::setDeviceId(DEVICE_ID);
+  BLEConfig::setDeviceVersion(DEVICE_VERSION);
+  bleStartTime = millis();
   
   delay(100);
 }
@@ -375,32 +369,6 @@ void loop() {
   
   // Determine BLE advertising duration based on cycle type
   unsigned long bleAdvertiseDuration = isFirstCycle ? BLE_ADVERTISE_FIRST_CYCLE_MS : BLE_ADVERTISE_SUBSEQUENT_CYCLE_MS;
-  
-  // Start BLE if not already enabled (for subsequent cycles after deep sleep)
-  // On first cycle, BLE is already started in setup()
-  if (!BLEConfig::isEnabled() && !isFirstCycle) {
-    Serial.println("Restarting BLE for subsequent cycle...");
-    BLEConfig::begin();
-    BLEConfig::setDeviceId(DEVICE_ID);
-    BLEConfig::setDeviceVersion(DEVICE_VERSION);
-    bleStartTime = millis();
-    cycleStarted = false; // Reset cycle flag
-    earlyBleAttempted = false; // Reset early BLE attempt flag for new cycle
-    earlyBleSucceeded = false; // Reset early BLE success flag for new cycle
-    firstBleConnectionTime = 0; // Reset first connection tracking for new cycle
-    firstBleConnectionTracked = false;
-    waitingForOneMinute = false; // Reset 1-minute wait flag
-    lastCountdownPrint = 0;
-  } else if (BLEConfig::isEnabled() && bleStartTime == 0) {
-    // BLE is enabled but start time not set (shouldn't happen, but safety check)
-    bleStartTime = millis();
-    earlyBleAttempted = false; // Reset early BLE attempt flag
-    earlyBleSucceeded = false; // Reset early BLE success flag
-    firstBleConnectionTime = 0; // Reset first connection tracking
-    firstBleConnectionTracked = false;
-    waitingForOneMinute = false; // Reset 1-minute wait flag
-    lastCountdownPrint = 0;
-  }
   
   // USB state monitoring
   bool currentUSBState = isUSBConnected();
