@@ -3,7 +3,6 @@
 #ifndef GPS_SENSOR_H
 #define GPS_SENSOR_H
 
-#include "time_sync.h"
 #include "nvs_config.h"
 
 // GPS pin definitions
@@ -20,7 +19,7 @@ struct GPSData {
   int satellites;
   int fixType;  // 0=no fix, 2=2D, 3=3D
   float hdop;
-  char timestamp[20];  // Formatted time string (yyyy:mm:dd hh:mm:ss)
+  unsigned long lastFixTimeMillis = 0;  // Timestamp (millis) when last valid fix was recorded
   bool hasValidFix = false;
 };
 
@@ -194,6 +193,7 @@ private:
       // GPS HAS FIX
       data.hasValidFix = true;
       data.fixType = 3;  // Assume 3D fix when status is A
+      data.lastFixTimeMillis = millis();  // Record timestamp when fix was received
       
       // Extract position data
       String lat = sentence.substring(commaPos[2] + 1, commaPos[3]);
@@ -220,9 +220,6 @@ private:
       // Course/heading
       data.heading = courseStr.toFloat();
       
-      // Update timestamp
-      TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
-      
       // RMC doesn't provide altitude, satellites, or HDOP
       // Keep last known values if available, otherwise keep defaults
       if (lastKnownData.hasValidFix) {
@@ -239,8 +236,8 @@ private:
       // Store as last known values
       lastKnownData = data;
       
-      // Save to NVS for hot start on next boot
-      NVSConfig::saveLastGPSLocation(data.latitude, data.longitude, data.altitude);
+      // Save complete GPS data to NVS for hot start on next boot
+      NVSConfig::saveLastGPSData(data);
       
     } else {
       // NO FIX - use last known values
@@ -256,8 +253,7 @@ private:
         data.heading = lastKnownData.heading;
         data.satellites = lastKnownData.satellites;
         data.hdop = lastKnownData.hdop;
-        // Keep current timestamp to indicate this is stale data
-        TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
+        data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
       }
     }
   }
@@ -309,22 +305,15 @@ public:
     data.heading = 0.0;
     data.satellites = 0;
     data.hdop = 0.0;
-    TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
+    data.lastFixTimeMillis = 0;
     
-    // Load last known location from NVS and send hot start command
-    double savedLat = 0.0, savedLon = 0.0, savedAlt = 0.0;
-    if (NVSConfig::loadLastGPSLocation(savedLat, savedLon, savedAlt)) {
-      Serial.println("Found last known GPS location in NVS");
-      // Update lastKnownData with saved values
-      lastKnownData.hasValidFix = true;
-      lastKnownData.latitude = savedLat;
-      lastKnownData.longitude = savedLon;
-      lastKnownData.altitude = savedAlt;
-      
-      // Send hot start command to GPS module for faster fix
-      sendHotStartCommand(savedLat, savedLon, savedAlt);
+    // Load last known GPS data from NVS and send hot start command
+    if (NVSConfig::loadLastGPSData(lastKnownData)) {
+      Serial.println("Found last known GPS data in NVS");
+      // Send hot start command to GPS module for faster fix (only needs position)
+      sendHotStartCommand(lastKnownData.latitude, lastKnownData.longitude, lastKnownData.altitude);
     } else {
-      Serial.println("No saved GPS location found");
+      Serial.println("No saved GPS data found");
       lastKnownData = data;
     }
     
@@ -359,7 +348,7 @@ public:
       data.heading = lastKnownData.heading;
       data.satellites = lastKnownData.satellites;
       data.hdop = lastKnownData.hdop;
-      TimeSync::getCurrentTimeString(data.timestamp, sizeof(data.timestamp));
+      data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
       // hasValidFix remains false to indicate this is stale data
     }
   }

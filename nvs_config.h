@@ -20,6 +20,12 @@ private:
   static const char* GPS_LAST_LON_KEY;
   static const char* GPS_LAST_ALT_KEY;
   static const char* GPS_LAST_FIX_KEY;
+  static const char* GPS_LAST_SPEED_KEY;
+  static const char* GPS_LAST_HEADING_KEY;
+  static const char* GPS_LAST_SATELLITES_KEY;
+  static const char* GPS_LAST_FIXTYPE_KEY;
+  static const char* GPS_LAST_HDOP_KEY;
+  static const char* GPS_LAST_FIX_TIME_KEY;
   static const char* CYCLE_TIME_KEY;
 
 public:
@@ -165,6 +171,7 @@ public:
   static bool setQueueReadPtr(uint32_t readPtr) { return writeU32NVS(QUEUE_READ_PTR_KEY, readPtr); }
 
   // GPS last known location storage (using strings to handle negative coordinates)
+  // Legacy function - kept for backward compatibility
   static bool saveLastGPSLocation(double latitude, double longitude, double altitude) {
     bool success = true;
     success &= writeU32NVS(GPS_LAST_FIX_KEY, 1); // Mark as having valid fix
@@ -199,6 +206,72 @@ public:
     return true;
   }
 
+  // Save complete GPS data structure
+  // Note: GPSData struct must be defined when this template is instantiated
+  template<typename GPSDataType>
+  static bool saveLastGPSData(const GPSDataType& gpsData) {
+    if (!gpsData.hasValidFix) return false;
+    
+    bool success = true;
+    success &= writeU32NVS(GPS_LAST_FIX_KEY, 1); // Mark as having valid fix
+    
+    // Store coordinates as strings to preserve precision and handle negative values
+    char latStr[20], lonStr[20], altStr[20], speedStr[20], headingStr[20], hdopStr[20];
+    snprintf(latStr, sizeof(latStr), "%.7f", gpsData.latitude);
+    snprintf(lonStr, sizeof(lonStr), "%.7f", gpsData.longitude);
+    snprintf(altStr, sizeof(altStr), "%.2f", gpsData.altitude);
+    snprintf(speedStr, sizeof(speedStr), "%.3f", gpsData.speed);
+    snprintf(headingStr, sizeof(headingStr), "%.2f", gpsData.heading);
+    snprintf(hdopStr, sizeof(hdopStr), "%.2f", gpsData.hdop);
+    
+    success &= writeStringNVS(GPS_LAST_LAT_KEY, latStr);
+    success &= writeStringNVS(GPS_LAST_LON_KEY, lonStr);
+    success &= writeStringNVS(GPS_LAST_ALT_KEY, altStr);
+    success &= writeStringNVS(GPS_LAST_SPEED_KEY, speedStr);
+    success &= writeStringNVS(GPS_LAST_HEADING_KEY, headingStr);
+    success &= writeU32NVS(GPS_LAST_SATELLITES_KEY, (uint32_t)gpsData.satellites);
+    success &= writeU8NVS(GPS_LAST_FIXTYPE_KEY, (uint8_t)gpsData.fixType);
+    success &= writeStringNVS(GPS_LAST_HDOP_KEY, hdopStr);
+    // Store lastFixTimeMillis (unsigned long, 32-bit on ESP32)
+    success &= writeU32NVS(GPS_LAST_FIX_TIME_KEY, (uint32_t)gpsData.lastFixTimeMillis);
+    
+    return success;
+  }
+
+  // Load complete GPS data structure
+  template<typename GPSDataType>
+  static bool loadLastGPSData(GPSDataType& gpsData) {
+    uint32_t hasFix = readU32NVS(GPS_LAST_FIX_KEY, 0);
+    if (hasFix == 0) return false; // No saved location
+    
+    String latStr = readStringNVS(GPS_LAST_LAT_KEY);
+    String lonStr = readStringNVS(GPS_LAST_LON_KEY);
+    String altStr = readStringNVS(GPS_LAST_ALT_KEY);
+    
+    if (latStr.length() == 0 || lonStr.length() == 0 || altStr.length() == 0) {
+      return false; // Invalid data
+    }
+    
+    gpsData.hasValidFix = true;
+    gpsData.latitude = latStr.toFloat();
+    gpsData.longitude = lonStr.toFloat();
+    gpsData.altitude = altStr.toFloat();
+    
+    // Load additional fields if available (for backward compatibility, use defaults if not present)
+    String speedStr = readStringNVS(GPS_LAST_SPEED_KEY);
+    String headingStr = readStringNVS(GPS_LAST_HEADING_KEY);
+    String hdopStr = readStringNVS(GPS_LAST_HDOP_KEY);
+    
+    gpsData.speed = (speedStr.length() > 0) ? speedStr.toFloat() : 0.0;
+    gpsData.heading = (headingStr.length() > 0) ? headingStr.toFloat() : 0.0;
+    gpsData.satellites = (int)readU32NVS(GPS_LAST_SATELLITES_KEY, 0);
+    gpsData.fixType = (int)readU8NVS(GPS_LAST_FIXTYPE_KEY, 0);
+    gpsData.hdop = (hdopStr.length() > 0) ? hdopStr.toFloat() : 0.0;
+    gpsData.lastFixTimeMillis = readU32NVS(GPS_LAST_FIX_TIME_KEY, 0);
+    
+    return true;
+  }
+
   static bool hasLastGPSLocation() {
     return (readU32NVS(GPS_LAST_FIX_KEY, 0) == 1);
   }
@@ -219,6 +292,12 @@ const char* NVSConfig::GPS_LAST_LAT_KEY = "gps_last_lat";
 const char* NVSConfig::GPS_LAST_LON_KEY = "gps_last_lon";
 const char* NVSConfig::GPS_LAST_ALT_KEY = "gps_last_alt";
 const char* NVSConfig::GPS_LAST_FIX_KEY = "gps_last_fix";
+const char* NVSConfig::GPS_LAST_SPEED_KEY = "gps_last_speed";
+const char* NVSConfig::GPS_LAST_HEADING_KEY = "gps_last_heading";
+const char* NVSConfig::GPS_LAST_SATELLITES_KEY = "gps_last_sat";
+const char* NVSConfig::GPS_LAST_FIXTYPE_KEY = "gps_last_fixtype";
+const char* NVSConfig::GPS_LAST_HDOP_KEY = "gps_last_hdop";
+const char* NVSConfig::GPS_LAST_FIX_TIME_KEY = "gps_last_fix_time";
 const char* NVSConfig::CYCLE_TIME_KEY = "cycle_time";
 
 #endif

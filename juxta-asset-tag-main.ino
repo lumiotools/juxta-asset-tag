@@ -242,9 +242,8 @@ void setup() {
 
 String createSensorCSV(IMUData imuData, GPSData gpsData) {
   static char csvBuffer[400];  // Increased buffer size to prevent overflow  
-  char timestamp[20];
+  unsigned long currentMillis = millis();
   
-  TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
   int batteryLevel = BatteryMonitor::getBatteryPercentage();
   
   // Get signal strength based on active connection (BLE priority, then WiFi)
@@ -261,10 +260,10 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   //             gps.fix,gps.fixType,gps.last_recieved_on,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%d,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%s,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%d,%lu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%lu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
            batteryLevel,
-           timestamp,
+           currentMillis,
            signalStrength,
            imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
            imuData.gyroscope.x, imuData.gyroscope.y, imuData.gyroscope.z,
@@ -272,7 +271,7 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
            
            gpsData.hasValidFix ? "true" : "false",
            gpsData.fixType,
-           gpsData.timestamp,
+           currentMillis,
            gpsData.satellites,
            gpsData.hasValidFix ? gpsData.latitude : 0.0,
            gpsData.hasValidFix ? gpsData.longitude : 0.0,
