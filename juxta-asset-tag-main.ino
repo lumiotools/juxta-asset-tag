@@ -17,7 +17,7 @@
 #include <Ticker.h>
 
 // Device ID and Version Configuration (hardcoded to save memory)
-const char* DEVICE_ID = "ASSET_TAG_007";  // Change this for each device
+const char* DEVICE_ID = "ASSET_TAG_WJ";  // Change this for each device
 const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
 const int STATUS_LED_PIN = D1;
@@ -64,7 +64,7 @@ bool flashInitialized = false;
 
 // BLE advertising durations
 const unsigned long BLE_ADVERTISE_FIRST_CYCLE_MS = 60000; // 60 seconds for first cycle (power-on/reset)
-const unsigned long BLE_ADVERTISE_SUBSEQUENT_CYCLE_MS = 4000; // 4 seconds for subsequent cycles
+const unsigned long BLE_ADVERTISE_SUBSEQUENT_CYCLE_MS = 10000; // 4 seconds for subsequent cycles
 
 // USB detection function for ESP32-S3
 // Checks if USB is connected by verifying USB Serial availability
@@ -174,19 +174,6 @@ void setup() {
   // Determine if this is first cycle (power-on or reset button) vs subsequent (deep sleep wake-up)
   bool isFirstCycle = (resetReason == ESP_RST_POWERON || resetReason == ESP_RST_EXT);
   
-  // Initialize BLE on first cycle (power-on or reset button press)
-  // On subsequent cycles, BLE will be started in the loop
-  if (isFirstCycle) {
-    Serial.println("First cycle detected (POWER_ON or reset button press)");
-    BLEConfig::begin();
-    BLEConfig::setDeviceId(DEVICE_ID);
-    BLEConfig::setDeviceVersion(DEVICE_VERSION);
-    bleStartTime = millis();
-  } else {
-    Serial.println("Subsequent cycle detected (deep sleep wake-up)");
-    // BLE will be started in loop() for subsequent cycles
-  }
-  
   // Initialize Battery Monitor ADC
   BatteryMonitor::initializeADC();
   delay(100);
@@ -236,6 +223,20 @@ void setup() {
 
   // Update status LED based on sensor initialization
   updateStatusLED();
+  delay(200);
+
+  // Initialize BLE on first cycle (power-on or reset button press)
+  // On subsequent cycles, BLE will be started in the loop
+  if (isFirstCycle) {
+    Serial.println("First cycle detected (POWER_ON or reset button press)");
+    BLEConfig::begin();
+    BLEConfig::setDeviceId(DEVICE_ID);
+    BLEConfig::setDeviceVersion(DEVICE_VERSION);
+    bleStartTime = millis();
+  } else {
+    Serial.println("Subsequent cycle detected (deep sleep wake-up)");
+    // BLE will be started in loop() for subsequent cycles
+  }
   
   delay(100);
 }
@@ -452,10 +453,6 @@ void loop() {
         }
       }
       
-      // Wait 5 seconds to let BLE complete transmission before stopping
-      Serial.println("Waiting 5 seconds for BLE to complete transmission...");
-      delay(5000);
-      
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
       
@@ -591,10 +588,6 @@ void loop() {
           Serial.println("Final data transmission failed");
         }
       }
-      
-      // Wait 5 seconds to let BLE complete transmission before stopping
-      Serial.println("Waiting 5 seconds for BLE to complete transmission...");
-      delay(5000);
       
       // Now safe to turn off BLE
       Serial.println("Preparing to enter deep sleep");
@@ -742,10 +735,6 @@ void loop() {
       }
     }
     
-    // Wait 5 seconds to let BLE complete transmission before stopping
-    Serial.println("Waiting 5 seconds for BLE to complete transmission...");
-    delay(5000);
-    
     // Turn off BLE now that advertising period is complete and transmission attempted
     // (only if 1-minute wait completed)
     if (!waitingForOneMinute) {
@@ -834,10 +823,6 @@ void loop() {
         Serial.println("Final data transmission failed");
       }
     }
-    
-    // Wait 5 seconds to let BLE complete transmission before stopping
-    Serial.println("Waiting 5 seconds for BLE to complete transmission...");
-    delay(5000);
     
     // Prepare for deep sleep
     Serial.println("Preparing for deep sleep - saving queue state...");
