@@ -13,8 +13,8 @@
 #include "esp_bt.h"
 
 // Forward declarations for status LED control
-extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
-extern void stopStatusLEDBlink();
+extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+extern void stopStatusLEDBlink(long long startTime);
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -96,7 +96,7 @@ private:
   class SSIDCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
       // Start blue LED blinking on receive
-      startStatusLEDBlink(0, 0, 255);
+      // startStatusLEDBlink(0, 0, 255);
       
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
@@ -104,7 +104,7 @@ private:
       }
       
       // Stop LED blinking and restore to green
-      stopStatusLEDBlink();
+      // stopStatusLEDBlink();
     }
   };
 
@@ -112,7 +112,7 @@ private:
   class PasswordCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
       // Start blue LED blinking on receive
-      startStatusLEDBlink(0, 0, 255);
+      // startStatusLEDBlink(0, 0, 255);
       
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
@@ -124,7 +124,7 @@ private:
       }
       
       // Stop LED blinking and restore to green
-      stopStatusLEDBlink();
+      // stopStatusLEDBlink();
     }
   };
 
@@ -132,7 +132,7 @@ private:
   class DebugModeCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
       // Start blue LED blinking on receive
-      startStatusLEDBlink(0, 0, 255);
+      // startStatusLEDBlink(0, 0, 255);
       
       // Read raw byte data (sent as Uint8Array from web interface)
       String value = pCharacteristic->getValue();
@@ -156,7 +156,7 @@ private:
       }
       
       // Stop LED blinking and restore to green
-      stopStatusLEDBlink();
+      // stopStatusLEDBlink();
     }
   };
 
@@ -164,7 +164,7 @@ private:
   class CycleTimeCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
       // Start blue LED blinking on receive
-      startStatusLEDBlink(0, 0, 255);
+      long long startTime = startStatusLEDBlink(0, 0, 255);
       
       // Read cycle time as string (sent as string from web interface, value in seconds)
       String value = pCharacteristic->getValue();
@@ -183,7 +183,7 @@ private:
       }
       
       // Stop LED blinking and restore to green
-      stopStatusLEDBlink();
+      stopStatusLEDBlink(startTime);
     }
   };
 
@@ -354,7 +354,7 @@ public:
   // Stop and deinitialize BLE permanently (consumes no power)
   static void stop() {
     // Stop LED blinking and restore to green
-    stopStatusLEDBlink();
+    stopStatusLEDBlink(TimeSync::getCurrentTimeMillis() + 4000);
     
     // Disconnect any connected clients first (prevents heap corruption)
     if (pServer != nullptr && deviceConnected) {
@@ -434,7 +434,7 @@ public:
     }
     
     // Start blue LED blinking on transmit
-    startStatusLEDBlink(0, 0, 255);
+    long long startTime = startStatusLEDBlink(0, 0, 255);
     
     // Calculate safe chunk size (MTU - 3 bytes for ATT header)
     uint16_t maxChunkSize = (mtuSize > 23) ? (mtuSize - 3) : 20;
@@ -465,7 +465,7 @@ public:
     }
     
     // Stop LED blinking and restore to green
-    stopStatusLEDBlink();
+    stopStatusLEDBlink(startTime);
     
     return true;
   }

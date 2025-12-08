@@ -39,10 +39,10 @@ BatteryIndicatorLED batteryIndicatorLED;
 TransmissionHandler transmissionHandler;
 
 // BLE start time tracking
-unsigned long bleStartTime = 0;
+unsigned long long bleStartTime = 0;
 
 // First BLE connection time tracking (for 1-minute connection requirement)
-unsigned long firstBleConnectionTime = 0;
+unsigned long long firstBleConnectionTime = 0;
 bool firstBleConnectionTracked = false;
 bool waitingForOneMinute = false; // Flag to track if we're in 1-minute wait period
 unsigned long lastCountdownPrint = 0; // Track last countdown print time
@@ -108,17 +108,22 @@ void toggleStatusLED() {
 }
 
 // Start blinking status LED with specified color
-void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
+long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
   blinkR = r;
   blinkG = g;
   blinkB = b;
   statusLedBlinkState = false;
-  statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
+  toggleStatusLED();
+  return TimeSync::getCurrentTimeMillis();
+  // statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
+  // statusLedTicker.attach_ms(4000, toggleStatusLED); // 20ms = 50Hz blink
 }
 
 // Stop blinking and restore to normal status color
-void stopStatusLEDBlink() {
-  statusLedTicker.detach();
+void stopStatusLEDBlink(long long t) {
+  delay(4000 - (TimeSync::getCurrentTimeMillis() - t));
+  // statusLedTicker.detach();
+  toggleStatusLED(); // Ensure LED is on before restoring
   setPixelAndShow(0, restoreR, restoreG, restoreB);
 }
 
@@ -230,14 +235,14 @@ void setup() {
   BLEConfig::begin();
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
-  bleStartTime = millis();
+  bleStartTime = TimeSync::getCurrentTimeMillis();
   
   delay(100);
 }
 
 String createSensorCSV(IMUData imuData, GPSData gpsData) {
   static char csvBuffer[400];  // Increased buffer size to prevent overflow  
-  unsigned long currentMillis = millis();
+  unsigned long long currentMillis = TimeSync::getCurrentTimeMillis();
   
   int batteryLevel = BatteryMonitor::getBatteryPercentage();
   
@@ -255,7 +260,7 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   //             gps.fix,gps.fixType,gps.last_recieved_on,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%d,%lu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%lu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%d,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
            batteryLevel,
            currentMillis,
@@ -266,7 +271,7 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
            
            gpsData.hasValidFix ? "true" : "false",
            gpsData.fixType,
-           currentMillis,
+           gpsData.lastFixTimeMillis,
            gpsData.satellites,
            gpsData.hasValidFix ? gpsData.latitude : 0.0,
            gpsData.hasValidFix ? gpsData.longitude : 0.0,
@@ -322,28 +327,20 @@ bool collectAndSendData(const char* messagePrefix) {
 }
 
 // Helper function to check if time is already synced
-bool isTimeSynced() {
-  time_t now = time(nullptr);
-  // Time is synced if it's greater than 24 hours (1970-01-02 00:00:00)
-  // This indicates a valid NTP-synced time
-  return (now > 24 * 3600);
-}
-
 // Attempt time sync if WiFi is connected and time hasn't been synced yet
 void attemptTimeSyncIfNeeded() {
-  if (CustomWiFi::isConnected()) {
-    if (!isTimeSynced()) {
-      Serial.println("Time not synced - attempting NTP sync...");
-      bool syncSuccess = TimeSync::syncTimeNTP();
-      if (syncSuccess) {
-        Serial.println("Time sync successful");
-      } else {
-        Serial.println("Time sync failed");
-      }
-    } else {
-      Serial.println("Time already synced, skipping NTP sync");
-    }
+  if (!CustomWiFi::isConnected()) {
+    Serial.println("WiFi not connected - skipping time sync");
+    return;
   }
+  
+  if (TimeSync::isTimeSynced()) {
+    Serial.println("Time already synced - skipping NTP sync");
+    return;
+  }
+  
+  Serial.println("Attempting NTP sync...");
+  TimeSync::syncTimeNTP();
 }
 
 void loop() {
@@ -351,7 +348,7 @@ void loop() {
   static bool cycleStarted = false; // Track if cycle logic has started
   static bool earlyBleAttempted = false; // Track if we already tried early BLE transmission
   static bool earlyBleSucceeded = false; // Track if early BLE transmission was successful
-  unsigned long currentTime = millis();
+  unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
   static bool lastUSBState = isUSBConnected();
   bool bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
   
@@ -775,6 +772,12 @@ void loop() {
       Serial.println("Entering storage mode - queuing data to flash...");
       // Data is already queued by sendDataWithRetryLogic if transmission failed
       // Just ensure it's saved
+      bool queued = transmissionHandler.handleDataTransmission(csvData);
+      if (queued) {
+        Serial.println("Data successfully queued to flash");
+      } else {
+        Serial.println("Failed to queue data to flash!");
+      }
       transmissionHandler.saveQueueState();
     }
     

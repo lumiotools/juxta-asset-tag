@@ -7,8 +7,8 @@
 #include "spi_flash_handler.h"
 
 // External LED blink functions from main.ino
-extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
-extern void stopStatusLEDBlink();  
+extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+extern void stopStatusLEDBlink(long long startTime);  
 
 class DataQueue {
 private:
@@ -219,7 +219,7 @@ public:
     Serial.print(" bytes to flash at 0x");
     Serial.println(writePtr, HEX);
     
-    startStatusLEDBlink(0, 255, 255);
+    long long startTime = startStatusLEDBlink(150, 75, 0);
     
     if (!flashHandler->writeCharArray(writePtr, dataStr, dataLen)) {
       Serial.print("ERROR: Failed to write to flash at 0x");
@@ -227,13 +227,13 @@ public:
       Serial.print(" (length: ");
       Serial.print(dataLen);
       Serial.println(" bytes)");
-      stopStatusLEDBlink();
+      stopStatusLEDBlink(startTime);
       
       return false;
     }
     
     Serial.println("Flash write successful");
-    stopStatusLEDBlink();
+    stopStatusLEDBlink(startTime);
     
     writePtr += dataLen;
     

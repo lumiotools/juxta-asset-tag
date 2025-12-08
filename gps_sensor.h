@@ -4,6 +4,7 @@
 #define GPS_SENSOR_H
 
 #include "nvs_config.h"
+#include "time_sync.h"
 
 // GPS pin definitions
 #define GPS_TX_PIN D7      // GPS_TX connects to ESP32 RX
@@ -19,7 +20,7 @@ struct GPSData {
   int satellites;
   int fixType;  // 0=no fix, 2=2D, 3=3D
   float hdop;
-  unsigned long lastFixTimeMillis = 0;  // Timestamp (millis) when last valid fix was recorded
+  unsigned long long lastFixTimeMillis = 0;  // Timestamp (ms since epoch or millis) when last valid fix was recorded
   bool hasValidFix = false;
 };
 
@@ -113,11 +114,11 @@ private:
       }
       
       // Try to receive data for detection timeout
-      unsigned long startTime = millis();
+      unsigned long long startTime = TimeSync::getCurrentTimeMillis();
       String testSentence = "";
       bool foundValidData = false;
       
-      while (millis() - startTime < detectionTimeout) {
+      while (TimeSync::getCurrentTimeMillis() - startTime < detectionTimeout) {
         if (Serial1.available() > 0) {
           char c = Serial1.read();
           
@@ -193,7 +194,7 @@ private:
       // GPS HAS FIX
       data.hasValidFix = true;
       data.fixType = 3;  // Assume 3D fix when status is A
-      data.lastFixTimeMillis = millis();  // Record timestamp when fix was received
+      data.lastFixTimeMillis = TimeSync::getCurrentTimeMillis();  // Record timestamp when fix was received
       
       // Extract position data
       String lat = sentence.substring(commaPos[2] + 1, commaPos[3]);

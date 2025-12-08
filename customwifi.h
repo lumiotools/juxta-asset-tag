@@ -6,11 +6,11 @@
 #include "nvs_config.h"
 
 // Forward declarations for status LED control
-extern void startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
-extern void stopStatusLEDBlink();
+extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+extern void stopStatusLEDBlink(long long t);
 
 // Server Configuration
-const char* SERVER_URL = "http://echo-http-requests.appspot.com/push/juxtatetsing";
+const char* SERVER_URL = "https://unusable-melody-unhealing.ngrok-free.dev/api/record/wifi/v2.0.0";
 const int REQUEST_TIMEOUT = 5000; // 5 seconds
 
 class CustomWiFi {
@@ -48,7 +48,7 @@ public:
     
     // Start orange LED blinking for WiFi transmission
     // Orange = (255, 165, 0)
-    startStatusLEDBlink(255, 165, 0);
+    long long startTime = startStatusLEDBlink(255, 255, 255);
     
     HTTPClient http;
     http.setTimeout(REQUEST_TIMEOUT);
@@ -59,7 +59,7 @@ public:
     int httpResponseCode = http.POST(csvData);
     
     // Stop LED blinking and restore to green
-    stopStatusLEDBlink();
+    stopStatusLEDBlink(startTime);
     
     if (httpResponseCode > 0) {
       http.end();

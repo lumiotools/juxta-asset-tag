@@ -96,6 +96,26 @@ private:
     return (err == ESP_OK);
   }
 
+  static uint64_t readU64NVS(const char* key, uint64_t defaultVal = 0) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return defaultVal;
+    
+    uint64_t value = defaultVal;
+    nvs_get_u64(nvsHandle, key, &value);
+    nvs_close(nvsHandle);
+    return value;
+  }
+
+  static bool writeU64NVS(const char* key, uint64_t value) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    esp_err_t err = nvs_set_u64(nvsHandle, key, value);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK);
+  }
+
   static uint8_t readU8NVS(const char* key, uint8_t defaultVal = 0) {
     nvs_handle_t nvsHandle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return defaultVal;
@@ -232,8 +252,8 @@ public:
     success &= writeU32NVS(GPS_LAST_SATELLITES_KEY, (uint32_t)gpsData.satellites);
     success &= writeU8NVS(GPS_LAST_FIXTYPE_KEY, (uint8_t)gpsData.fixType);
     success &= writeStringNVS(GPS_LAST_HDOP_KEY, hdopStr);
-    // Store lastFixTimeMillis (unsigned long, 32-bit on ESP32)
-    success &= writeU32NVS(GPS_LAST_FIX_TIME_KEY, (uint32_t)gpsData.lastFixTimeMillis);
+    // Store lastFixTimeMillis (64-bit timestamp in milliseconds)
+    success &= writeU64NVS(GPS_LAST_FIX_TIME_KEY, (uint64_t)gpsData.lastFixTimeMillis);
     
     return success;
   }
@@ -267,7 +287,7 @@ public:
     gpsData.satellites = (int)readU32NVS(GPS_LAST_SATELLITES_KEY, 0);
     gpsData.fixType = (int)readU8NVS(GPS_LAST_FIXTYPE_KEY, 0);
     gpsData.hdop = (hdopStr.length() > 0) ? hdopStr.toFloat() : 0.0;
-    gpsData.lastFixTimeMillis = readU32NVS(GPS_LAST_FIX_TIME_KEY, 0);
+    gpsData.lastFixTimeMillis = readU64NVS(GPS_LAST_FIX_TIME_KEY, 0);
     
     return true;
   }
