@@ -351,6 +351,7 @@ void loop() {
   static bool cycleStarted = false; // Track if cycle logic has started
   static bool earlyBleAttempted = false; // Track if we already tried early BLE transmission
   static bool earlyBleSucceeded = false; // Track if early BLE transmission was successful
+  static unsigned long long lastCycleTime = 0; // Track last cycle execution time
   unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
   static bool lastUSBState = isUSBConnected();
   bool bleMinConnectionTimeElapsed = true; // Default to true (no restriction)
@@ -421,23 +422,19 @@ void loop() {
         }
       }
       
-      // Now safe to turn off BLE
-      Serial.println("Preparing to enter deep sleep");
+      // Reset cycle flags to allow next cycle to run
+      cycleStarted = false;
+      earlyBleAttempted = false;
+      earlyBleSucceeded = false;
       
-      // Turn off BLE
+      // Check if BLE is enabled - if so, don't deep sleep, just continue loop
       if (BLEConfig::isEnabled()) {
-        Serial.println("Turning off BLE...");
-        BLEConfig::stop(); // Now handles graceful disconnect internally
-        bleStartTime = 0;
-        firstBleConnectionTime = 0;
-        firstBleConnectionTracked = false;
-        waitingForOneMinute = false;
+        Serial.println("BLE is enabled - skipping deep sleep, continuing loop for next cycle");
+        // Continue loop - BLE will stay on and next cycle will run when time elapses
+        return;
       }
       
-      // Ensure status LED is restored
-      updateStatusLED();
-      
-      // Prepare for deep sleep
+      // BLE is not enabled - proceed with deep sleep
       Serial.println("Preparing for deep sleep - saving queue state...");
       transmissionHandler.saveQueueState();
       
@@ -513,6 +510,22 @@ void loop() {
     bleMinConnectionTimeElapsed = (currentTime - firstBleConnectionTime >= BLE_MIN_CONNECTION_DURATION_MS);
   }
   
+  // Check if cycle time has elapsed (time-based cycle execution)
+  // Get cycle time from NVS (default: 900 seconds = 15 minutes)
+  uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
+  unsigned long cycleTimeMillis = (unsigned long)cycleTimeSeconds * 1000ULL;
+  bool cycleTimeElapsed = false;
+  
+  // Initialize lastCycleTime on first run
+  if (lastCycleTime == 0) {
+    lastCycleTime = currentTime;
+  }
+  
+  // Check if cycle time has elapsed
+  if (currentTime - lastCycleTime >= cycleTimeMillis) {
+    cycleTimeElapsed = true;
+  }
+  
   // EARLY EXIT: If BLE is connected and we haven't started the cycle yet, send data after 5 seconds
   // Skip if we're already waiting for 1-minute requirement
   if (!cycleStarted && !earlyBleAttempted && !waitingForOneMinute && BLEConfig::isEnabled() && BLEConfig::isConnected()) {
@@ -530,7 +543,7 @@ void loop() {
       if (dataSent) {
         Serial.println("Data sent successfully via BLE (FIRST transmission)");
         earlyBleSucceeded = true; // Mark that early BLE transmission succeeded
-        cycleStarted = true; // Mark cycle as started immediately to prevent cycle logic from running
+        // Don't set cycleStarted - allow cycles to run based on time
       
       // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
       if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
@@ -557,28 +570,19 @@ void loop() {
         }
       }
       
-      // Now safe to turn off BLE
-      Serial.println("Preparing to enter deep sleep");
+      // Reset cycle flags to allow next cycle to run
+      cycleStarted = false;
+      earlyBleAttempted = false;
+      earlyBleSucceeded = false;
       
-      // Turn off BLE (only if 1-minute wait completed)
-      if (!waitingForOneMinute) {
-        if (BLEConfig::isEnabled()) {
-          Serial.println("Turning off BLE...");
-          BLEConfig::stop(); // Now handles graceful disconnect internally
-          bleStartTime = 0;
-          firstBleConnectionTime = 0;
-          firstBleConnectionTracked = false;
-          waitingForOneMinute = false;
-        }
-      } else {
-        // Still waiting for 1 minute - return to loop() to continue waiting
+      // Check if BLE is enabled - if so, don't deep sleep, just continue loop
+      if (BLEConfig::isEnabled()) {
+        Serial.println("BLE is enabled - skipping deep sleep, continuing loop for next cycle");
+        // Continue loop - BLE will stay on and next cycle will run when time elapses
         return;
       }
       
-      // Ensure status LED is restored
-      updateStatusLED();
-      
-      // Prepare for deep sleep
+      // BLE is not enabled - proceed with deep sleep
       Serial.println("Preparing for deep sleep - saving queue state...");
       transmissionHandler.saveQueueState();
       
@@ -612,7 +616,7 @@ void loop() {
       esp_deep_sleep_start();
       return; // This should never be reached, but added for safety
     } else {
-      Serial.println("Early BLE transmission failed - will wait for advertising period or try WiFi");
+      Serial.println("Early BLE transmission failed - will wait for cycle time or try WiFi");
         earlyBleSucceeded = false; // Mark that early BLE transmission failed
       // Reset early attempt flag so cycle logic can try again if still connected
       earlyBleAttempted = false;
@@ -624,19 +628,26 @@ void loop() {
     }
   }
   
-  // CYCLE LOGIC: Execute once per cycle AFTER BLE advertising period completes
-  // Only turn off BLE and switch to WiFi after the full advertising time has elapsed
-  // Note: For first cycle, we'll wait for 1-minute connection requirement before disconnecting BLE
-  // On first cycle, also ensure 1-minute connection requirement is met before starting cycle logic
-  bool canStartCycle = bleAdvertiseTimeElapsed;
-  if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0) {
-    // On first cycle, don't start cycle logic until 1 minute has passed since first connection
+  // CYCLE LOGIC: Execute periodically based on cycle time (independent of BLE state)
+  // Cycle runs when cycle time has elapsed, regardless of BLE advertising period
+  // For first cycle, still respect 1-minute connection requirement if applicable
+  bool canStartCycle = cycleTimeElapsed;
+  
+  // On first cycle, ensure 1-minute connection requirement is met before starting cycle logic
+  // (only if we're tracking first connection and haven't completed the wait)
+  if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0 && waitingForOneMinute) {
+    canStartCycle = false; // Don't start cycle if still waiting for 1 minute
+  } else if (isFirstCycle && firstBleConnectionTracked && firstBleConnectionTime > 0 && !waitingForOneMinute) {
+    // First cycle wait completed, allow cycle to proceed
     canStartCycle = canStartCycle && bleMinConnectionTimeElapsed;
   }
   
   if (canStartCycle && !cycleStarted) {
     cycleStarted = true; // Mark cycle as started to prevent re-execution
-    Serial.println("BLE advertising period elapsed, executing cycle logic...");
+    Serial.println("Cycle time elapsed, executing cycle logic...");
+    
+    // Update last cycle time
+    lastCycleTime = currentTime;
     
     // Now that advertising period is complete, check BLE connection status
     bool bleConnected = BLEConfig::isEnabled() && BLEConfig::isConnected();
@@ -647,13 +658,9 @@ void loop() {
     bool dataSent = false;
     bool shouldEnterStorageMode = false;
     
-    // STEP 1: Try BLE transmission if connected (after advertising period completed)
-    // Only try if we haven't already attempted early transmission, or if early attempt failed
-    // If early attempt succeeded, skip BLE and WiFi (data already sent)
-    if (earlyBleSucceeded) {
-      Serial.println("Early BLE transmission already succeeded - skipping retry and WiFi");
-      dataSent = true; // Mark as sent to prevent WiFi attempt
-    } else if (bleConnected && !earlyBleAttempted) {
+    // STEP 1: Try BLE transmission if connected
+    // Cycles run periodically and always attempt to send data
+    if (bleConnected) {
       Serial.println("BLE connected - attempting data transmission...");
       dataSent = sendDataWithRetryLogic(csvData);
       
@@ -662,20 +669,6 @@ void loop() {
       } else {
         Serial.println("Data transmission failed via BLE");
       }
-    } else if (bleConnected && earlyBleAttempted && !earlyBleSucceeded) {
-      // Early attempt was made but failed - retry BLE transmission
-      Serial.println("BLE still connected - retrying BLE transmission after early attempt failed...");
-      dataSent = sendDataWithRetryLogic(csvData);
-      
-      if (dataSent) {
-        Serial.println("Data sent successfully via BLE (retry)");
-    } else {
-        Serial.println("Data transmission failed via BLE (retry)");
-      }
-    } else if (bleConnected && earlyBleAttempted && earlyBleSucceeded) {
-      // This shouldn't happen if cycle logic is properly gated, but safety check
-      Serial.println("BLE connected and early transmission succeeded - data already sent");
-      dataSent = true;
     }
     
     // On first cycle, COMPULSORY: wait full 1 minute after first connection (even if connection drops)
@@ -703,21 +696,9 @@ void loop() {
       }
     }
     
-    // Turn off BLE now that advertising period is complete and transmission attempted
-    // (only if 1-minute wait completed)
-    if (!waitingForOneMinute) {
-      if (BLEConfig::isEnabled()) {
-        Serial.println("BLE advertising period complete - turning off BLE...");
-        BLEConfig::stop(); // Now handles graceful disconnect internally
-        bleStartTime = 0;
-        firstBleConnectionTime = 0;
-        firstBleConnectionTracked = false;
-        waitingForOneMinute = false;
-      }
-    } else {
-      // Still waiting for 1 minute - return to loop() to continue waiting
-      return;
-    }
+    // BLE stays on - not turning off after advertising period
+    // Keep BLE running continuously - it will continue advertising and accepting connections
+    Serial.println("BLE advertising period complete - BLE will remain on");
     
     if (dataSent) {
       // Data sent successfully via BLE, prepare for deep sleep
@@ -798,7 +779,19 @@ void loop() {
       }
     }
     
-    // Prepare for deep sleep
+    // Reset cycle flags to allow next cycle to run
+    cycleStarted = false;
+    earlyBleAttempted = false;
+    earlyBleSucceeded = false;
+    
+    // Check if BLE is enabled - if so, don't deep sleep, just continue loop
+    if (BLEConfig::isEnabled()) {
+      Serial.println("BLE is enabled - skipping deep sleep, continuing loop for next cycle");
+      // Continue loop - BLE will stay on and next cycle will run when time elapses
+      return;
+    }
+    
+    // BLE is not enabled - proceed with deep sleep
     Serial.println("Preparing for deep sleep - saving queue state...");
     transmissionHandler.saveQueueState();
     
@@ -816,7 +809,6 @@ void loop() {
     delay(50);
     
     // Get cycle time from NVS (default: 900 seconds = 15 minutes)
-    uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
     unsigned long cycleTimeMicroseconds = (unsigned long)cycleTimeSeconds * 1000000ULL;
     
     // Always deep sleep for configured cycle time
@@ -833,5 +825,10 @@ void loop() {
   }
   
   // If cycle hasn't started yet, continue normal operation (BLE advertising, battery updates, etc.)
+  // Keep BLE updated continuously (even after cycle logic)
+  if (BLEConfig::isEnabled()) {
+    BLEConfig::update();
+  }
+  
   delay(100);
 }
