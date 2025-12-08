@@ -27,10 +27,9 @@ extern void stopStatusLEDBlink(long long startTime);
 #define CURRENT_SSID_CHAR_UUID "12345678-1234-1234-1234-123456789ac1"
 
 // BLE Device Name
-#define BLE_DEVICE_NAME "Juxta AssetTag v2.0.0"
-
 class BLEConfig {
 private:
+  static char bleDeviceName[64];
   static BLEServer* pServer;
   static BLEService* pService;
   static BLECharacteristic* pSSIDCharacteristic;
@@ -199,8 +198,15 @@ public:
   
   // Initialize BLE and start advertising
   static bool begin() {
+    // Create device name with device ID (will be set via setDeviceId() before begin())
+    if (deviceId != nullptr) {
+      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta %s v2.0.0", deviceId);
+    } else {
+      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta AssetTag v2.0.0");
+    }
+    
     // Initialize BLE Device
-    BLEDevice::init(BLE_DEVICE_NAME);
+    BLEDevice::init(bleDeviceName);
     
     // Create BLE Server
     pServer = BLEDevice::createServer();
@@ -472,6 +478,7 @@ public:
 };
 
 // Static member definitions
+char BLEConfig::bleDeviceName[64] = "";
 BLEServer* BLEConfig::pServer = nullptr;
 BLEService* BLEConfig::pService = nullptr;
 BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;

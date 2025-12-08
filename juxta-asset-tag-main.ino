@@ -232,9 +232,9 @@ void setup() {
 
   // Initialize BLE for both first and subsequent cycles
   Serial.println("Initializing BLE...");
-  BLEConfig::begin();
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
+  BLEConfig::begin();
   bleStartTime = TimeSync::getCurrentTimeMillis();
   
   delay(100);
