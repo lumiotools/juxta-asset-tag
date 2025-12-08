@@ -233,9 +233,9 @@ void setup() {
 
   // Initialize BLE for both first and subsequent cycles
   Serial.println("Initializing BLE...");
-  BLEConfig::begin();
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
+  BLEConfig::begin();
   bleStartTime = TimeSync::getCurrentTimeMillis();
   
   delay(100);
@@ -245,7 +245,7 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   static char csvBuffer[400];  // Increased buffer size to prevent overflow  
   unsigned long long currentMillis = TimeSync::getCurrentTimeMillis();
   
-  int batteryLevel = BatteryMonitor::getBatteryPercentage();
+  String batteryLevel = BatteryMonitor::getBatteryPercentageV();
   
   // Get signal strength based on active connection (BLE priority, then WiFi)
   // Add safety checks to prevent crashes if BLE/WiFi not initialized
@@ -261,9 +261,9 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   //             gps.fix,gps.fixType,gps.last_recieved_on,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%d,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%s,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
-           batteryLevel,
+           batteryLevel.c_str(),
            currentMillis,
            signalStrength,
            imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
