@@ -31,7 +31,8 @@ private:
 
 public:
   // Initialize the data queue (must be called before use)
-  bool begin(SPIFlashHandler* flashHandler) {
+  // flashHandler parameter kept for compatibility but ignored (using internal flash)
+  bool begin(void* flashHandler) {
     return dataQueue.begin(flashHandler);
   }
 

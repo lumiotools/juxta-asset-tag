@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include "nvs_config.h"
-#include "spi_flash_handler.h"
+// #include "spi_flash_handler.h"  // COMMENTED OUT: Using internal flash instead
 
 // External LED blink functions from main.ino
 extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
@@ -13,104 +13,80 @@ extern void stopStatusLEDBlink(long long startTime);
 class DataQueue {
 private:
   bool initialized = false;
-  SPIFlashHandler* flashHandler = nullptr;
-  const uint32_t QUEUE_FLASH_ADDR = 0x10000;
+  // SPIFlashHandler* flashHandler = nullptr;  // COMMENTED OUT: No longer using external flash
   
-  uint32_t queueStartAddr;
-  uint32_t queueEndAddr;
-  uint32_t queueSizeBytes;
-  uint32_t writePtr;
-  uint32_t readPtr;
+  // Internal flash queue parameters
+  // Using NVS string storage (max ~4000 bytes per key, using 3000 for safety)
+  const size_t MAX_QUEUE_SIZE_BYTES = 3000;  // Max queue size in internal flash
+  String queueData;  // In-memory queue buffer
+  uint32_t writePtr;  // Write pointer (byte offset in queueData)
+  uint32_t readPtr;   // Read pointer (byte offset in queueData)
   
   const size_t BATCH_SIZE = 2048;
   
-  void calculateQueueBounds() {
-    if (flashHandler == nullptr) {
-      queueSizeBytes = 256 * 1024;
-    } else {
-      uint32_t totalSpace = flashHandler->getCapacity();
-      if (totalSpace == 0) totalSpace = 16 * 1024 * 1024;
-      queueSizeBytes = totalSpace - QUEUE_FLASH_ADDR;
+  // Load queue data from NVS
+  bool loadQueueFromNVS() {
+    String storedData = NVSConfig::getQueueData();
+    if (storedData.length() > MAX_QUEUE_SIZE_BYTES) {
+      Serial.println("WARNING: Stored queue data exceeds max size, truncating");
+      storedData = storedData.substring(0, MAX_QUEUE_SIZE_BYTES);
     }
-    
-    queueStartAddr = QUEUE_FLASH_ADDR;
-    queueEndAddr = queueStartAddr + queueSizeBytes;
-    
-    Serial.print("Queue bounds: Start=0x");
-    Serial.print(queueStartAddr, HEX);
-    Serial.print(", End=0x");
-    Serial.print(queueEndAddr, HEX);
-    Serial.print(", Size=");
-    Serial.print(queueSizeBytes);
-    Serial.println(" bytes");
+    queueData = storedData;
+    return true;
   }
   
-  // Check if we need to wrap around (circular buffer)
-  uint32_t wrapAddress(uint32_t addr) {
-    if (addr >= queueEndAddr) {
-      return queueStartAddr + (addr - queueEndAddr);
+  // Save queue data to NVS
+  bool saveQueueToNVS() {
+    if (queueData.length() > MAX_QUEUE_SIZE_BYTES) {
+      Serial.println("WARNING: Queue data exceeds max size, truncating before save");
+      queueData = queueData.substring(0, MAX_QUEUE_SIZE_BYTES);
     }
-    return addr;
-  }
-  
-  // Erase sector if we're writing to it (flash requires sector erase before write)
-  // Flash memory can only change bits from 1->0, so we must erase (set all to 1) before writing
-  void ensureSectorErased(uint32_t addr, size_t writeLen) {
-    uint32_t sectorStart = (addr / 4096) * 4096;
-    
-    if (addr == sectorStart) {
-      Serial.print("Erasing sector at 0x");
-      Serial.println(sectorStart, HEX);
-      flashHandler->eraseSector(sectorStart);
-      delay(10);
-    }
-    
-    uint32_t writeEnd = addr + writeLen;
-    uint32_t endSector = (writeEnd / 4096) * 4096;
-    if (endSector > sectorStart && endSector < queueEndAddr) {
-      Serial.print("Erasing next sector at 0x");
-      Serial.println(endSector, HEX);
-      flashHandler->eraseSector(endSector);
-      delay(10);
-    }
+    return NVSConfig::setQueueData(queueData.c_str());
   }
 
 public:
-  DataQueue() : initialized(false), flashHandler(nullptr), 
-                queueStartAddr(0), queueEndAddr(0), queueSizeBytes(0),
-                writePtr(0), readPtr(0) {}
+  DataQueue() : initialized(false), 
+                writePtr(0), readPtr(0) {
+    queueData.reserve(MAX_QUEUE_SIZE_BYTES + 100);  // Reserve memory
+  }
   
   ~DataQueue() {}
   
-  bool begin(SPIFlashHandler* handler) {
+  bool begin(void* handler) {  // handler parameter kept for compatibility but ignored
     if (initialized) return true;
 
-    this->flashHandler = handler;
-    if (this->flashHandler == nullptr || !this->flashHandler->isInitialized()) {
-        Serial.println("DataQueue: Invalid or uninitialized Flash Handler!");
-        return false;
-    }
-    
-    // Calculate queue boundaries
-    calculateQueueBounds();
+    // handler is ignored - we use internal flash (NVS)
+    // if (handler == nullptr) {
+    //   Serial.println("DataQueue: Handler parameter ignored (using internal flash)");
+    // }
     
     // Check if first boot
     bool firstBoot = NVSConfig::isFirstBoot();
     
-    Serial.println("========== DataQueue Initialization ==========");
+    Serial.println("========== DataQueue Initialization (Internal Flash) ==========");
     Serial.print("First boot flag: ");
     Serial.println(firstBoot ? "YES (first time)" : "NO (subsequent boot)");
+    Serial.print("Max queue size: ");
+    Serial.print(MAX_QUEUE_SIZE_BYTES);
+    Serial.println(" bytes");
     
     if (firstBoot) {
-      // Initialize pointers to start
-      writePtr = queueStartAddr;
-      readPtr = queueStartAddr;
+      // Initialize queue to empty
+      queueData = "";
+      writePtr = 0;
+      readPtr = 0;
       
-      Serial.println("FIRST BOOT: Initializing queue pointers to start");
-      Serial.print("  Setting writePtr = 0x");
-      Serial.println(writePtr, HEX);
-      Serial.print("  Setting readPtr = 0x");
-      Serial.println(readPtr, HEX);
+      Serial.println("FIRST BOOT: Initializing queue to empty");
+      Serial.print("  Setting writePtr = ");
+      Serial.println(writePtr);
+      Serial.print("  Setting readPtr = ");
+      Serial.println(readPtr);
+      
+      if (!saveQueueToNVS()) {
+        Serial.println("  ERROR: Failed to save initial queue data!");
+      } else {
+        Serial.println("  Queue data saved to NVS");
+      }
       
       if (!NVSConfig::setQueueWritePtr(writePtr)) {
         Serial.println("  ERROR: Failed to save initial write pointer!");
@@ -130,56 +106,52 @@ public:
       } else {
         Serial.println("  First boot flag set to complete");
       }
-      
-      // Erase first sector to start clean
-      Serial.println("  Erasing first sector...");
-      flashHandler->eraseSector(queueStartAddr);
     } else {
-      // Load pointers from NVS
-      Serial.println("SUBSEQUENT BOOT: Loading queue pointers from NVS");
+      // Load queue data and pointers from NVS
+      Serial.println("SUBSEQUENT BOOT: Loading queue from NVS");
+      
+      if (!loadQueueFromNVS()) {
+        Serial.println("  ERROR: Failed to load queue data from NVS!");
+        queueData = "";
+      } else {
+        Serial.print("  Loaded queue data: ");
+        Serial.print(queueData.length());
+        Serial.println(" bytes");
+      }
       
       uint32_t loadedWritePtr = NVSConfig::getQueueWritePtr();
       uint32_t loadedReadPtr = NVSConfig::getQueueReadPtr();
       
-      Serial.print("  Loaded writePtr from NVS: 0x");
-      Serial.println(loadedWritePtr, HEX);
-      Serial.print("  Loaded readPtr from NVS: 0x");
-      Serial.println(loadedReadPtr, HEX);
-      
-      // Handle case where NVS returned 0 (might be first write after initial setup)
-      if (loadedWritePtr == 0 && queueStartAddr != 0) {
-        Serial.println("  WARNING: Write pointer is 0, but queue starts at non-zero address");
-        Serial.println("  This might indicate NVS read failure or first write");
-        loadedWritePtr = queueStartAddr;
-      }
-      
-      if (loadedReadPtr == 0 && queueStartAddr != 0) {
-        Serial.println("  WARNING: Read pointer is 0, but queue starts at non-zero address");
-        Serial.println("  This might indicate NVS read failure or first write");
-        loadedReadPtr = queueStartAddr;
-      }
+      Serial.print("  Loaded writePtr from NVS: ");
+      Serial.println(loadedWritePtr);
+      Serial.print("  Loaded readPtr from NVS: ");
+      Serial.println(loadedReadPtr);
       
       // Validate pointers are within bounds
-      if (loadedWritePtr < queueStartAddr || loadedWritePtr >= queueEndAddr) {
-        Serial.print("  ERROR: Write pointer 0x");
-        Serial.print(loadedWritePtr, HEX);
-        Serial.println(" is out of bounds! Resetting to queue start.");
-        writePtr = queueStartAddr;
+      if (loadedWritePtr > queueData.length()) {
+        Serial.print("  ERROR: Write pointer ");
+        Serial.print(loadedWritePtr);
+        Serial.print(" exceeds queue length ");
+        Serial.print(queueData.length());
+        Serial.println("! Resetting to queue end.");
+        writePtr = queueData.length();
       } else {
         writePtr = loadedWritePtr;
-        Serial.print("  Write pointer validated: 0x");
-        Serial.println(writePtr, HEX);
+        Serial.print("  Write pointer validated: ");
+        Serial.println(writePtr);
       }
       
-      if (loadedReadPtr < queueStartAddr || loadedReadPtr >= queueEndAddr) {
-        Serial.print("  ERROR: Read pointer 0x");
-        Serial.print(loadedReadPtr, HEX);
-        Serial.println(" is out of bounds! Resetting to queue start.");
-        readPtr = queueStartAddr;
+      if (loadedReadPtr > queueData.length()) {
+        Serial.print("  ERROR: Read pointer ");
+        Serial.print(loadedReadPtr);
+        Serial.print(" exceeds queue length ");
+        Serial.print(queueData.length());
+        Serial.println("! Resetting to queue start.");
+        readPtr = 0;
       } else {
         readPtr = loadedReadPtr;
-        Serial.print("  Read pointer validated: 0x");
-        Serial.println(readPtr, HEX);
+        Serial.print("  Read pointer validated: ");
+        Serial.println(readPtr);
       }
       
       // Calculate and display queued data
@@ -187,7 +159,8 @@ public:
       if (writePtr >= readPtr) {
         queuedBytes = writePtr - readPtr;
       } else {
-        queuedBytes = (queueEndAddr - readPtr) + (writePtr - queueStartAddr);
+        // Should not happen with linear buffer, but handle it
+        queuedBytes = 0;
       }
       
       Serial.print("  Queued data detected: ");
@@ -211,47 +184,65 @@ public:
     
     size_t dataLen = csvData.length();
     
-    ensureSectorErased(writePtr, dataLen);
+    // Check if adding this data would exceed max size
+    size_t currentSize = queueData.length();
+    size_t newSize = (writePtr > currentSize) ? writePtr + dataLen : currentSize + dataLen;
     
-    const char* dataStr = csvData.c_str();
-    Serial.print("Writing ");
-    Serial.print(dataLen);
-    Serial.print(" bytes to flash at 0x");
-    Serial.println(writePtr, HEX);
-    
-    long long startTime = startStatusLEDBlink(150, 75, 0);
-    
-    if (!flashHandler->writeCharArray(writePtr, dataStr, dataLen)) {
-      Serial.print("ERROR: Failed to write to flash at 0x");
-      Serial.print(writePtr, HEX);
-      Serial.print(" (length: ");
-      Serial.print(dataLen);
-      Serial.println(" bytes)");
-      stopStatusLEDBlink(startTime);
+    if (newSize > MAX_QUEUE_SIZE_BYTES) {
+      // Queue is full - need to remove old data
+      Serial.println("WARNING: Queue full, removing oldest data");
       
-      return false;
-    }
-    
-    Serial.println("Flash write successful");
-    stopStatusLEDBlink(startTime);
-    
-    writePtr += dataLen;
-    
-    // Wrap around if needed
-    if (writePtr >= queueEndAddr) {
-      writePtr = queueStartAddr + (writePtr - queueEndAddr);
-      // If we wrapped, we may have overwritten old data
-      // Update readPtr if it's behind (circular buffer: oldest data is lost)
-      if (readPtr < writePtr && readPtr > queueStartAddr) {
-        // ReadPtr is now invalid (behind writePtr after wrap), reset to writePtr
-        readPtr = writePtr;
-        NVSConfig::setQueueReadPtr(readPtr);
+      // Remove data up to readPtr if readPtr > 0
+      if (readPtr > 0) {
+        queueData = queueData.substring(readPtr);
+        writePtr -= readPtr;
+        readPtr = 0;
+      } else {
+        // No data to remove, queue is truly full
+        Serial.println("ERROR: Queue is completely full, cannot add more data!");
+        return false;
+      }
+      
+      // Recalculate new size
+      currentSize = queueData.length();
+      newSize = currentSize + dataLen;
+      
+      if (newSize > MAX_QUEUE_SIZE_BYTES) {
+        Serial.println("ERROR: Data too large to fit in queue even after cleanup!");
+        return false;
       }
     }
     
-    Serial.print("Saving writePtr to NVS: 0x");
-    Serial.println(writePtr, HEX);
+    // Append data at writePtr position
+    if (writePtr >= queueData.length()) {
+      // Append to end
+      queueData += csvData;
+      writePtr = queueData.length();
+    } else {
+      // Insert at writePtr (shouldn't normally happen, but handle it)
+      queueData = queueData.substring(0, writePtr) + csvData + queueData.substring(writePtr);
+      writePtr += dataLen;
+    }
     
+    Serial.print("Writing ");
+    Serial.print(dataLen);
+    Serial.print(" bytes to queue (writePtr=");
+    Serial.print(writePtr);
+    Serial.println(")");
+    
+    long long startTime = startStatusLEDBlink(150, 75, 0);
+    
+    // Save to NVS
+    if (!saveQueueToNVS()) {
+      Serial.println("ERROR: Failed to save queue data to NVS!");
+      stopStatusLEDBlink(startTime);
+      return false;
+    }
+    
+    Serial.println("Queue write successful (saved to internal flash)");
+    stopStatusLEDBlink(startTime);
+    
+    // Save write pointer
     if (!NVSConfig::setQueueWritePtr(writePtr)) {
       Serial.println("ERROR: Failed to save write pointer to NVS!");
     } else {
@@ -267,129 +258,42 @@ public:
       return "";
     }
     
-    if (readPtr == writePtr) {
-      Serial.println("readBatch: Queue is empty (readPtr == writePtr)");
+    if (readPtr >= writePtr) {
+      Serial.println("readBatch: Queue is empty (readPtr >= writePtr)");
       return "";
     }
     
-    if (readPtr < queueStartAddr || readPtr >= queueEndAddr) {
-      Serial.print("ERROR: readPtr out of bounds: 0x");
-      Serial.print(readPtr, HEX);
-      Serial.print(" (valid range: 0x");
-      Serial.print(queueStartAddr, HEX);
-      Serial.print(" - 0x");
-      Serial.print(queueEndAddr, HEX);
-      Serial.println(")");
+    if (readPtr >= queueData.length()) {
+      Serial.println("readBatch: Read pointer beyond queue data length");
       return "";
     }
     
-    if (writePtr < queueStartAddr || writePtr >= queueEndAddr) {
-      Serial.print("ERROR: writePtr out of bounds: 0x");
-      Serial.print(writePtr, HEX);
-      Serial.print(" (valid range: 0x");
-      Serial.print(queueStartAddr, HEX);
-      Serial.print(" - 0x");
-      Serial.print(queueEndAddr, HEX);
-      Serial.println(")");
-      return "";
-    }
+    // Calculate how much data to read
+    size_t availableBytes = writePtr - readPtr;
+    size_t bytesToRead = (availableBytes < BATCH_SIZE) ? availableBytes : BATCH_SIZE;
     
-    char* buffer = (char*)malloc(BATCH_SIZE + 1);
-    if (buffer == nullptr) {
-      Serial.println("ERROR: Failed to allocate memory for read buffer");
-      return "";
-    }
-    
-    size_t bytesRead = 0;
-    uint32_t currentReadPtr = readPtr;
-    
-    Serial.print("readBatch: Starting read from 0x");
-    Serial.print(readPtr, HEX);
-    Serial.print(" to 0x");
-    Serial.print(writePtr, HEX);
+    Serial.print("readBatch: Reading ");
+    Serial.print(bytesToRead);
+    Serial.print(" bytes from position ");
+    Serial.print(readPtr);
     Serial.println();
     
-    while (bytesRead < BATCH_SIZE && currentReadPtr != writePtr) {
-      uint32_t bytesToEnd = (writePtr > currentReadPtr) ? 
-                            (writePtr - currentReadPtr) : 
-                            (queueEndAddr - currentReadPtr);
-      
-      size_t chunkSize = (bytesToEnd < (BATCH_SIZE - bytesRead)) ? bytesToEnd : (BATCH_SIZE - bytesRead);
-      
-      if (!flashHandler->readCharArray(currentReadPtr, buffer + bytesRead, chunkSize)) {
-        Serial.print("ERROR: Flash read failed for ");
-        Serial.print(chunkSize);
-        Serial.print(" bytes at 0x");
-        Serial.print(currentReadPtr, HEX);
-        Serial.print(" (bytesRead so far: ");
-        Serial.print(bytesRead);
-        Serial.println(")");
-        free(buffer);
-        return "";
-      }
-      
-      bytesRead += chunkSize;
-      currentReadPtr += chunkSize;
-      
-      if (currentReadPtr >= queueEndAddr) currentReadPtr = queueStartAddr;
-      if (currentReadPtr == writePtr) break;
-    }
-    
-    buffer[bytesRead] = '\0';
-    
-    Serial.print("readBatch: Total bytes read: ");
-    Serial.println(bytesRead);
-    
-    // Validate that we didn't just read erased flash (all 0xFF or mostly 0xFF)
-    // Erased flash appears as 0xFF bytes which show as garbage characters
-    if (bytesRead > 0) {
-      size_t checkSize = (bytesRead < 32) ? bytesRead : 32;
-      size_t validChars = 0;
-      
-      for (size_t i = 0; i < checkSize; i++) {
-        char c = buffer[i];
-        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
-            c == ',' || c == '.' || c == '-' || c == '\n' || c == '_' || c == ':' || c == ' ') {
-          validChars++;
-        }
-      }
-      
-      // If less than 50% valid characters, data is likely corrupted
-      if (validChars < (checkSize / 2)) {
-        Serial.println("ERROR: Data appears corrupted - resetting queue");
-        readPtr = queueStartAddr;
-        writePtr = queueStartAddr;
-        NVSConfig::setQueueReadPtr(readPtr);
-        NVSConfig::setQueueWritePtr(writePtr);
-        free(buffer);
-        return "";
-      }
-    }
+    // Extract data from queue
+    String result = queueData.substring(readPtr, readPtr + bytesToRead);
     
     // Find last complete line (end with newline)
-    int lastNewline = -1;
-    for (int i = bytesRead - 1; i >= 0; i--) {
-      if (buffer[i] == '\n') {
-        lastNewline = i;
-        break;
-      }
-    }
-    
-    String result;
+    int lastNewline = result.lastIndexOf('\n');
     if (lastNewline >= 0) {
-      buffer[lastNewline + 1] = '\0';
-      result = String(buffer);
+      result = result.substring(0, lastNewline + 1);
       Serial.print("readBatch: Returning ");
       Serial.print(result.length());
-      Serial.println(" bytes");
-    } else if (bytesRead > 0) {
-      result = String(buffer);
+      Serial.println(" bytes (complete lines)");
+    } else if (result.length() > 0) {
       Serial.print("readBatch: WARNING - No newline found, returning ");
       Serial.print(result.length());
       Serial.println(" bytes (no newline)");
     }
     
-    free(buffer);
     return result;
   }
 
@@ -403,13 +307,25 @@ public:
     
     readPtr += bytesToAdvance;
     
-    // Wrap around if needed
-    if (readPtr >= queueEndAddr) {
-      readPtr = queueStartAddr + (readPtr - queueEndAddr);
+    // Ensure readPtr doesn't exceed writePtr
+    if (readPtr > writePtr) {
+      Serial.println("WARNING: readPtr exceeded writePtr, resetting to writePtr");
+      readPtr = writePtr;
     }
     
-    Serial.print("commitRead: New read pointer: 0x");
-    Serial.println(readPtr, HEX);
+    Serial.print("commitRead: New read pointer: ");
+    Serial.println(readPtr);
+    
+    // Clean up data before readPtr if we've read a significant amount
+    if (readPtr > 100 && readPtr > queueData.length() / 2) {
+      // Remove processed data to free memory
+      queueData = queueData.substring(readPtr);
+      writePtr -= readPtr;
+      readPtr = 0;
+      
+      // Save updated queue
+      saveQueueToNVS();
+    }
     
     if (!NVSConfig::setQueueReadPtr(readPtr)) {
       Serial.println("commitRead: ERROR - Failed to save read pointer to NVS!");
@@ -423,10 +339,9 @@ public:
   int getLength() {
     if (!initialized) return 0;
     if (writePtr >= readPtr) {
-      return (writePtr - readPtr) / 350;
+      return (writePtr - readPtr) / 350;  // Approximate entries (350 bytes per entry)
     } else {
-      // Wrapped around
-      return ((queueEndAddr - readPtr) + (writePtr - queueStartAddr)) / 350;
+      return 0;
     }
   }
 
@@ -434,20 +349,21 @@ public:
   
   bool isEmpty() {
     if (!initialized) return true;
-    return (readPtr == writePtr);
+    return (readPtr >= writePtr);
   }
 
-  int getMaxSize() { return queueSizeBytes; }
+  int getMaxSize() { return MAX_QUEUE_SIZE_BYTES; }
 
   void clear() {
     if (!initialized) return;
     
     Serial.println("Clearing queue...");
-    readPtr = queueStartAddr;
-    writePtr = queueStartAddr;
+    queueData = "";
+    readPtr = 0;
+    writePtr = 0;
     NVSConfig::setQueueReadPtr(readPtr);
     NVSConfig::setQueueWritePtr(writePtr);
-    flashHandler->eraseSector(queueStartAddr);
+    saveQueueToNVS();
     Serial.println("Queue cleared");
   }
   
@@ -457,14 +373,23 @@ public:
       return;
     }
     
-    Serial.println("========== Force Saving Queue Pointers ==========");
-    Serial.print("Current writePtr: 0x");
-    Serial.println(writePtr, HEX);
-    Serial.print("Current readPtr: 0x");
-    Serial.println(readPtr, HEX);
+    Serial.println("========== Force Saving Queue State ==========");
+    Serial.print("Current writePtr: ");
+    Serial.println(writePtr);
+    Serial.print("Current readPtr: ");
+    Serial.println(readPtr);
+    Serial.print("Queue data length: ");
+    Serial.println(queueData.length());
     
+    bool queueSaved = saveQueueToNVS();
     bool writePtrSaved = NVSConfig::setQueueWritePtr(writePtr);
     bool readPtrSaved = NVSConfig::setQueueReadPtr(readPtr);
+    
+    if (queueSaved) {
+      Serial.println("Queue data saved to NVS successfully");
+    } else {
+      Serial.println("ERROR: Failed to save queue data!");
+    }
     
     if (writePtrSaved) {
       Serial.println("Write pointer saved to NVS successfully");
@@ -479,13 +404,16 @@ public:
     }
     
     // Verify by reading back
+    String verifyQueue = NVSConfig::getQueueData();
     uint32_t verifyWrite = NVSConfig::getQueueWritePtr();
     uint32_t verifyRead = NVSConfig::getQueueReadPtr();
     
-    Serial.print("Verification - writePtr read back: 0x");
-    Serial.println(verifyWrite, HEX);
-    Serial.print("Verification - readPtr read back: 0x");
-    Serial.println(verifyRead, HEX);
+    Serial.print("Verification - queue data length read back: ");
+    Serial.println(verifyQueue.length());
+    Serial.print("Verification - writePtr read back: ");
+    Serial.println(verifyWrite);
+    Serial.print("Verification - readPtr read back: ");
+    Serial.println(verifyRead);
     
     if (verifyWrite == writePtr && verifyRead == readPtr) {
       Serial.println("SUCCESS: All pointers verified!");
