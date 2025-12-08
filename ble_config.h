@@ -70,14 +70,14 @@ private:
       TimeSync::getCurrentTimeString(timestamp, sizeof(timestamp));
       
       // Get battery level
-      int batteryLevel = BatteryMonitor::getBatteryPercentage();
+      String batteryLevel = BatteryMonitor::getBatteryPercentageV();
       
       const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
       
       char jsonBuffer[256];
       snprintf(jsonBuffer, sizeof(jsonBuffer), 
-               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%d,\"currentSSID\":\"%s\",\"debug_mode\":%d,\"cycle_time\":%d}",
+               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%s\",\"battery\":%s,\"currentSSID\":\"%s\",\"debug_mode\":%d,\"cycle_time\":%d}",
                devId, devVer, timestamp, batteryLevel, currentSSID.c_str(), NVSConfig::getDebugMode(), NVSConfig::getCycleTime());
       
       // Send JSON data via Current SSID Characteristic
