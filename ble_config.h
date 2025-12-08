@@ -75,7 +75,7 @@ private:
       char jsonBuffer[256];
       snprintf(jsonBuffer, sizeof(jsonBuffer), 
                "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%llu\",\"battery\":%d,\"voltage\":%.3f,\"currentSSID\":\"%s\",\"debug_mode\":%d,\"cycle_time\":%d}",
-               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, currentSSID.c_str(), NVSConfig::getDebugMode(), NVSConfig::getCycleTime());
+               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getDebugMode(), NVSConfig::getCycleTime());
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
