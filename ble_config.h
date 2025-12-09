@@ -435,6 +435,8 @@ public:
     if (bleDisabled || !deviceConnected || pDataCharacteristic == nullptr) {
       return false;
     }
+
+    delay(1500); // Small delay to ensure connection stability
     
     // Start blue LED blinking on transmit
     long long startTime = startStatusLEDBlink(0, 0, 255);
