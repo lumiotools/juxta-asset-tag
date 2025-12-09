@@ -50,10 +50,10 @@ Located next to the **power icon**, this light indicates if the internal sensors
 
 The Status Light (same as Device Status Light above) blinks in different colors to indicate communication activity:
 
-* **Blue (Blinking):** The device is being configured or transferring data via Bluetooth.  
+* **Blue (Blinking):** The device is transmitting data via Bluetooth.  
 * **White (Blinking):** The device is transmitting data via WiFi.  
 * **Brown (Blinking):** The device is saving data to external flash memory.  
-* **Green (Solid):** Sensors are healthy and device is ready (normal operation).
+* **Green (Solid):** Sensors are healthy and the device is ready (normal operation).
 
 ## Configuration (Setting up WiFi)
 
@@ -61,44 +61,50 @@ To transmit data to the cloud, the device requires a Bluetooth or WiFi connectio
 
 ### Connecting Through the Dashboard UI
 
-1. **Enter Configuration Mode:** Press the **Connect Button** on the device to activate Bluetooth mode. The Status LED will light up **purple** during startup.
-
-2. **Open Dashboard:** On your computer or smartphone, open the Juxta User Dashboard website.
-
-3. **Enable Chrome Feature (Required for Web UI):** 
-   > **⚠️ IMPORTANT:** If using the web-based UI, you must enable the Chrome feature flag: `chrome://flags/#enable-web-bluetooth-new-permissions-backend`. This is **required** for the web-based UI to auto-connect to the Asset Tag. The functionality will **not work** without enabling this feature.
-
-4. **Connect to Device:**
-   * Click the **Connect** button in the dashboard.
-   * The dashboard will scan and display available devices nearby.
-   * Select your device (named **"Juxta {DeviceID} v2.0.0"**).
+1. **Enter Configuration Mode:** Press the **Connect Button** on the device to activate Bluetooth mode. The Status LED will light up **purple** during startup.  
+     
+2. **Open Dashboard:** On your computer or smartphone, open the Juxta User Dashboard website.  
+     
+3. **Enable Chrome Feature (Required for Web UI):**  
+   **⚠️ IMPORTANT:** If using the web-based UI, you must enable the Chrome feature flag: `chrome://flags/#enable-web-bluetooth-new-permissions-backend`.   
+   This is **required** for the web-based UI to auto-connect to the Asset Tag. The functionality will **not work** without enabling this feature.  
+     
+4. **Connect to Device:**  
+     
+   * Click the **Connect** button in the dashboard.  
+   * The dashboard will scan and display available devices nearby.  
+   * Select your device (named **"Juxta {DeviceID} v2.0.0"**).  
    * Pair with the selected device.
 
-5. **Connection Duration:** The device will stay connected for **1 minute** after pairing. During this time, you can configure settings and view data.
+   
 
+5. **Connection Duration:** The device will stay connected for **1 minute** after pairing. During this time, you can configure settings and view data.  
+     
 6. **Auto Reconnection:** The device will automatically disconnect and reconnect through the portal when it enters deep sleep or wakes up. This allows seamless data transmission without manual intervention.
 
 ### Configurable Parameters
 
 Once connected, you can configure the following parameters:
 
-* **Debug Mode:** When enabled, LEDs are dimmed to 10% brightness during deep sleep instead of being turned off. This helps monitor device status during sleep.
-* **WiFi Credentials:** 
-  * Click the **WiFi Configuration** button.
-  * Click the **Update** button.
-  * Enter your **WiFi SSID** (network name).
-  * Enter your **WiFi Password**.
-  * Click on **Update** button to save the credentials to the device.
-* **Cycle Time:** Set the deep sleep duration (default: 15 minutes).
-  > **Note:** Cycle time is the duration the device spends in deep sleep. The device wakes up from deep sleep every X seconds (where X is the cycle time), completes its processes (device status check, sensor data collection, GPS reading, data transmission), and then goes back to sleep for X seconds. The processing time is **not included** in the cycle time. This means the device does **not** transmit every X seconds — it transmits after waking up, and the actual transmission interval includes both the sleep time and processing time.
+* **Debug Mode:** When enabled, LEDs are dimmed to 10% brightness during deep sleep instead of being turned off. This helps monitor device status during sleep.  
+* **WiFi Credentials:**  
+  * Click the **WiFi Configuration** button.  
+  * Click the **Update** button.  
+  * Enter your **WiFi SSID** (network name).  
+  * Enter your **WiFi Password**.  
+  * Click on **Update** button to save the credentials to the device.  
+* **Cycle Time:** Set the deep sleep duration (default: 15 minutes).  
+    
+  **Note:** Cycle time is the duration the device spends in deep sleep. The device wakes up from deep sleep every X seconds (where X is the cycle time), completes its processes (device status check, sensor data collection, GPS reading, data transmission), and then goes back to sleep for X seconds. The processing time is **not included** in the cycle time. This means the device does **not** transmit every X seconds — it transmits after waking up, and the actual transmission interval includes both the sleep time and processing time.
 
 ### Viewing Data
 
-* **Last Received Data:** After connecting via BLE, you can view the last received sensor data directly on the dashboard screen. This includes GPS location, IMU data, battery status, and timestamp.
-
-* **Device History:** To view detailed device pairing history and data logs:
-  * Navigate to the **My Devices** page in the dashboard.
-  * Select your Asset Tag device.
+* **Last Received Data:** After connecting via BLE, you can view the last received sensor data directly on the dashboard screen. This includes GPS location, IMU data, battery status, and timestamp.  
+    
+* **Device History:** To view detailed device pairing history and data logs:  
+    
+  * Navigate to the **My Devices** page in the dashboard.  
+  * Select your Asset Tag device.  
   * View the complete history of data transmissions, connection events, and device status.
 
 **Note:** Configuration mode is active for **1 minute** after the device is first turned on or the **Connect Button** is pressed. On subsequent wake-ups, Bluetooth is available for **10 seconds**.
