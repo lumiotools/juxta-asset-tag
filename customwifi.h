@@ -10,7 +10,7 @@ extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
 extern void stopStatusLEDBlink(long long t);
 
 // Server Configuration
-const char* SERVER_URL = "https://unusable-melody-unhealing.ngrok-free.dev/api/record/wifi/v2.0.0";
+const char* SERVER_URL = "https://juxta.pmcprecision.com/api/record/wifi/v2.0.0";
 const int REQUEST_TIMEOUT = 5000; // 5 seconds
 
 class CustomWiFi {

@@ -31,7 +31,8 @@ private:
 
 public:
   // Initialize the data queue (must be called before use)
-  bool begin(SPIFlashHandler* flashHandler) {
+  // flashHandler parameter kept for compatibility but ignored (using internal flash)
+  bool begin(void* flashHandler) {
     return dataQueue.begin(flashHandler);
   }
 
@@ -49,18 +50,18 @@ public:
     bool bleConnected = BLEConfig::isConnected();
     
     // First, read and send any existing queued data (prioritize old data)
+    // Limit to 3 packets to avoid long transmission times
     bool allQueuedSent = true;
     if (isInitialized() && !dataQueue.isEmpty() && (wifiConnected || bleConnected)) {
       Serial.println("TransmissionHandler: Reading and sending queued data first...");
       
-      // Safety counter to prevent infinite loops
-      int maxAttempts = 100; // Limit to 100 batches per session
-      int attemptCount = 0;
+      // Limit to 3 packets maximum per transmission cycle
+      const int MAX_PACKETS_PER_CYCLE = 3;
+      int packetsSent = 0;
       int consecutiveEmptyReads = 0; // Track consecutive empty reads
       
-      while (!dataQueue.isEmpty() && attemptCount < maxAttempts) {
+      while (!dataQueue.isEmpty() && packetsSent < MAX_PACKETS_PER_CYCLE) {
         String batchData = dataQueue.readBatch();
-        attemptCount++;
         
         if (batchData.length() == 0) {
           consecutiveEmptyReads++;
@@ -97,7 +98,12 @@ public:
         
         if (success) {
           dataQueue.commitRead(batchData);
-          Serial.println("TransmissionHandler: Queued batch sent successfully");
+          packetsSent++;
+          Serial.print("TransmissionHandler: Queued batch sent successfully (");
+          Serial.print(packetsSent);
+          Serial.print("/");
+          Serial.print(MAX_PACKETS_PER_CYCLE);
+          Serial.println(" packets)");
         } else {
           Serial.println("TransmissionHandler: Queued batch transmission failed - stopping");
           allQueuedSent = false;
@@ -105,9 +111,11 @@ public:
         }
       }
       
-      // Warn if we hit the max attempts limit
-      if (attemptCount >= maxAttempts) {
-        Serial.println("TransmissionHandler: WARNING - Reached maximum transmission attempts limit");
+      // Check if there's more data remaining in queue
+      if (!dataQueue.isEmpty() && packetsSent >= MAX_PACKETS_PER_CYCLE) {
+        Serial.print("TransmissionHandler: Reached packet limit (");
+        Serial.print(MAX_PACKETS_PER_CYCLE);
+        Serial.println(" packets sent). Remaining data will be sent in next cycle.");
         allQueuedSent = false;
       }
     }

@@ -2,7 +2,7 @@
 
 #include "imu_sensor.h"
 #include "gps_sensor.h"
-#include "spi_flash_handler.h"
+// #include "spi_flash_handler.h"  // COMMENTED OUT: Using internal flash instead
 #include "customwifi.h"
 #include "time_sync.h"
 #include "data_queue.h"
@@ -17,7 +17,7 @@
 #include <Ticker.h>
 
 // Device ID and Version Configuration (hardcoded to save memory)
-const char* DEVICE_ID = "ASSET_TAG_WJ";  // Change this for each device
+const char* DEVICE_ID = "ASSET_TAG_01";  // Change this for each device
 const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
 const int STATUS_LED_PIN = D1;
@@ -51,12 +51,12 @@ const unsigned long BLE_MIN_CONNECTION_DURATION_MS = 60000; // 1 minute
 // Create sensor instances
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
-SPIFlashHandler spiFlash;
+// SPIFlashHandler spiFlash;  // COMMENTED OUT: Using internal flash instead
 
 // Sensor status flags
 bool imuInitialized = false;
 bool gpsInitialized = false;
-bool flashInitialized = false;
+// bool flashInitialized = false;  // COMMENTED OUT: No longer using external flash
 
 // Configuration: Cycle duration is now configurable via BLE and stored in NVS
 // Default is 900 seconds (15 minutes) if not set via BLE
@@ -83,8 +83,9 @@ void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void updateStatusLED() {
-  // Green if all sensors (IMU, GPS, and Flash) initialized, Red if any failed
-  if (imuInitialized && gpsInitialized && flashInitialized) {
+  // Green if all sensors (IMU, GPS) initialized, Red if any failed
+  // Note: Flash initialization removed - using internal flash now
+  if (imuInitialized && gpsInitialized) {
     restoreR = 0;
     restoreG = 255;
     restoreB = 0;
@@ -153,21 +154,21 @@ void setup() {
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
   
-  // Initialize External SPI Flash
-  Serial.println("Initializing SPI Flash...");
-  flashInitialized = spiFlash.begin();
-  if (flashInitialized) {
-    Serial.println("SPI Flash initialized successfully");
-    Serial.print("Flash Capacity: ");
-    Serial.print(spiFlash.getCapacity());
-    Serial.println(" bytes");
-  } else {
-    Serial.println("SPI Flash initialization failed");
-  }
+  // COMMENTED OUT: External SPI Flash initialization
+  // Serial.println("Initializing SPI Flash...");
+  // flashInitialized = spiFlash.begin();
+  // if (flashInitialized) {
+  //   Serial.println("SPI Flash initialized successfully");
+  //   Serial.print("Flash Capacity: ");
+  //   Serial.print(spiFlash.getCapacity());
+  //   Serial.println(" bytes");
+  // } else {
+  //   Serial.println("SPI Flash initialization failed");
+  // }
 
-  // Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
-  Serial.println("Initializing data queue...");
-  if (!transmissionHandler.begin(&spiFlash)) {
+  // Initialize transmission handler and data queue (using internal flash/NVS)
+  Serial.println("Initializing data queue (internal flash)...");
+  if (!transmissionHandler.begin(nullptr)) {  // Pass nullptr - using internal flash
     Serial.println("Warning: Data queue initialization failed!");
   }
   
@@ -244,7 +245,8 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   static char csvBuffer[400];  // Increased buffer size to prevent overflow  
   unsigned long long currentMillis = TimeSync::getCurrentTimeMillis();
   
-  String batteryLevel = BatteryMonitor::getBatteryPercentageV();
+  float batteryVoltage = BatteryMonitor::readBatteryVoltage();
+  int batteryLevel = BatteryMonitor::getBatteryPercentageV(batteryVoltage);
   
   // Get signal strength based on active connection (BLE priority, then WiFi)
   // Add safety checks to prevent crashes if BLE/WiFi not initialized
@@ -255,14 +257,15 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
     signalStrength = CustomWiFi::getRSSI();
   }
   
-  // CSV format: device_id,battery_level,timestamp,signal_strength,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
+  // CSV format: device_id,battery_level,voltage,timestamp,signal_strength,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
   //             imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,imu.temperature,
   //             gps.fix,gps.fixType,gps.last_recieved_on,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%s,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%d,%.3f,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
-           batteryLevel.c_str(),
+           batteryLevel,
+           batteryVoltage,
            currentMillis,
            signalStrength,
            imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
@@ -774,9 +777,9 @@ void loop() {
       // Just ensure it's saved
       bool queued = transmissionHandler.handleDataTransmission(csvData);
       if (queued) {
-        Serial.println("Data successfully queued to flash");
-      } else {
         Serial.println("Failed to queue data to flash!");
+      } else {
+        Serial.println("Data successfully queued to flash");
       }
       transmissionHandler.saveQueueState();
     }

@@ -38,16 +38,14 @@ public:
     return (int)percentage;
   }
 
-  static String getBatteryPercentageV() {
-    float voltage = readBatteryVoltage();
-    
-    if (voltage >= BATTERY_MAX_VOLTAGE) return String("100(") + String(voltage, 2) + String(")");
-    if (voltage <= BATTERY_MIN_VOLTAGE) return String("0(") + String(voltage, 2) + String(")");
+  static int getBatteryPercentageV(float voltage) {
+    if (voltage >= BATTERY_MAX_VOLTAGE) return 100;
+    if (voltage <= BATTERY_MIN_VOLTAGE) return 0;
     
     float percentage = ((voltage - BATTERY_MIN_VOLTAGE) / 
                        (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE)) * 100.0f;
     
-    return String((int)percentage) + String("(") + String(voltage, 2) + String(")");
+    return (int)percentage;
   }
 
   static uint32_t getBatteryColor() {
