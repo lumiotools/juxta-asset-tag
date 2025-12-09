@@ -244,7 +244,8 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
   static char csvBuffer[400];  // Increased buffer size to prevent overflow  
   unsigned long long currentMillis = TimeSync::getCurrentTimeMillis();
   
-  String batteryLevel = BatteryMonitor::getBatteryPercentageV();
+  float batteryVoltage = BatteryMonitor::readBatteryVoltage();
+  int batteryLevel = BatteryMonitor::getBatteryPercentageV(batteryVoltage);
   
   // Get signal strength based on active connection (BLE priority, then WiFi)
   // Add safety checks to prevent crashes if BLE/WiFi not initialized
@@ -255,14 +256,15 @@ String createSensorCSV(IMUData imuData, GPSData gpsData) {
     signalStrength = CustomWiFi::getRSSI();
   }
   
-  // CSV format: device_id,battery_level,timestamp,signal_strength,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
+  // CSV format: device_id,battery_level,voltage,timestamp,signal_strength,imu.accelerometer.x,imu.accelerometer.y,imu.accelerometer.z,
   //             imu.gyroscope.x,imu.gyroscope.y,imu.gyroscope.z,imu.temperature,
   //             gps.fix,gps.fixType,gps.last_recieved_on,gps.satellites,gps.latitude,gps.longitude,gps.altitude,gps.speed,gps.heading,gps.hdop
   
   snprintf(csvBuffer, sizeof(csvBuffer), 
-           "%s,%s,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
+           "%s,%d,%.3f,%llu,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%d,%llu,%d,%.7f,%.7f,%.2f,%.2f,%.2f,%.2f",
            DEVICE_ID,
-           batteryLevel.c_str(),
+           batteryLevel,
+           batteryVoltage,
            currentMillis,
            signalStrength,
            imuData.accelerometer.x, imuData.accelerometer.y, imuData.accelerometer.z,
@@ -774,9 +776,9 @@ void loop() {
       // Just ensure it's saved
       bool queued = transmissionHandler.handleDataTransmission(csvData);
       if (queued) {
-        Serial.println("Data successfully queued to flash");
-      } else {
         Serial.println("Failed to queue data to flash!");
+      } else {
+        Serial.println("Data successfully queued to flash");
       }
       transmissionHandler.saveQueueState();
     }
