@@ -64,7 +64,7 @@ bool flashInitialized = false;
 
 // BLE advertising durations
 const unsigned long BLE_ADVERTISE_FIRST_CYCLE_MS = 60000; // 60 seconds for first cycle (power-on/reset)
-const unsigned long BLE_ADVERTISE_SUBSEQUENT_CYCLE_MS = 10000; // 4 seconds for subsequent cycles
+const unsigned long BLE_ADVERTISE_SUBSEQUENT_CYCLE_MS = 5000; // 5 seconds for subsequent cycles
 
 // USB detection function for ESP32-S3
 // Checks if USB is connected by verifying USB Serial availability

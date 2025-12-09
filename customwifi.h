@@ -46,8 +46,8 @@ public:
       return false;
     }
     
-    // Start orange LED blinking for WiFi transmission
-    // Orange = (255, 165, 0)
+    // Start white LED blinking for WiFi transmission
+    // White = (255, 255, 255)
     long long startTime = startStatusLEDBlink(255, 255, 255);
     
     HTTPClient http;
