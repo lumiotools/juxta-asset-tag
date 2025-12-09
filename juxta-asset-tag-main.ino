@@ -113,17 +113,17 @@ long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
   blinkG = g;
   blinkB = b;
   statusLedBlinkState = false;
-  toggleStatusLED();
-  return TimeSync::getCurrentTimeMillis();
-  // statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
+  // toggleStatusLED();
+  statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
   // statusLedTicker.attach_ms(4000, toggleStatusLED); // 20ms = 50Hz blink
+  return TimeSync::getCurrentTimeMillis();
 }
 
 // Stop blinking and restore to normal status color
 void stopStatusLEDBlink(long long t) {
-  delay(4000 - (TimeSync::getCurrentTimeMillis() - t));
-  // statusLedTicker.detach();
-  toggleStatusLED(); // Ensure LED is on before restoring
+  // delay(4000 - (TimeSync::getCurrentTimeMillis() - t));
+  statusLedTicker.detach();
+  // toggleStatusLED(); // Ensure LED is on before restoring
   setPixelAndShow(0, restoreR, restoreG, restoreB);
 }
 

@@ -436,7 +436,12 @@ public:
       return false;
     }
 
-    delay(1500); // Small delay to ensure connection stability
+    // Non-blocking delay to ensure connection stability (prevents loop freezing)
+    unsigned long startWait = millis();
+    while (millis() - startWait < 1500) {
+      yield(); // Allow other tasks to run
+      delay(100); // Small chunks to prevent blocking
+    }
     
     // Start blue LED blinking on transmit
     long long startTime = startStatusLEDBlink(0, 0, 255);
@@ -451,11 +456,13 @@ public:
     if (dataWithNewline.length() <= maxChunkSize) {
       pDataCharacteristic->setValue(dataWithNewline.c_str());
       pDataCharacteristic->notify();
-      delay(50); // Give BLE stack time to process
+      yield(); // Allow other tasks to run instead of blocking delay
+      delay(10); // Minimal delay for BLE stack
     } else {
       // Send data in chunks
       int totalLength = dataWithNewline.length();
       int offset = 0;
+      int chunkCount = 0;
       
       while (offset < totalLength) {
         int chunkSize = min((int)maxChunkSize, totalLength - offset);
@@ -465,7 +472,19 @@ public:
         pDataCharacteristic->notify();
         
         offset += chunkSize;
-        delay(50); // Give BLE stack time between chunks
+        chunkCount++;
+        
+        // Use yield() to prevent loop freezing and watchdog resets
+        yield();
+        
+        // Reduced delay and periodic yield for large transmissions
+        if (chunkCount % 5 == 0) {
+          // Every 5 chunks, yield more to prevent watchdog reset
+          delay(5);
+          yield();
+        } else {
+          delay(10); // Minimal delay between chunks
+        }
       }
     }
     
