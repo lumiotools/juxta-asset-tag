@@ -94,6 +94,9 @@ public:
           Serial.println(batchData.substring(0, 200));
         }
         
+        // Yield before sending to prevent watchdog reset during large transmissions
+        yield();
+        
         bool success = sendData(batchData);
         
         if (success) {
@@ -104,6 +107,9 @@ public:
           Serial.print("/");
           Serial.print(MAX_PACKETS_PER_CYCLE);
           Serial.println(" packets)");
+          
+          // Yield after successful transmission to prevent loop freezing
+          yield();
         } else {
           Serial.println("TransmissionHandler: Queued batch transmission failed - stopping");
           allQueuedSent = false;
