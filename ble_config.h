@@ -435,6 +435,13 @@ public:
     if (bleDisabled || !deviceConnected || pDataCharacteristic == nullptr) {
       return false;
     }
+
+    // Non-blocking delay to ensure connection stability (prevents loop freezing)
+    unsigned long startWait = millis();
+    while (millis() - startWait < 1500) {
+      yield(); // Allow other tasks to run
+      delay(100); // Small chunks to prevent blocking
+    }
     
     // Start blue LED blinking on transmit
     long long startTime = startStatusLEDBlink(0, 0, 255);
