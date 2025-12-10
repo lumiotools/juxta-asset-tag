@@ -20,7 +20,7 @@ extern void stopStatusLEDBlink(long long startTime);
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
 #define SSID_CHAR_UUID      "12345678-1234-1234-1234-123456789abd"
 #define PASSWORD_CHAR_UUID  "12345678-1234-1234-1234-123456789abe"
-#define DEBUG_MODE_CHAR_UUID "12345678-1234-1234-1234-123456789ac2"
+#define GPS_ACTIVE_CHAR_UUID "12345678-1234-1234-1234-123456789ac2"
 #define CYCLE_TIME_CHAR_UUID "12345678-1234-1234-1234-123456789ac3"
 #define STATUS_CHAR_UUID    "12345678-1234-1234-1234-123456789abf"
 #define DATA_CHAR_UUID      "12345678-1234-1234-1234-123456789ac0"
@@ -34,7 +34,7 @@ private:
   static BLEService* pService;
   static BLECharacteristic* pSSIDCharacteristic;
   static BLECharacteristic* pPasswordCharacteristic;
-  static BLECharacteristic* pDebugModeCharacteristic;
+  static BLECharacteristic* pGPSActiveCharacteristic;
   static BLECharacteristic* pCycleTimeCharacteristic;
   static BLECharacteristic* pStatusCharacteristic;
   static BLECharacteristic* pDataCharacteristic;
@@ -43,10 +43,10 @@ private:
   static bool oldDeviceConnected;
   static String receivedSSID;
   static String receivedPassword;
-  static uint8_t receivedDebugMode;
+  static uint8_t receivedGPSActive;
   static uint32_t receivedCycleTime;
   static bool credentialsReceived;
-  static bool debugModeReceived;
+  static bool gpsActiveReceived;
   static bool cycleTimeReceived;
   static uint16_t mtuSize;
   static const char* deviceId;
@@ -74,8 +74,8 @@ private:
       
       char jsonBuffer[350];
       snprintf(jsonBuffer, sizeof(jsonBuffer), 
-               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%llu\",\"battery\":%d,\"voltage\":%.3f,\"currentSSID\":\"%s\",\"debug_mode\":%d,\"cycle_time\":%d}",
-               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getDebugMode(), NVSConfig::getCycleTime());
+               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%llu\",\"battery\":%d,\"voltage\":%.3f,\"currentSSID\":\"%s\",\"gps_active\":%d,\"cycle_time\":%d}",
+               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getGPSActive(), NVSConfig::getCycleTime());
       
       // Send JSON data via Current SSID Characteristic
       if (pCurrentSSIDCharacteristic != nullptr) {
@@ -124,8 +124,8 @@ private:
     }
   };
 
-  // Debug Mode Characteristic Callbacks
-  class DebugModeCallbacks: public BLECharacteristicCallbacks {
+  // GPS Active Characteristic Callbacks
+  class GPSActiveCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pCharacteristic) {
       // Start blue LED blinking on receive
       // startStatusLEDBlink(0, 0, 255);
@@ -133,17 +133,17 @@ private:
       // Read raw byte data (sent as Uint8Array from web interface)
       String value = pCharacteristic->getValue();
       if (value.length() > 0) {
-        receivedDebugMode = (uint8_t)value[0]; // Read first byte as uint8_t (0 or 1)
-        // Save debug mode immediately to NVS (independent of WiFi credentials)
-        // NVS key: "debug_mode" in namespace "wifi_config"
-        bool debugModeSaved = NVSConfig::setDebugMode(receivedDebugMode);
-        debugModeReceived = true;
-        Serial.print("Debug Mode received: ");
-        Serial.print(receivedDebugMode);
+        receivedGPSActive = (uint8_t)value[0]; // Read first byte as uint8_t (0 or 1)
+        // Save GPS active setting immediately to NVS (independent of WiFi credentials)
+        // NVS key: "gps_active" in namespace "wifi_config"
+        bool gpsActiveSaved = NVSConfig::setGPSActive(receivedGPSActive);
+        gpsActiveReceived = true;
+        Serial.print("GPS Active received: ");
+        Serial.print(receivedGPSActive);
         Serial.print(" - ");
-        Serial.print(debugModeSaved ? "Saved to NVS (key: debug_mode)" : "Failed to save to NVS");
+        Serial.print(gpsActiveSaved ? "Saved to NVS (key: gps_active)" : "Failed to save to NVS");
         Serial.print(" - Current NVS value: ");
-        Serial.println(NVSConfig::getDebugMode());
+        Serial.println(NVSConfig::getGPSActive());
         
         // Check if all credentials are received (SSID and password) for WiFi credentials saving
         if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
@@ -226,12 +226,12 @@ public:
     );
     pPasswordCharacteristic->setCallbacks(new PasswordCallbacks());
     
-    // Create Debug Mode Characteristic
-    pDebugModeCharacteristic = pService->createCharacteristic(
-      DEBUG_MODE_CHAR_UUID,
+    // Create GPS Active Characteristic
+    pGPSActiveCharacteristic = pService->createCharacteristic(
+      GPS_ACTIVE_CHAR_UUID,
       BLECharacteristic::PROPERTY_WRITE
     );
-    pDebugModeCharacteristic->setCallbacks(new DebugModeCallbacks());
+    pGPSActiveCharacteristic->setCallbacks(new GPSActiveCallbacks());
     
     // Create Cycle Time Characteristic
     pCycleTimeCharacteristic = pService->createCharacteristic(
@@ -279,10 +279,10 @@ public:
     oldDeviceConnected = false;
     receivedSSID = "";
     receivedPassword = "";
-    receivedDebugMode = 0; // Default to 0 (LED off in deep sleep)
+    receivedGPSActive = 0; // Default to 0 (GPS OFF)
     receivedCycleTime = 900; // Default to 900 seconds (15 minutes)
     credentialsReceived = false;
-    debugModeReceived = false;
+    gpsActiveReceived = false;
     cycleTimeReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
@@ -326,10 +326,10 @@ public:
       receivedPassword = "";
     }
     
-    // Reset debug mode flag if it was processed
-    if (debugModeReceived) {
-      debugModeReceived = false;
-      receivedDebugMode = 0;
+    // Reset GPS active flag if it was processed
+    if (gpsActiveReceived) {
+      gpsActiveReceived = false;
+      receivedGPSActive = 0;
     }
     
     // Reset cycle time flag if it was processed
@@ -383,7 +383,7 @@ public:
     pService = nullptr;
     pSSIDCharacteristic = nullptr;
     pPasswordCharacteristic = nullptr;
-    pDebugModeCharacteristic = nullptr;
+    pGPSActiveCharacteristic = nullptr;
     pCycleTimeCharacteristic = nullptr;
     pStatusCharacteristic = nullptr;
     pDataCharacteristic = nullptr;
@@ -397,10 +397,10 @@ public:
     // Clear credentials
     receivedSSID = "";
     receivedPassword = "";
-    receivedDebugMode = 0;
+    receivedGPSActive = 0;
     receivedCycleTime = 900;
     credentialsReceived = false;
-    debugModeReceived = false;
+    gpsActiveReceived = false;
     cycleTimeReceived = false;
   }
   
@@ -501,7 +501,7 @@ BLEServer* BLEConfig::pServer = nullptr;
 BLEService* BLEConfig::pService = nullptr;
 BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pDebugModeCharacteristic = nullptr;
+BLECharacteristic* BLEConfig::pGPSActiveCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pCycleTimeCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
 BLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
@@ -510,10 +510,10 @@ bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
 String BLEConfig::receivedPassword = "";
-uint8_t BLEConfig::receivedDebugMode = 0;
+uint8_t BLEConfig::receivedGPSActive = 0;
 uint32_t BLEConfig::receivedCycleTime = 900;
 bool BLEConfig::credentialsReceived = false;
-bool BLEConfig::debugModeReceived = false;
+bool BLEConfig::gpsActiveReceived = false;
 bool BLEConfig::cycleTimeReceived = false;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;

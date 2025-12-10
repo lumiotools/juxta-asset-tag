@@ -10,7 +10,8 @@ extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
 extern void stopStatusLEDBlink(long long t);
 
 // Server Configuration
-const char* SERVER_URL = "https://juxta.pmcprecision.com/api/record/wifi/v2.0.0";
+// Note: http.begin() requires full URL with protocol (http:// or https://)
+const char* SERVER_URL = "http://echo-http-requests.appspot.com/push/juxtatetsing";
 const int REQUEST_TIMEOUT = 5000; // 5 seconds
 
 class CustomWiFi {
@@ -42,9 +43,27 @@ public:
   }
   
   static bool sendSensorData(const String& csvData) {
+    Serial.print("CustomWiFi::sendSensorData: Entry - WiFi.status()=");
+    Serial.print(WiFi.status());
+    Serial.print(", WiFi.isConnected()=");
+    Serial.print(WiFi.isConnected());
+    Serial.print(", SSID=");
+    Serial.println(WiFi.SSID());
+    
     if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("CustomWiFi::sendSensorData: ERROR - WiFi.status() != WL_CONNECTED");
       return false;
     }
+    
+    if (!WiFi.isConnected()) {
+      Serial.println("CustomWiFi::sendSensorData: ERROR - WiFi.isConnected() returned false");
+      return false;
+    }
+    
+    Serial.print("CustomWiFi::sendSensorData: Sending ");
+    Serial.print(csvData.length());
+    Serial.print(" bytes to ");
+    Serial.println(SERVER_URL);
     
     // Start white LED blinking for WiFi transmission
     // White = (255, 255, 255)
@@ -52,26 +71,80 @@ public:
     
     HTTPClient http;
     http.setTimeout(REQUEST_TIMEOUT);
-    http.begin(SERVER_URL);
+    
+    Serial.println("CustomWiFi::sendSensorData: Initializing HTTP client...");
+    Serial.print("CustomWiFi::sendSensorData: URL: ");
+    Serial.println(SERVER_URL);
+    
+    // Try with full URL first
+    bool httpBegin = http.begin(SERVER_URL);
+    
+    if (!httpBegin) {
+      Serial.println("CustomWiFi::sendSensorData: ERROR - http.begin() failed");
+      Serial.print("CustomWiFi::sendSensorData: WiFi.status()=");
+      Serial.print(WiFi.status());
+      Serial.print(", IP address: ");
+      Serial.println(WiFi.localIP());
+      
+      // Try alternative: begin with WiFiClient
+      WiFiClient client;
+      bool httpBegin2 = http.begin(client, SERVER_URL);
+      if (httpBegin2) {
+        Serial.println("CustomWiFi::sendSensorData: http.begin() succeeded with WiFiClient");
+        httpBegin = true;
+      } else {
+        Serial.println("CustomWiFi::sendSensorData: ERROR - http.begin() with WiFiClient also failed");
+        stopStatusLEDBlink(startTime);
+        return false;
+      }
+    } else {
+      Serial.println("CustomWiFi::sendSensorData: http.begin() succeeded");
+    }
+    
     http.addHeader("Content-Type", "text/csv");
     
+    Serial.println("CustomWiFi::sendSensorData: Sending POST request...");
     // POST is blocking - LED blinks via Ticker interrupt during transmission
     int httpResponseCode = http.POST(csvData);
+    
+    Serial.print("CustomWiFi::sendSensorData: HTTP response code: ");
+    Serial.println(httpResponseCode);
     
     // Stop LED blinking and restore to green
     stopStatusLEDBlink(startTime);
     
+    http.end();
+    
     if (httpResponseCode > 0) {
-      http.end();
-      return (httpResponseCode == 200);
+      bool success = (httpResponseCode == 200);
+      if (success) {
+        Serial.println("CustomWiFi::sendSensorData: SUCCESS - HTTP 200");
+      } else {
+        Serial.print("CustomWiFi::sendSensorData: HTTP error - code ");
+        Serial.println(httpResponseCode);
+      }
+      return success;
     } else {
-      http.end();
+      Serial.print("CustomWiFi::sendSensorData: ERROR - HTTP request failed (code=");
+      Serial.print(httpResponseCode);
+      Serial.println(")");
       return false;
     }
   }
   
   static bool isConnected() {
-    return WiFi.isConnected();
+    // Use both checks for reliability
+    bool connected = (WiFi.status() == WL_CONNECTED) && WiFi.isConnected();
+    if (!connected) {
+      // Debug output
+      Serial.print("WiFi status check: status=");
+      Serial.print(WiFi.status());
+      Serial.print(", isConnected()=");
+      Serial.print(WiFi.isConnected());
+      Serial.print(", SSID=");
+      Serial.println(WiFi.SSID());
+    }
+    return connected;
   }
   
   // Get WiFi RSSI signal strength (returns dBm, or -100 if not connected)

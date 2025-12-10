@@ -14,7 +14,11 @@ class DataQueue {
 private:
   bool initialized = false;
   SPIFlashHandler* flashHandler = nullptr;
-  const uint32_t QUEUE_FLASH_ADDR = 0x10000;
+  // Flash partitioning:
+  // 0x00000 - 0xFFFFF (1MB): Buffer/General use
+  // 0x100000 - 0x5FFFFF (5MB): IMU readings storage
+  // 0x600000 - 0xFFFFFF (10MB): Data queue storage (failed transmissions)
+  const uint32_t QUEUE_FLASH_ADDR = 0x600000;  // 6MB offset (after 1MB buffer + 5MB IMU)
   
   uint32_t queueStartAddr;
   uint32_t queueEndAddr;
@@ -219,7 +223,7 @@ public:
     Serial.print(" bytes to flash at 0x");
     Serial.println(writePtr, HEX);
     
-    long long startTime = startStatusLEDBlink(150, 75, 0);
+    long long startTime = startStatusLEDBlink(150, 75, 0);//brown blink
     
     if (!flashHandler->writeCharArray(writePtr, dataStr, dataLen)) {
       Serial.print("ERROR: Failed to write to flash at 0x");

@@ -22,7 +22,17 @@ private:
 
     // Only try WiFi if BLE didn't succeed and WiFi is connected
     if (!bleSuccess && CustomWiFi::isConnected()) {
+      Serial.print("TransmissionHandler::sendData: Attempting WiFi transmission (");
+      Serial.print(data.length());
+      Serial.println(" bytes)...");
       wifiSuccess = CustomWiFi::sendSensorData(data);
+      if (wifiSuccess) {
+        Serial.println("TransmissionHandler::sendData: WiFi transmission successful");
+      } else {
+        Serial.println("TransmissionHandler::sendData: WiFi transmission failed");
+      }
+    } else if (!bleSuccess) {
+      Serial.println("TransmissionHandler::sendData: WiFi not connected, skipping WiFi attempt");
     }
     
     // Consider successful if either method worked
@@ -47,6 +57,11 @@ public:
     // Check if WiFi or BLE is connected before attempting transmission
     bool wifiConnected = CustomWiFi::isConnected();
     bool bleConnected = BLEConfig::isConnected();
+    
+    Serial.print("TransmissionHandler: Connection status - WiFi: ");
+    Serial.print(wifiConnected ? "CONNECTED" : "DISCONNECTED");
+    Serial.print(", BLE: ");
+    Serial.println(bleConnected ? "CONNECTED" : "DISCONNECTED");
     
     // First, read and send any existing queued data (prioritize old data)
     // Limit to 3 packets to avoid long transmission times
