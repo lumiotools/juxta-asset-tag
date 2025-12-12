@@ -230,22 +230,88 @@ public:
       uint32_t batchEndPtr = startReadPtr;
 
       // Read entries for this batch (do NOT call markAsSent during building)
+      // IMPORTANT: Only add complete entries - never break entries or objects (objects separated by ',')
+      // Track object count to ensure consistent batches
+      uint32_t objectsInBatch = 0;
+      const uint32_t TARGET_OBJECTS_PER_BATCH = 200; // Target ~500 objects per batch for consistency
+      
       while (storage->hasDataToRead() && entriesInBatch < chunkSize) {
+        // Save read pointer before reading entry (in case we need to skip it)
+        uint32_t entryStartPtr = storage->getReadPtr();
+        
+        // Save read pointer before reading to detect partial entries
+        uint32_t readPtrBefore = storage->getReadPtr();
+        
         String entry = storage->readNextCSVEntry();
 
         if (entry.length() == 0) {
           break; // No more data
         }
 
-        // Check if adding this entry would exceed max size
-        size_t entrySize = entry.length() + (batch.length() > 0 ? 1 : 0); // +1 for newline
-        if (batchBytes + entrySize > maxChunkBytes && entriesInBatch > 0) {
-          // Batch is full - stop here and keep readPtr at startReadPtr
-          Serial.println("  Batch full - capping at current size");
-          break;
+        // CRITICAL: Detect partial entries to prevent data corruption
+        // Partial entries occur when readNextCSVEntry() reaches writePtr without finding newline
+        // We detect this by checking if readPtr is now very close to writePtr
+        uint32_t readPtrAfter = storage->getReadPtr();
+        uint32_t writePtr = storage->getWritePtr();
+        uint32_t lastEntryEndPtr = storage->getLastEntryEndPtr();
+        
+        // Check if we're at the write boundary (might be partial entry)
+        // If lastEntryEndPtr equals writePtr, it's a partial entry (no newline found)
+        bool isPartialEntry = (lastEntryEndPtr == writePtr && readPtrBefore != writePtr);
+        
+        if (isPartialEntry) {
+          // This is a partial entry - don't add it to batch
+          // It will be completed when more data is written
+          Serial.println("  WARNING: Detected partial entry at write boundary - skipping to prevent data corruption");
+          Serial.print("    ReadPtr: 0x");
+          Serial.print(readPtrAfter, HEX);
+          Serial.print(", WritePtr: 0x");
+          Serial.print(writePtr, HEX);
+          Serial.print(", LastEntryEndPtr: 0x");
+          Serial.println(lastEntryEndPtr, HEX);
+          break; // Stop batching - wait for entry to be completed
         }
 
-        // Add entry to batch
+        // Count objects in this entry (objects separated by commas: count commas + 1)
+        uint32_t objectsInEntry = 1; // At least 1 object
+        for (int i = 0; i < entry.length(); i++) {
+          if (entry.charAt(i) == ',') {
+            objectsInEntry++;
+          }
+        }
+
+        // Calculate size if we add this complete entry
+        size_t entrySize = entry.length() + (batch.length() > 0 ? 1 : 0); // +1 for newline
+        
+        // Check if this complete entry would exceed max size OR object count limit
+        // If it would exceed AND we already have entries, stop here (don't break the entry)
+        bool wouldExceedSize = (batchBytes + entrySize > maxChunkBytes);
+        bool wouldExceedObjects = (objectsInBatch + objectsInEntry > TARGET_OBJECTS_PER_BATCH && objectsInBatch > 0);
+        
+        if (wouldExceedSize || wouldExceedObjects) {
+          if (entriesInBatch > 0) {
+            // Batch is full - stop here with complete entries only
+            // Don't add this entry - readNextCSVEntry() doesn't advance readPtr, so it will be read again next batch
+            if (wouldExceedSize) {
+              Serial.println("  Batch full (size limit) - stopping to preserve complete entries only");
+            } else {
+              Serial.print("  Batch full (object limit: ");
+              Serial.print(objectsInBatch);
+              Serial.println(" objects) - stopping to preserve complete entries only");
+            }
+            break;
+          } else {
+            // This is the first entry and it's too large - we have to send it anyway
+            // (otherwise we'd never send large entries)
+            Serial.print("  WARNING: First entry is large (");
+            Serial.print(entry.length());
+            Serial.print(" bytes, ");
+            Serial.print(objectsInEntry);
+            Serial.println(" objects) - sending anyway");
+          }
+        }
+
+        // Add complete entry to batch (entry contains complete objects separated by ',')
         if (batch.length() > 0) {
           batch += "\n";
           batchBytes += 1;
@@ -254,9 +320,17 @@ public:
         batchBytes += entry.length();
         entriesInBatch++;
         entriesRead++;
+        objectsInBatch += objectsInEntry;
 
-        // Record end pointer for this entry (so we can advance readPtr after success)
+        // IMPORTANT: Only update batchEndPtr AFTER we've confirmed we're adding this entry
+        // This ensures batchEndPtr points to the end of the last entry that was actually added
         batchEndPtr = storage->getLastEntryEndPtr();
+      }
+      
+      // Log object count for this batch
+      if (entriesInBatch > 0) {
+        Serial.print("  Objects in batch: ");
+        Serial.println(objectsInBatch);
       }
       
       if (entriesInBatch == 0) {

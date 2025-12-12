@@ -272,9 +272,26 @@ public:
     // Start the service
     pService->start();
     
-    // Start advertising (simplified)
+    // Configure and start advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    
+    // Set advertising parameters for better discoverability
+    // 2 = BLE_GAP_CONN_MODE_UND (undirected connectable advertising)
+    pAdvertising->setConnectableMode(2);
+    pAdvertising->setMinInterval(32);   // 20ms (units of 0.625ms)
+    pAdvertising->setMaxInterval(160);  // 100ms (units of 0.625ms)
+    pAdvertising->enableScanResponse(true);
+    
+    // Add service UUID to advertising data
     pAdvertising->addServiceUUID(SERVICE_UUID);
+    
+    // Set device name in advertising data (important for discoverability)
+    // Note: In NimBLE 2.x, device name must be explicitly set
+    pAdvertising->setName(bleDeviceName);
+    
+    // Start advertising
+    Serial.print("BLE advertising started with name: ");
+    Serial.println(bleDeviceName);
     NimBLEDevice::startAdvertising();
     
     deviceConnected = false;

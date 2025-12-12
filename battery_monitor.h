@@ -51,14 +51,11 @@ public:
   static uint32_t getBatteryColor() {
     int percentage = getBatteryPercentage();
     
-    if (percentage >= 75) {
-      return 0x00FF00;
-    } else if (percentage >= 25) {
-      int greenComponent = (int)(255 * (percentage - 25) / 50);
-      int redComponent = 255 - greenComponent;
-      return (redComponent << 16) | (greenComponent << 8);
-    } else {
+    if (percentage <= 20) {
       return 0xFF0000;
+    }
+    else{
+      return 0x000000;
     }
   }
 };

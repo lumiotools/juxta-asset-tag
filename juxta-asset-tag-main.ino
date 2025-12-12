@@ -191,6 +191,11 @@ void setup() {
   // String y = x?"true":"false";
   // Serial.print("erased :");
   // Serial.println(y);
+  // // Reset read/write pointers after erasing flash chip
+  // if (x && unifiedCSVStorage.isInitialized()) {
+  //   unifiedCSVStorage.clear();
+  //   Serial.println("CSV storage pointers reset after chip erase");
+  // }
   // delay(-100);
   
   // Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
@@ -250,6 +255,9 @@ void setup() {
     CustomWiFi::connectWiFi();
     // Attempt time sync if WiFi connected (regardless of whether it was previously synced)
     attemptTimeSyncIfNeeded();
+    // Disconnect WiFi after time sync to save power
+    CustomWiFi::disconnectWiFi();
+    Serial.println("WiFi disconnected after time sync");
   } else {
     Serial.println("Subsequent cycle - skipping WiFi connection in setup (will connect in loop if needed)");
   }
@@ -373,6 +381,12 @@ void loop() {
   }
   
   // Periodic status update removed for production - light sleep enabled
+  
+  // ========== BLE UPDATE ==========
+  // Update BLE to handle connections and process received data
+  if (BLEConfig::isEnabled()) {
+    BLEConfig::update();
+  }
   
   // ========== USB STATE MONITORING ==========
   // USB state monitoring

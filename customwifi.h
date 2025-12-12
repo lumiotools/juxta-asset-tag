@@ -11,7 +11,7 @@ extern void stopStatusLEDBlink(long long t);
 
 // Server Configuration
 // Note: http.begin() requires full URL with protocol (http:// or https://)
-const char* SERVER_URL = "http://echo-http-requests.appspot.com/push/juxtatetsing";
+const char* SERVER_URL = "https://unusable-melody-unhealing.ngrok-free.dev/";
 const int REQUEST_TIMEOUT = 60000; // 60 seconds (for large batches and slow servers)
 
 class CustomWiFi {

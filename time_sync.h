@@ -3,6 +3,7 @@
 
 #include <WiFi.h>
 #include <time.h>
+#include <sys/time.h>
 
 // Include esp_sntp.h if available (ESP-IDF v4.1+, Arduino ESP32 v2.0+)
 #if __has_include(<esp_sntp.h>)
@@ -15,6 +16,9 @@
 class TimeSync {
 private:
   static bool _timeSyncReceived;
+  static unsigned long long _syncTimeMillis;  // Unix timestamp in ms when sync happened
+  static unsigned long _syncMillis;            // millis() value when sync happened
+  static bool _hasSyncOffset;                  // Whether we have a valid sync offset
   
   // Callback function (gets called when time adjusts via NTP)
   static void onTimeSyncCallback(struct timeval *t) {
@@ -59,8 +63,26 @@ public:
     
     bool success = (now > 24 * 3600);
     if (success) {
-      Serial.print("NTP sync successful - UTC time: ");
-      printLocalTime();
+      // Store sync time offset for accurate timestamps even after WiFi disconnect
+      struct timeval tv;
+      if (gettimeofday(&tv, nullptr) == 0) {
+        _syncTimeMillis = (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
+        _syncMillis = millis();
+        _hasSyncOffset = true;
+        Serial.print("NTP sync successful - UTC time: ");
+        printLocalTime();
+        Serial.print("Sync offset stored: Unix=");
+        Serial.print(_syncTimeMillis);
+        Serial.print("ms, millis()=");
+        Serial.println(_syncMillis);
+      } else {
+        // Fallback if gettimeofday fails
+        _syncTimeMillis = (unsigned long long)now * 1000ULL;
+        _syncMillis = millis();
+        _hasSyncOffset = true;
+        Serial.print("NTP sync successful (fallback) - UTC time: ");
+        printLocalTime();
+      }
     } else {
       Serial.println("NTP sync failed - timeout");
     }
@@ -99,25 +121,56 @@ public:
   
   // Get Unix timestamp in milliseconds (synced time)
   // Returns milliseconds since epoch if time is synced, otherwise returns 0
+  // Uses gettimeofday() for accurate millisecond precision
   static unsigned long long getUnixTimeMillis() {
     if (!isTimeSynced()) {
       return 0; // Return 0 if time not synced
     }
+    struct timeval tv;
+    if (gettimeofday(&tv, nullptr) == 0) {
+      // Convert seconds and microseconds to milliseconds
+      return (unsigned long long)tv.tv_sec * 1000ULL + (unsigned long long)tv.tv_usec / 1000ULL;
+    }
+    // Fallback to seconds * 1000 if gettimeofday fails
     time_t now = time(nullptr);
     return (unsigned long long)now * 1000ULL;
   }
   
   // Get current timestamp in milliseconds (prefers synced NTP time, falls back to millis)
+  // Uses stored sync offset to maintain accurate timestamps even after WiFi disconnect
   static unsigned long long getCurrentTimeMillis() {
+    // First, try to use system time if synced
     if (isTimeSynced()) {
-      return getUnixTimeMillis();
+      unsigned long long unixTime = getUnixTimeMillis();
+      if (unixTime > 0) {
+        // Update sync offset if system time is available
+        _syncTimeMillis = unixTime;
+        _syncMillis = millis();
+        _hasSyncOffset = true;
+        return unixTime;
+      }
     }
-    // Fallback to millis() if time not synced
+    
+    // If we have a stored sync offset, use it with millis() for accurate timestamps
+    // This ensures timestamps remain correct even after WiFi disconnects
+    if (_hasSyncOffset) {
+      unsigned long currentMillis = millis();
+      // Handle millis() overflow (happens every ~49 days)
+      unsigned long elapsed = (currentMillis >= _syncMillis) 
+                            ? (currentMillis - _syncMillis)
+                            : (ULONG_MAX - _syncMillis + currentMillis + 1);
+      return _syncTimeMillis + (unsigned long long)elapsed;
+    }
+    
+    // Last resort: fallback to millis() if no sync has ever happened
     return (unsigned long long)millis();
   }
 };
 
 // Static member initialization
 bool TimeSync::_timeSyncReceived = false;
+unsigned long long TimeSync::_syncTimeMillis = 0;
+unsigned long TimeSync::_syncMillis = 0;
+bool TimeSync::_hasSyncOffset = false;
 
 #endif

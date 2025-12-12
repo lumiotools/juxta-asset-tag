@@ -207,7 +207,9 @@ public:
       
       if (currentDataSent) {
         Serial.println("TransmissionHandler: Current data sent successfully - skipping flash write");
-        return allQueuedSent; // Return true if all queued data was also sent
+        // Return true if current data was sent successfully (HTTP 200)
+        // Queued data failures don't affect current batch success
+        return true;
       } else {
         Serial.println("TransmissionHandler: Direct transmission failed - will queue current data");
       }
