@@ -53,7 +53,7 @@ public:
   // Check transmission status and handle accordingly
   // Uses batch reading to send data in chunks
   // Returns: true if data sent successfully (via WiFi or BLE), false if saved to queue or failed
-  bool handleDataTransmission(String currentCSV) {
+  bool handleDataTransmission(const String& currentCSV) {
     // IMPORTANT: Save currentCSV length immediately (before any operations that might affect memory)
     size_t currentCSVLength = currentCSV.length();
     

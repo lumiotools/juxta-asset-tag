@@ -32,24 +32,24 @@ private:
     Serial.print(maxAlloc);
     Serial.println(" bytes");
     
-    // Use only 40% of free heap (conservative to avoid fragmentation)
-    size_t safeHeap = (freeHeap * 40) / 100;
+    // Use only 25% of free heap (more conservative to reduce peak memory usage)
+    size_t safeHeap = (freeHeap * 25) / 100;
     
-    // Cap at largest contiguous block (also conservative)
-    size_t safeLargestBlock = (maxAlloc * 60) / 100;
+    // Cap at a fraction of the largest contiguous block
+    size_t safeLargestBlock = (maxAlloc * 50) / 100;
     
     // Use smaller of the two
     size_t availableForBatch = (safeHeap < safeLargestBlock) ? safeHeap : safeLargestBlock;
     
-    // Absolute maximum: 20KB (reduced for server stability and timeout issues)
-    if (availableForBatch > 20000) {
-      availableForBatch = 20000;
+    // Absolute maximum: 10KB (reduce peak allocations)
+    if (availableForBatch > 10000) {
+      availableForBatch = 10000;
     }
     
-    // Absolute minimum: 5KB
-    if (availableForBatch < 5000) {
+    // Absolute minimum: 4KB
+    if (availableForBatch < 4000) {
       Serial.println("WARNING: Very low memory available!");
-      availableForBatch = 5000;
+      availableForBatch = 4000;
     }
     
     maxChunkBytes = availableForBatch;
@@ -217,35 +217,34 @@ public:
       // Check RAM before each batch
       size_t heapBefore = ESP.getFreeHeap();
       
-      // Build batch
+      // Build batch (use readNextCSVEntry without advancing storage readPtr; collect end pointer)
       String batch = "";
       batch.reserve(maxChunkBytes); // Pre-allocate to avoid fragmentation
-      
+
       uint32_t entriesInBatch = 0;
       size_t batchBytes = 0;
       uint32_t batchStartEntry = entriesRead + 1;
-      
-      // Save read position (in case we need to restore it)
-      uint32_t savedReadPtr = storage->getReadPtr();
-      
-      // Read entries for this batch
+
+      // Save start pointer (we will only advance the read ptr after a successful send)
+      uint32_t startReadPtr = storage->getReadPtr();
+      uint32_t batchEndPtr = startReadPtr;
+
+      // Read entries for this batch (do NOT call markAsSent during building)
       while (storage->hasDataToRead() && entriesInBatch < chunkSize) {
         String entry = storage->readNextCSVEntry();
-        
+
         if (entry.length() == 0) {
           break; // No more data
         }
-        
+
         // Check if adding this entry would exceed max size
         size_t entrySize = entry.length() + (batch.length() > 0 ? 1 : 0); // +1 for newline
         if (batchBytes + entrySize > maxChunkBytes && entriesInBatch > 0) {
-          // Batch is full - stop here and restore pointer
-          // This entry will be read again in next batch
-          storage->setReadPtr(savedReadPtr);
+          // Batch is full - stop here and keep readPtr at startReadPtr
           Serial.println("  Batch full - capping at current size");
           break;
         }
-        
+
         // Add entry to batch
         if (batch.length() > 0) {
           batch += "\n";
@@ -255,14 +254,10 @@ public:
         batchBytes += entry.length();
         entriesInBatch++;
         entriesRead++;
-        
-        // Update saved position (this entry is now included)
-        savedReadPtr = storage->getReadPtr();
-        storage->markAsSent(); // Advance for next read
+
+        // Record end pointer for this entry (so we can advance readPtr after success)
+        batchEndPtr = storage->getLastEntryEndPtr();
       }
-      
-      // Restore read pointer to start of this batch
-      storage->setReadPtr(savedReadPtr);
       
       if (entriesInBatch == 0) {
         Serial.println("No entries in batch - stopping");
@@ -301,10 +296,8 @@ public:
       bool sent = transmitter->handleDataTransmission(batch);
       
       if (sent) {
-        // Success - mark all entries in batch as sent
-        for (uint32_t i = 0; i < entriesInBatch; i++) {
-          storage->markAsSent();
-        }
+        // Success - advance read pointer to end of last entry in this batch
+        storage->setReadPtr(batchEndPtr);
         entriesSent += entriesInBatch;
         Serial.println("✓ OK");
         

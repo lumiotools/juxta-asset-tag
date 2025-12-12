@@ -1456,7 +1456,7 @@ public:
         Serial.print(ESP.getFreeHeap());
         Serial.println(" bytes)");
         
-        // Pass batch - String is passed by value so it should be safe
+        // Pass batch - String is passed by const reference to avoid copying large batches
         // But verify it's not empty right before passing
         if (batch.length() == 0) {
           Serial.println("ERROR: Batch became empty right before transmission!");

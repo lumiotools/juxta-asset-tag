@@ -212,6 +212,8 @@ public:
   }
   
   // Read next CSV entry (does NOT advance readPtr - call markAsSent() after successful transmission)
+  // Implemented as a 2-pass approach: 1) scan to find newline and determine length, 2) bulk read into buffer
+  // This reduces intermediate reallocations and heap pressure from char-by-char appends
   String readNextCSVEntry() {
     if (!initialized || flashHandler == nullptr) {
       return String("");
@@ -222,78 +224,129 @@ public:
       return String(""); // No data available
     }
     
-    String entry = "";
     uint32_t currentPtr = readPtr;
     uint32_t startPtr = readPtr;
     bool wrapped = false;
-    
-    // Read until we find newline or hit writePtr
+    size_t entryLength = 0;
+
+    // First pass: scan ahead for newline to compute entry length and lastEntryEndPtr
     while (true) {
-      // Check if we've reached writePtr (end of valid data)
       if (currentPtr == writePtr && !wrapped) {
-        // No more data
-        if (entry.length() == 0) {
-          return String(""); // Empty entry
-        }
-        break; // Return what we have
+        if (entryLength == 0) return String("");
+        break;
       }
-      
-      // Handle wrap-around
+
       if (currentPtr >= flashEndAddr) {
-        if (wrapped) {
-          // Already wrapped once, stop
-          break;
-        }
+        if (wrapped) break;
         wrapped = true;
         currentPtr = CSV_FLASH_START_ADDR;
-        
-        // Check if we've caught up to writePtr after wrapping
-        if (currentPtr == writePtr) {
-          break;
+        if (currentPtr == writePtr) break;
+      }
+
+      uint8_t peekBuf[64];
+      size_t toRead = 64;
+      if (!wrapped && (writePtr > currentPtr)) {
+        size_t remaining = (size_t)(writePtr - currentPtr);
+        if (remaining < toRead) toRead = remaining;
+      }
+
+      if (!flashHandler->readBytes(currentPtr, peekBuf, toRead)) {
+        Serial.print("ERROR: Failed to peek bytes at 0x");
+        Serial.println(currentPtr, HEX);
+        return String("");
+      }
+
+      for (size_t i = 0; i < toRead; i++) {
+        char c = (char)peekBuf[i];
+        if (c == '\n') {
+          // Found newline - record entry length and end pointer
+          entryLength += i;
+          uint32_t endPtr = currentPtr + (uint32_t)i + 1; // include newline
+          lastEntryEndPtr = wrapAddress(endPtr);
+
+          if (entryLength == 0) return String("");
+          // Read the full entry into a temporary buffer (bulk read)
+          char* buf = (char*)malloc(entryLength + 1);
+          if (!buf) {
+            Serial.println("ERROR: Failed to allocate buffer for CSV entry");
+            return String("");
+          }
+
+          size_t copied = 0;
+          uint32_t readBlockPtr = startPtr;
+          size_t remainingToFill = entryLength;
+          while (remainingToFill > 0) {
+            size_t chunk = (remainingToFill > 256) ? 256 : remainingToFill;
+            if (!flashHandler->readBytes(readBlockPtr, (uint8_t*)(buf + copied), chunk)) {
+              Serial.print("ERROR: Failed to read CSV entry data at 0x");
+              Serial.println(readBlockPtr, HEX);
+              free(buf);
+              return String("");
+            }
+            copied += chunk;
+            remainingToFill -= chunk;
+            readBlockPtr += chunk;
+            if (readBlockPtr >= flashEndAddr) readBlockPtr = CSV_FLASH_START_ADDR;
+          }
+
+          buf[entryLength] = '\0';
+          String result = String(buf);
+          free(buf);
+          return result;
         }
       }
-      
-      // Read byte
-      uint8_t byteBuffer[1];
-      if (!flashHandler->readBytes(currentPtr, byteBuffer, 1)) {
-        Serial.print("ERROR: Failed to read byte at 0x");
-        Serial.println(currentPtr, HEX);
-        break;
+
+      entryLength += toRead;
+      currentPtr += (uint32_t)toRead;
+      if (currentPtr >= flashEndAddr) {
+        wrapped = true;
+        currentPtr = CSV_FLASH_START_ADDR + (currentPtr - flashEndAddr);
       }
-      
-      char c = (char)byteBuffer[0];
-      
-      if (c == '\n') {
-        // Found entry boundary - store end position and return entry
-        lastEntryEndPtr = currentPtr + 1;
-        lastEntryEndPtr = wrapAddress(lastEntryEndPtr);
-        return entry; // Return complete CSV string
-      }
-      
-      if (c == '\0') {
-        // Hit unwritten area (shouldn't happen if pointers are correct)
-        lastEntryEndPtr = currentPtr;
-        break;
-      }
-      
-      entry += c;
-      currentPtr++;
-      
-      // Safety: prevent infinite loop (max entry size ~10KB)
-      if (entry.length() > 10000) {
+
+      // Safety: prevent very large entries
+      if (entryLength > 10000) {
         Serial.println("ERROR: Entry too large, possible corruption");
         lastEntryEndPtr = currentPtr;
-        break;
+        return String("");
       }
     }
-    
-    // Store end position for entries without newline (corrupted or last entry)
-    if (entry.length() > 0) {
-      lastEntryEndPtr = currentPtr;
-      lastEntryEndPtr = wrapAddress(lastEntryEndPtr);
+
+    // If we exited the loop due to reaching writePtr but found some bytes (partial entry),
+    // read what we have and return it (no newline but valid data).
+    if (entryLength > 0) {
+      // lastEntryEndPtr should be currentPtr (where we stopped)
+      uint32_t endPtr = currentPtr;
+      lastEntryEndPtr = wrapAddress(endPtr);
+
+      char* buf = (char*)malloc(entryLength + 1);
+      if (!buf) {
+        Serial.println("ERROR: Failed to allocate buffer for CSV entry");
+        return String("");
+      }
+
+      size_t copied = 0;
+      uint32_t readBlockPtr = startPtr;
+      size_t remainingToFill = entryLength;
+      while (remainingToFill > 0) {
+        size_t chunk = (remainingToFill > 256) ? 256 : remainingToFill;
+        if (!flashHandler->readBytes(readBlockPtr, (uint8_t*)(buf + copied), chunk)) {
+          Serial.print("ERROR: Failed to read CSV entry data at 0x");
+          Serial.println(readBlockPtr, HEX);
+          free(buf);
+          return String("");
+        }
+        copied += chunk;
+        remainingToFill -= chunk;
+        readBlockPtr += chunk;
+        if (readBlockPtr >= flashEndAddr) readBlockPtr = CSV_FLASH_START_ADDR;
+      }
+      buf[entryLength] = '\0';
+      String result = String(buf);
+      free(buf);
+      return result;
     }
-    
-    return entry.length() > 0 ? entry : String("");
+
+    return String("");
   }
   
   // Check if data is available to read
@@ -329,6 +382,9 @@ public:
     readPtr = lastEntryEndPtr;
     NVSConfig::setCSVReadPtr(readPtr);
   }
+  
+  // Get last entry end pointer (set by last readNextCSVEntry())
+  uint32_t getLastEntryEndPtr() const { return lastEntryEndPtr; }
   
   // Mark entry as failed (don't advance readPtr - entry remains for retry)
   void markAsFailed() {
