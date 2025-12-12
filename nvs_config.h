@@ -30,6 +30,8 @@ private:
   static const char* IMU_WRITE_PTR_KEY;
   static const char* IMU_READ_PTR_KEY;
   static const char* IMU_TOTAL_READINGS_KEY;
+  static const char* CSV_WRITE_PTR_KEY;
+  static const char* CSV_READ_PTR_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -200,6 +202,12 @@ public:
   static bool setIMUReadPtr(uint32_t readPtr) { return writeU32NVS(IMU_READ_PTR_KEY, readPtr); }
   static uint32_t getIMUTotalReadings() { return readU32NVS(IMU_TOTAL_READINGS_KEY, 0); }
   static bool setIMUTotalReadings(uint32_t count) { return writeU32NVS(IMU_TOTAL_READINGS_KEY, count); }
+  
+  // Unified CSV Storage pointers (uses entire external flash)
+  static uint32_t getCSVWritePtr() { return readU32NVS(CSV_WRITE_PTR_KEY, 0); } // Default to start
+  static bool setCSVWritePtr(uint32_t writePtr) { return writeU32NVS(CSV_WRITE_PTR_KEY, writePtr); }
+  static uint32_t getCSVReadPtr() { return readU32NVS(CSV_READ_PTR_KEY, 0); } // Default to start
+  static bool setCSVReadPtr(uint32_t readPtr) { return writeU32NVS(CSV_READ_PTR_KEY, readPtr); }
 
   // GPS last known location storage (using strings to handle negative coordinates)
   // Legacy function - kept for backward compatibility
@@ -333,5 +341,7 @@ const char* NVSConfig::CYCLE_TIME_KEY = "cycle_time";
 const char* NVSConfig::IMU_WRITE_PTR_KEY = "imu_write_ptr";
 const char* NVSConfig::IMU_READ_PTR_KEY = "imu_read_ptr";
 const char* NVSConfig::IMU_TOTAL_READINGS_KEY = "imu_total_readings";
+const char* NVSConfig::CSV_WRITE_PTR_KEY = "csv_write_ptr";
+const char* NVSConfig::CSV_READ_PTR_KEY = "csv_read_ptr";
 
 #endif

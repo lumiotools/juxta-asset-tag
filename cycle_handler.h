@@ -14,12 +14,15 @@
 #include "battery_monitor.h"
 #include "battery_indicator_led.h"
 #include "ble_config.h"
-#include "imu_flash_storage.h"
+#include "unified_csv_storage.h"
+#include "flash_reader.h"
 #include <Adafruit_NeoPixel.h>
 
 // Forward declaration for function defined in main .ino file
 extern void attemptTimeSyncIfNeeded();
 
+// LEGACY CODE - COMMENTED OUT (replaced by unified CSV storage)
+/*
 // IMU data size constant (matches imu_flash_storage.h)
 #define IMU_DATA_SIZE 28  // Size of TimestampedIMUData struct
 
@@ -27,6 +30,7 @@ extern void attemptTimeSyncIfNeeded();
 struct TimestampedIMUData {
   IMUData data;
 };
+*/
 
 // Cycle result status
 enum CycleResult {
@@ -67,6 +71,8 @@ private:
     }
   }
   
+  // LEGACY CODE - COMMENTED OUT (replaced by unified CSV storage)
+  /*
   // Helper: Create CSV data from IMU array and GPS data
   String createSensorCSV(TimestampedIMUData* imuDataArray, int imuDataCount, GPSData gpsData, bool gpsActive) {
     // Dynamic buffer size calculation
@@ -247,6 +253,8 @@ private:
     return result;
   }
   
+  // LEGACY CODE - COMMENTED OUT (replaced by unified CSV storage)
+  /*
   // Helper: Create CSV data by reading IMU data from flash in chunks
   String createSensorCSVFromFlash(IMUFlashStorage* imuFlash, uint32_t totalReadings, GPSData gpsData, bool gpsActive) {
     if (imuFlash == nullptr || !imuFlash->isInitialized() || totalReadings == 0) {
@@ -404,7 +412,10 @@ private:
     
     return result;
   }
+  */
   
+  // LEGACY CODE - COMMENTED OUT (replaced by unified CSV storage)
+  /*
   // Helper: Send IMU data in multiple CSV chunks (handles large datasets)
   // Sends all readings across multiple CSV packets to avoid RAM limitations
   bool sendIMUDataInChunks(IMUFlashStorage* imuFlash, uint32_t totalReadings, GPSData gpsData, bool gpsActive, TransmissionHandler* txHandler) {
@@ -542,7 +553,10 @@ private:
       return false;
     }
   }
+  */
   
+  // LEGACY CODE - COMMENTED OUT (replaced by unified CSV storage)
+  /*
   // Helper: Create CSV chunk with subset of IMU data
   String createSensorCSVChunk(IMUFlashStorage* imuFlash, uint32_t startReadPtr, 
                                uint32_t readingsInChunk, uint32_t totalReadings, 
@@ -821,6 +835,7 @@ private:
     
     return result;
   }
+  */
 
 public:
   // Constructor
@@ -846,6 +861,8 @@ public:
     restoreB = b;
   }
   
+  // LEGACY CODE - COMMENTED OUT (replaced by executeCycleFromUnifiedCSV)
+  /*
   // Main cycle execution - reads IMU data from flash in chunks
   // Parameters: IMU flash storage handler
   // Returns: CycleResult indicating transmission outcome
@@ -1078,6 +1095,531 @@ public:
       return CYCLE_FAILED;
     }
   }
+  */
+  
+  // Main cycle execution - reads CSV entries from unified storage and sends directly
+  // Parameters: Unified CSV storage handler
+  // Returns: CycleResult indicating transmission outcome
+  CycleResult executeCycleFromUnifiedCSV(UnifiedCSVStorage* csvStorage) {
+    if (csvStorage == nullptr || !csvStorage->isInitialized()) {
+      Serial.println("ERROR: Unified CSV storage not available");
+      return CYCLE_FAILED;
+    }
+    
+    // Turn on LEDs when cycle starts
+    setStatusLED(restoreR, restoreG, restoreB);
+    if (batteryLED && batteryLED->isEnabled()) {
+      batteryLED->updateBatteryLED();
+    }
+    
+    Serial.println("========== CYCLE EXECUTION START ==========");
+    
+    // Get current storage state
+    uint32_t readPtr = csvStorage->getReadPtr();
+    uint32_t writePtr = csvStorage->getWritePtr();
+    Serial.print("Storage state - ReadPtr: 0x");
+    Serial.print(readPtr, HEX);
+    Serial.print(", WritePtr: 0x");
+    Serial.print(writePtr, HEX);
+    Serial.println();
+    
+    if (!csvStorage->hasDataToRead()) {
+      Serial.println("WARNING: No CSV entries available (readPtr == writePtr)");
+      setStatusLED(0, 0, 0);
+      turnOffBatteryLED();
+      return CYCLE_SUCCESS_STORED; // No data to send is not a failure
+    }
+    
+    // Create FlashReader instance for modular data transmission
+    FlashReader flashReader(csvStorage, transmissionHandler);
+    
+    // ========== STEP 1: BLE TRANSMISSION ATTEMPT ==========
+    Serial.println("\n========== STEP 1: BLE TRANSMISSION ==========");
+    
+    // Check heap before BLE initialization
+    size_t freeHeap = ESP.getFreeHeap();
+    size_t maxAlloc = ESP.getMaxAllocHeap();
+    Serial.print("Heap status before BLE: Free: ");
+    Serial.print(freeHeap);
+    Serial.print(" bytes, Largest block: ");
+    Serial.print(maxAlloc);
+    Serial.println(" bytes");
+    
+    // BLE needs at least 20KB contiguous memory
+    if (maxAlloc < 20000) {
+      Serial.print("WARNING: Largest free block (");
+      Serial.print(maxAlloc);
+      Serial.println(" bytes) may be too small for BLE initialization");
+      Serial.println("Heap may be fragmented - BLE initialization might fail");
+    }
+    
+    bool bleWasAlreadyOn = BLEConfig::isEnabled();
+    
+    if (!BLEConfig::isEnabled()) {
+      Serial.println("Starting BLE...");
+      
+      // Try to free memory before BLE start
+      yield(); // Allow garbage collection
+      delay(100); // Give time for cleanup
+      
+      BLEConfig::begin();
+      delay(500);
+      
+      // Check if BLE initialized successfully
+      if (!BLEConfig::isEnabled()) {
+        Serial.println("WARNING: BLE initialization may have failed - heap may be too fragmented");
+      }
+    }
+    
+    Serial.println("Waiting for BLE connection (5 seconds)...");
+    unsigned long bleStartTime = millis();
+    bool bleConnected = false;
+    while (millis() - bleStartTime < 5000) {
+      BLEConfig::update();
+      if (BLEConfig::isConnected()) {
+        bleConnected = true;
+        Serial.println("BLE connected!");
+        break;
+      }
+      delay(100);
+    }
+    
+    if (bleConnected) {
+      bool allSent = flashReader.sendViaBLE();
+      
+      if (allSent) {
+        Serial.println("\n✓✓✓ SUCCESS: All CSV entries sent via BLE ✓✓✓");
+        setStatusLED(0, 255, 0); // Green
+        delay(1000);
+        
+        if (!bleWasAlreadyOn) {
+          Serial.println("Turning off BLE...");
+          BLEConfig::stop();
+        }
+        
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        Serial.println("========== CYCLE EXECUTION END (BLE) ==========\n");
+        return CYCLE_SUCCESS_BLE;
+      } else {
+        Serial.println("\n✗✗✗ FAILED: Some CSV entries failed to send via BLE ✗✗✗");
+        Serial.println("Will attempt WiFi transmission...");
+      }
+    } else {
+      Serial.println("No BLE connection within 5 seconds");
+      Serial.println("Will attempt WiFi transmission...");
+    }
+    
+    if (!bleWasAlreadyOn) {
+      Serial.println("Turning off BLE...");
+      BLEConfig::stop();
+    }
+    
+    // ========== STEP 2: WIFI TRANSMISSION ATTEMPT ==========
+    Serial.println("\n========== STEP 2: WIFI TRANSMISSION ==========");
+    
+    String ssid = NVSConfig::getWiFiSSID();
+    String password = NVSConfig::getWiFiPassword();
+    
+    if (ssid.length() > 0 && password.length() > 0) {
+      Serial.println("WiFi credentials found");
+      Serial.println("Connecting to WiFi...");
+      bool wifiConnected = CustomWiFi::connectWiFi();
+      
+      if (wifiConnected) {
+        Serial.println("WiFi connected!");
+        delay(1000);
+        
+        if (!CustomWiFi::isConnected()) {
+          Serial.println("ERROR: WiFi disconnected - reconnecting...");
+          wifiConnected = CustomWiFi::connectWiFi();
+          if (wifiConnected) delay(500);
+        }
+        
+        attemptTimeSyncIfNeeded();
+        
+        if (CustomWiFi::isConnected()) {
+          bool allSent = flashReader.sendViaWiFi();
+          
+          Serial.println("Turning off WiFi...");
+          CustomWiFi::disconnectWiFi();
+          
+          if (allSent) {
+            Serial.println("\n✓✓✓ SUCCESS: All CSV entries sent via WiFi ✓✓✓");
+            setStatusLED(0, 255, 0); // Green
+            delay(1000);
+            setStatusLED(0, 0, 0);
+            turnOffBatteryLED();
+            Serial.println("========== CYCLE EXECUTION END (WiFi) ==========\n");
+            return CYCLE_SUCCESS_WIFI;
+          } else {
+            Serial.println("\n✗✗✗ FAILED: Some CSV entries failed to send via WiFi ✗✗✗");
+            Serial.println("Data remains in flash for retry in next cycle");
+          }
+        }
+      } else {
+        Serial.println("WiFi connection failed");
+      }
+    } else {
+      Serial.println("No WiFi credentials found");
+    }
+    
+    // ========== STEP 3: FLASH STORAGE (FALLBACK) ==========
+    Serial.println("\n========== STEP 3: NO CONNECTION - DATA PRESERVED ==========");
+    Serial.print("Final state - ReadPtr: 0x");
+    Serial.print(csvStorage->getReadPtr(), HEX);
+    Serial.print(", WritePtr: 0x");
+    Serial.println(csvStorage->getWritePtr(), HEX);
+    Serial.println("Data will be retried in next cycle");
+    csvStorage->saveState();
+    
+    setStatusLED(0, 0, 0);
+    turnOffBatteryLED();
+    Serial.println("========== CYCLE EXECUTION END (No Connection) ==========\n");
+    return CYCLE_SUCCESS_STORED;
+  }
+  
+  // LEGACY CODE - COMMENTED OUT (replaced by FlashReader)
+  /*
+  // Helper: Send CSV entries from unified storage
+  // For WiFi: Batches multiple entries together (reduces HTTP requests)
+  // For BLE: Sends one entry at a time (BLE has smaller MTU)
+  bool sendCSVEntries(UnifiedCSVStorage* csvStorage, TransmissionHandler* txHandler, bool isBLE) {
+    if (csvStorage == nullptr || !csvStorage->isInitialized() || txHandler == nullptr) {
+      Serial.println("ERROR: Invalid parameters for sendCSVEntries");
+      return false;
+    }
+    
+    const char* method = isBLE ? "BLE" : "WiFi";
+    Serial.print("\n--- Starting CSV transmission via ");
+    Serial.print(method);
+    Serial.println(" ---");
+    
+    // WiFi batching configuration
+    const uint32_t WIFI_BATCH_SIZE = 10; // Send 10 entries per batch for WiFi
+    const size_t WIFI_MAX_BATCH_SIZE = 50000; // Max 50KB per batch (to avoid memory issues)
+    
+    uint32_t entriesSent = 0;
+    uint32_t entriesFailed = 0;
+    uint32_t entryCounter = 0; // Total entries processed (sent + failed)
+    
+    // Get initial state
+    uint32_t initialReadPtr = csvStorage->getReadPtr();
+    Serial.print("Initial read pointer: 0x");
+    Serial.println(initialReadPtr, HEX);
+    
+    // Count total entries that will be sent (for progress tracking)
+    uint32_t savedReadPtr = csvStorage->getReadPtr();
+    uint32_t maxEntries = 0;
+    while (csvStorage->hasDataToRead()) {
+      String entry = csvStorage->readNextCSVEntry();
+      if (entry.length() > 0) {
+        maxEntries++;
+        csvStorage->markAsSent(); // Advance for counting
+      } else {
+        break;
+      }
+    }
+    csvStorage->setReadPtr(savedReadPtr); // Restore position
+    
+    Serial.print("Maximum entries to send: ");
+    Serial.println(maxEntries);
+    if (!isBLE) {
+      Serial.print("WiFi batching: ");
+      Serial.print(WIFI_BATCH_SIZE);
+      Serial.print(" entries per batch (max ");
+      Serial.print(WIFI_MAX_BATCH_SIZE / 1024);
+      Serial.println(" KB per batch)");
+    }
+    Serial.print("Starting transmission of ");
+    Serial.print(maxEntries);
+    Serial.println(" entries...");
+    Serial.println();
+    
+    // WiFi: Batch multiple entries together
+    if (!isBLE) {
+      while (csvStorage->hasDataToRead()) {
+        // Build batch of entries
+        // First, estimate batch size and pre-allocate String capacity to avoid fragmentation
+        uint32_t entriesInBatch = 0;
+        size_t estimatedBatchSize = 0;
+        uint32_t batchStartEntry = entryCounter + 1;
+        
+        // First pass: estimate size by reading entries (without building String yet)
+        uint32_t savedReadPtr = csvStorage->getReadPtr();
+        uint32_t tempEntryCounter = entryCounter;
+        while (csvStorage->hasDataToRead() && entriesInBatch < WIFI_BATCH_SIZE) {
+          String tempEntry = csvStorage->readNextCSVEntry();
+          if (tempEntry.length() == 0) break;
+          
+          if (estimatedBatchSize + tempEntry.length() + 1 > WIFI_MAX_BATCH_SIZE && entriesInBatch > 0) {
+            csvStorage->setReadPtr(savedReadPtr); // Restore for actual read
+            break;
+          }
+          
+          estimatedBatchSize += tempEntry.length() + (entriesInBatch > 0 ? 1 : 0); // +1 for newline
+          entriesInBatch++;
+          tempEntryCounter++;
+        }
+        csvStorage->setReadPtr(savedReadPtr); // Restore to start
+        
+        if (entriesInBatch == 0) {
+          break; // No more data
+        }
+        
+        // Pre-allocate String with estimated capacity to avoid fragmentation
+        String batch = "";
+        batch.reserve(estimatedBatchSize + 100); // Add 100 bytes buffer for safety
+        
+        // Second pass: actually build the batch
+        size_t batchSize = 0;
+        entryCounter = batchStartEntry - 1; // Reset counter
+        while (csvStorage->hasDataToRead() && entriesInBatch > 0) {
+          entryCounter++;
+          
+          // Read next CSV entry (does NOT advance readPtr yet)
+          String entry = csvStorage->readNextCSVEntry();
+          
+          if (entry.length() == 0) {
+            Serial.println("No more entries to read");
+            break; // No more data
+          }
+          
+          // Add entry to batch (separate with newline for multiple entries)
+          if (batch.length() > 0) {
+            batch += "\n";
+            batchSize += 1;
+          }
+          batch += entry;
+          batchSize += entry.length();
+          entriesInBatch--;
+        }
+        
+        if (entriesInBatch == 0) {
+          break; // No more data
+        }
+        
+        // Debug: Show batch info
+        Serial.print("\n[Batch: Entries ");
+        Serial.print(batchStartEntry);
+        Serial.print("-");
+        Serial.print(batchStartEntry + entriesInBatch - 1);
+        Serial.print("] Total length: ");
+        Serial.print(batchSize);
+        Serial.print(" bytes, Entries in batch: ");
+        Serial.print(entriesInBatch);
+        Serial.print(", ReadPtr: 0x");
+        Serial.print(csvStorage->getReadPtr(), HEX);
+        Serial.println();
+        
+        // Verify WiFi connection before sending batch
+        if (!CustomWiFi::isConnected()) {
+          Serial.println("ERROR: WiFi disconnected before batch transmission");
+          csvStorage->markAsFailed();
+          entriesFailed += entriesInBatch;
+          Serial.println("  Stopping transmission - WiFi connection lost");
+          break;
+        }
+        
+        // Verify batch before sending
+        if (batch.length() == 0) {
+          Serial.println("ERROR: Batch is empty (0 bytes)! Cannot send.");
+          csvStorage->markAsFailed();
+          entriesFailed += entriesInBatch;
+          Serial.println("  Stopping transmission - empty batch");
+          break;
+        }
+        
+        if (batch.length() != batchSize) {
+          Serial.print("WARNING: Batch size mismatch! Expected: ");
+          Serial.print(batchSize);
+          Serial.print(", Actual: ");
+          Serial.println(batch.length());
+          // Continue anyway - use actual length
+        }
+        
+        // Verify batch is valid before transmission
+        if (batch.length() == 0) {
+          Serial.println("ERROR: Batch is empty! Cannot send.");
+          csvStorage->markAsFailed();
+          entriesFailed += entriesInBatch;
+          break;
+        }
+        
+        // Attempt transmission of batch
+        Serial.print("  Sending batch via WiFi (");
+        Serial.print(entriesInBatch);
+        Serial.print(" entries, ");
+        Serial.print(batch.length());
+        Serial.print(" bytes)... ");
+        Serial.print("(Free heap: ");
+        Serial.print(ESP.getFreeHeap());
+        Serial.println(" bytes)");
+        
+        // Pass batch - String is passed by value so it should be safe
+        // But verify it's not empty right before passing
+        if (batch.length() == 0) {
+          Serial.println("ERROR: Batch became empty right before transmission!");
+          csvStorage->markAsFailed();
+          entriesFailed += entriesInBatch;
+          break;
+        }
+        
+        bool success = txHandler->handleDataTransmission(batch);
+        
+        // Verify WiFi connection after sending
+        if (success && !CustomWiFi::isConnected()) {
+          Serial.println("WARNING: WiFi disconnected after batch transmission (but transmission reported success)");
+        }
+        
+        if (success) {
+          // SUCCESS: Mark all entries in batch as sent
+          for (uint32_t i = 0; i < entriesInBatch; i++) {
+            csvStorage->markAsSent();
+            entriesSent++;
+          }
+          
+          Serial.print("SUCCESS");
+          Serial.print(" (Total sent: ");
+          Serial.print(entriesSent);
+          Serial.print("/");
+          Serial.print(maxEntries);
+          Serial.println(")");
+          
+          // Show progress every batch
+          Serial.print("  Progress: ");
+          Serial.print(entriesSent);
+          Serial.print(" entries sent successfully");
+          Serial.print(", ReadPtr now: 0x");
+          Serial.println(csvStorage->getReadPtr(), HEX);
+        } else {
+          // FAILURE: Don't advance readPtr (entries remain for retry)
+          csvStorage->markAsFailed();
+          entriesFailed += entriesInBatch;
+          
+          Serial.print("FAILED");
+          Serial.print(" (Batch ");
+          Serial.print(batchStartEntry);
+          Serial.print("-");
+          Serial.print(batchStartEntry + entriesInBatch - 1);
+          Serial.print(" failed, Total failed: ");
+          Serial.print(entriesFailed);
+          Serial.println(")");
+          
+          // Stop on first failure (data remains for retry)
+          Serial.println("  Stopping transmission - batch will be retried in next cycle");
+          break;
+        }
+        
+        // Small delay between batches to avoid overwhelming the server
+        if (csvStorage->hasDataToRead()) {
+          delay(100);
+        }
+      }
+    } else {
+      // BLE: Send one entry at a time (BLE has smaller MTU)
+      while (csvStorage->hasDataToRead()) {
+        entryCounter++;
+        
+        // Read next CSV entry (does NOT advance readPtr yet)
+        String entry = csvStorage->readNextCSVEntry();
+        
+        if (entry.length() == 0) {
+          Serial.println("No more entries to read");
+          break; // No more data
+        }
+        
+        // Debug: Show entry info
+        Serial.print("\n[Entry ");
+        Serial.print(entryCounter);
+        Serial.print("] Length: ");
+        Serial.print(entry.length());
+        Serial.print(" bytes, ReadPtr: 0x");
+        Serial.print(csvStorage->getReadPtr(), HEX);
+        
+        // Count objects in this entry (for debugging)
+        int objectCount = 0;
+        for (int i = 0; i < entry.length(); i++) {
+          if (entry.charAt(i) == ',') objectCount++;
+        }
+        objectCount++; // Last object doesn't have trailing comma
+        Serial.print(", Objects: ");
+        Serial.print(objectCount);
+        Serial.println();
+        
+        // Attempt transmission
+        Serial.print("  Sending via BLE... ");
+        bool success = txHandler->handleDataTransmission(entry);
+        
+        if (success) {
+          // SUCCESS: Mark as sent (advance readPtr past this entry)
+          csvStorage->markAsSent();
+          entriesSent++;
+          
+          Serial.print("SUCCESS");
+          Serial.print(" (Total sent: ");
+          Serial.print(entriesSent);
+          Serial.println(")");
+          
+          // Show progress every 10 entries
+          if (entriesSent % 10 == 0) {
+            Serial.print("  Progress: ");
+            Serial.print(entriesSent);
+            Serial.print(" entries sent successfully");
+            Serial.print(", ReadPtr now: 0x");
+            Serial.println(csvStorage->getReadPtr(), HEX);
+          }
+        } else {
+          // FAILURE: Don't advance readPtr (entry remains for retry)
+          csvStorage->markAsFailed();
+          entriesFailed++;
+          
+          Serial.print("FAILED");
+          Serial.print(" (Entry ");
+          Serial.print(entryCounter);
+          Serial.print(" failed, Total failed: ");
+          Serial.print(entriesFailed);
+          Serial.println(")");
+          
+          // Stop on first failure (data remains for retry)
+          Serial.println("  Stopping transmission - entry will be retried in next cycle");
+          break;
+        }
+      }
+    }
+    
+    // Save state
+    csvStorage->saveState();
+    
+    // Final summary
+    Serial.print("\n--- Transmission Summary (");
+    Serial.print(method);
+    Serial.print(") ---\n");
+    Serial.print("  Total entries processed: ");
+    Serial.println(entryCounter);
+    Serial.print("  Entries sent successfully: ");
+    Serial.println(entriesSent);
+    Serial.print("  Entries failed: ");
+    Serial.println(entriesFailed);
+    Serial.print("  Final read pointer: 0x");
+    Serial.println(csvStorage->getReadPtr(), HEX);
+    Serial.print("  Write pointer: 0x");
+    Serial.println(csvStorage->getWritePtr(), HEX);
+    
+    if (entriesFailed == 0 && entriesSent > 0) {
+      Serial.println("  Status: ALL ENTRIES SENT SUCCESSFULLY");
+    } else if (entriesFailed > 0) {
+      Serial.print("  Status: PARTIAL - ");
+      Serial.print(entriesFailed);
+      Serial.println(" entries failed (will retry)");
+    } else {
+      Serial.println("  Status: NO ENTRIES TO SEND");
+    }
+    Serial.println();
+    
+    return (entriesFailed == 0);
+  }
+  */
   
   // Update battery LED (call periodically in main loop)
   void updateBatteryLED() {

@@ -54,6 +54,9 @@ public:
   // Uses batch reading to send data in chunks
   // Returns: true if data sent successfully (via WiFi or BLE), false if saved to queue or failed
   bool handleDataTransmission(String currentCSV) {
+    // IMPORTANT: Save currentCSV length immediately (before any operations that might affect memory)
+    size_t currentCSVLength = currentCSV.length();
+    
     // Check if WiFi or BLE is connected before attempting transmission
     bool wifiConnected = CustomWiFi::isConnected();
     bool bleConnected = BLEConfig::isConnected();
@@ -63,10 +66,27 @@ public:
     Serial.print(", BLE: ");
     Serial.println(bleConnected ? "CONNECTED" : "DISCONNECTED");
     
+    Serial.print("TransmissionHandler: Received data length: ");
+    Serial.print(currentCSVLength);
+    Serial.println(" bytes");
+    
+    // Verify currentCSV is still valid after initial checks
+    if (currentCSV.length() != currentCSVLength) {
+      Serial.print("TransmissionHandler: ERROR - Data length changed! Expected: ");
+      Serial.print(currentCSVLength);
+      Serial.print(", Actual: ");
+      Serial.println(currentCSV.length());
+    }
+    
     // First, read and send any existing queued data (prioritize old data)
     // Limit to 3 packets to avoid long transmission times
+    // BUT: Skip queued data if currentCSV is large (prioritize current batch)
     bool allQueuedSent = true;
-    if (isInitialized() && !dataQueue.isEmpty() && (wifiConnected || bleConnected)) {
+    bool skipQueuedData = (currentCSVLength > 10000); // Skip queued data if current batch is > 10KB
+    
+    if (skipQueuedData) {
+      Serial.println("TransmissionHandler: Large batch detected - skipping queued data processing to preserve memory");
+    } else if (isInitialized() && !dataQueue.isEmpty() && (wifiConnected || bleConnected)) {
       Serial.println("TransmissionHandler: Reading and sending queued data first...");
       
       // Limit to 3 packets maximum per transmission cycle
@@ -140,11 +160,49 @@ public:
       }
     }
     
+    // Verify currentCSV is still valid before sending
+    if (currentCSV.length() != currentCSVLength) {
+      Serial.print("TransmissionHandler: ERROR - Data corrupted during queued processing! Expected: ");
+      Serial.print(currentCSVLength);
+      Serial.print(", Actual: ");
+      Serial.println(currentCSV.length());
+      return false;
+    }
+    
     // Now try to send current data directly (without writing to flash)
     bool currentDataSent = false;
     if (wifiConnected || bleConnected) {
       Serial.println("TransmissionHandler: Attempting direct transmission of current data (no flash write)...");
-      Serial.println(currentCSV);
+      Serial.print("TransmissionHandler: Current data length: ");
+      Serial.print(currentCSV.length());
+      Serial.print(" bytes (expected: ");
+      Serial.print(currentCSVLength);
+      Serial.println(" bytes)");
+      
+      if (currentCSV.length() == 0) {
+        Serial.println("TransmissionHandler: ERROR - Current data is empty (0 bytes)! Skipping transmission.");
+        Serial.print("TransmissionHandler: This should not happen - original length was: ");
+        Serial.println(currentCSVLength);
+        return false;
+      }
+      
+      if (currentCSV.length() != currentCSVLength) {
+        Serial.print("TransmissionHandler: ERROR - Data length mismatch! Expected: ");
+        Serial.print(currentCSVLength);
+        Serial.print(", Actual: ");
+        Serial.println(currentCSV.length());
+        return false;
+      }
+      
+      // Print first 100 chars for debugging (not full data)
+      if (currentCSV.length() <= 100) {
+        Serial.print("TransmissionHandler: Data: ");
+        Serial.println(currentCSV);
+      } else {
+        Serial.print("TransmissionHandler: First 100 chars: ");
+        Serial.println(currentCSV.substring(0, 100));
+      }
+      
       currentDataSent = sendData(currentCSV);
       
       if (currentDataSent) {

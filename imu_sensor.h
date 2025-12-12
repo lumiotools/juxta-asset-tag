@@ -124,8 +124,8 @@ public:
 
     // No quaternion/euler or magnetometer data available from this simple I2C read
 
-    // Store temperature
-    data.temperature = temperature_c;
+    // Temperature not stored (disabled for CSV format)
+    // data.temperature = temperature_c;
   }
   
   IMUData getIMUData() {

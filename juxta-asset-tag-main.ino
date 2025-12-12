@@ -12,7 +12,7 @@
 #include "battery_indicator_led.h"
 #include "ble_config.h"
 #include "cycle_handler.h"
-#include "imu_flash_storage.h"
+#include "unified_csv_storage.h"
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
@@ -51,7 +51,7 @@ CycleHandler* cycleHandler = nullptr;
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
 SPIFlashHandler spiFlash;
-IMUFlashStorage imuFlashStorage;
+UnifiedCSVStorage unifiedCSVStorage;
 
 // Sensor status flags
 bool imuInitialized = false;
@@ -65,8 +65,8 @@ bool flashInitialized = false;
 // IMU data collection at 100Hz (10ms intervals)
 const unsigned long IMU_READ_INTERVAL_US = 10000; // 10ms = 10000 microseconds for 100Hz
 
-// IMU data is now stored in external flash (5MB partition)
-// No RAM buffer needed - data written directly to flash
+// IMU data is now stored in external flash as CSV strings (entire flash as circular buffer)
+// Accumulate readings in buffer, then format and store as CSV
 
 // Timing variables for cycle and BLE management
 unsigned long long bleStartTime = 0; // Time when BLE was started
@@ -143,8 +143,8 @@ long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
   blinkG = g;
   blinkB = b;
   statusLedBlinkState = false;
-  // toggleStatusLED();
-  statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
+  toggleStatusLED();
+  // statusLedTicker.attach_ms(20, toggleStatusLED); // 20ms = 50Hz blink
   // statusLedTicker.attach_ms(4000, toggleStatusLED); // 20ms = 50Hz blink
   return TimeSync::getCurrentTimeMillis();
 }
@@ -152,8 +152,8 @@ long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b) {
 // Stop blinking and restore to normal status color
 void stopStatusLEDBlink(long long t) {
   // delay(4000 - (TimeSync::getCurrentTimeMillis() - t));
-  statusLedTicker.detach();
-  // toggleStatusLED(); // Ensure LED is on before restoring
+  // statusLedTicker.detach();
+  toggleStatusLED(); // Ensure LED is on before restoring
   setPixelAndShow(0, restoreR, restoreG, restoreB);
 }
 
@@ -181,10 +181,10 @@ void setup() {
     Serial.println("SPI Flash initialization failed");
   }
 
-  // Initialize IMU flash storage (5MB partition)
-  Serial.println("Initializing IMU flash storage...");
-  if (!imuFlashStorage.begin(&spiFlash)) {
-    Serial.println("Warning: IMU flash storage initialization failed!");
+  // Initialize Unified CSV Storage (uses entire external flash)
+  Serial.println("Initializing Unified CSV Storage...");
+  if (!unifiedCSVStorage.begin(&spiFlash)) {
+    Serial.println("Warning: Unified CSV Storage initialization failed!");
   }
 
   // bool x = spiFlash.eraseChip();
@@ -291,24 +291,16 @@ void setup() {
   }
   
   // IMU data is stored in external flash (5MB) - no RAM buffer needed
-  // Reset read pointer for new cycle
-  if (imuFlashStorage.isInitialized()) {
-    imuFlashStorage.resetReadPtr();
-    Serial.print("IMU flash storage ready: ~");
-    Serial.print(imuFlashStorage.getTotalReadings());
-    Serial.println(" readings available");
-  }
-  
   // Start IMU reading ticker at 100Hz (10ms intervals)
-  if (imuInitialized && imuFlashStorage.isInitialized()) {
+  if (imuInitialized && unifiedCSVStorage.isInitialized()) {
     imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
-    Serial.println("IMU sampling: 100Hz (stored to flash)");
+    Serial.println("IMU sampling: 100Hz (stored as CSV to flash)");
   } else {
     if (!imuInitialized) {
       Serial.println("IMU ticker not started - sensor failed");
     }
-    if (!imuFlashStorage.isInitialized()) {
-      Serial.println("IMU ticker not started - flash storage failed");
+    if (!unifiedCSVStorage.isInitialized()) {
+      Serial.println("IMU ticker not started - CSV storage failed");
     }
   }
   
@@ -318,22 +310,6 @@ void setup() {
   
 // ========== HELPER FUNCTIONS ==========
 
-// Get current IMU data count from flash
-int getIMUDataCount() {
-  if (imuFlashStorage.isInitialized()) {
-    return imuFlashStorage.getTotalReadings();
-  }
-  return 0;
-}
-
-// Clear IMU flash storage (call after cycle execution)
-void clearIMUBuffer() {
-  if (imuFlashStorage.isInitialized()) {
-    imuFlashStorage.clear();
-    Serial.println("IMU flash storage cleared");
-  }
-}
-
 // Execute cycle transmission (call when you want to send data)
 // IMU data is read from flash in chunks by cycle handler
 CycleResult executeCycleTransmission() {
@@ -342,14 +318,10 @@ CycleResult executeCycleTransmission() {
     return CYCLE_FAILED;
   }
   
-  // Execute cycle - cycle handler will read IMU data from flash
-  CycleResult result = cycleHandler->executeCycleFromFlash(&imuFlashStorage);
+  // Execute cycle - cycle handler will read CSV entries from unified storage
+  CycleResult result = cycleHandler->executeCycleFromUnifiedCSV(&unifiedCSVStorage);
   
-  // Reset read pointer for next cycle (don't clear - keep data for retry)
-  if (imuFlashStorage.isInitialized()) {
-    imuFlashStorage.resetReadPtr();
-  }
-  
+  // State is already saved by cycle handler
   return result;
 }
 
@@ -370,19 +342,32 @@ void loop() {
   if (imuDataReady && flashInitialized) {
     imuDataReady = false; // Clear flag
     
-    // Read IMU data and write directly to flash
-    if (imuInitialized && imuFlashStorage.isInitialized()) {
+    // Read IMU data and accumulate in buffer
+    if (imuInitialized && unifiedCSVStorage.isInitialized()) {
       imuSensor.update();
       IMUData imuData = imuSensor.getIMUData();
       
-      // Create timestamped IMU data structure
-      TimestampedIMUData timestampedData;
-      timestampedData.data = imuData;
+      // Static buffer to accumulate readings
+      static TimestampedIMUReading readingBuffer[100]; // Buffer 100 readings
+      static int bufferIndex = 0;
       
-      // Write directly to flash (circular buffer managed by IMUFlashStorage)
-      if (!imuFlashStorage.writeIMUReading(&timestampedData)) {
-        // Error already logged in writeIMUReading
-        // Don't block the loop - continue collecting data
+      // Add reading to buffer with timestamp
+      readingBuffer[bufferIndex].accX = imuData.accelerometer.x;
+      readingBuffer[bufferIndex].accY = imuData.accelerometer.y;
+      readingBuffer[bufferIndex].accZ = imuData.accelerometer.z;
+      readingBuffer[bufferIndex].gyrX = imuData.gyroscope.x;
+      readingBuffer[bufferIndex].gyrY = imuData.gyroscope.y;
+      readingBuffer[bufferIndex].gyrZ = imuData.gyroscope.z;
+      readingBuffer[bufferIndex].timestamp = TimeSync::getCurrentTimeMillis();
+      
+      bufferIndex++;
+      
+      // When buffer is full, format and store as CSV
+      if (bufferIndex >= 100) {
+        if (!unifiedCSVStorage.writeIMUReadings(readingBuffer, 100)) {
+          Serial.println("ERROR: Failed to write IMU readings to CSV storage");
+        }
+        bufferIndex = 0; // Reset buffer
       }
     }
   }
@@ -416,28 +401,68 @@ void loop() {
     if (BLEConfig::isConnected() && !bleConnectedDuringFirstCycle) {
       bleConnectedDuringFirstCycle = true;
       bleConnectionTime = currentTime;
+      Serial.print("BLE connected during first cycle at: ");
+      Serial.print(bleConnectionTime);
+      Serial.println(" ms");
     }
     
     // Calculate when first cycle should end
     unsigned long long firstCycleEndTime;
+    unsigned long long timeElapsed = currentTime - bleStartTime;
+    unsigned long long timeRemaining = 0;
     
     if (bleConnectedDuringFirstCycle) {
       // User connected - calculate both options
       unsigned long long connectionPlusThirty = bleConnectionTime + 30000; // +30s
-      unsigned long long minimumOneMinute = bleStartTime + 60000; // 1 min from start
+      unsigned long long minimumOneMinute = bleStartTime + 30000; // 1 min from start
       
       // Use whichever is longer
       firstCycleEndTime = (connectionPlusThirty > minimumOneMinute) 
                           ? connectionPlusThirty 
                           : minimumOneMinute;
+      
+      timeRemaining = (firstCycleEndTime > currentTime) ? (firstCycleEndTime - currentTime) : 0;
+      
+      // Debug output every 10 seconds
+      static unsigned long long lastDebugTime = 0;
+      if (currentTime - lastDebugTime >= 10000) {
+        lastDebugTime = currentTime;
+        Serial.print("[FIRST CYCLE] Time elapsed: ");
+        Serial.print(timeElapsed / 1000);
+        Serial.print("s, Time remaining: ");
+        Serial.print(timeRemaining / 1000);
+        Serial.print("s, End time: ");
+        Serial.print(firstCycleEndTime);
+        Serial.print(" ms (BLE connected: ");
+        Serial.print((currentTime - bleConnectionTime) / 1000);
+        Serial.println("s ago)");
+      }
     } else {
       // No connection yet - default 1 minute wait
       firstCycleEndTime = bleStartTime + 60000;
+      timeRemaining = (firstCycleEndTime > currentTime) ? (firstCycleEndTime - currentTime) : 0;
+      
+      // Debug output every 10 seconds
+      static unsigned long long lastDebugTime = 0;
+      if (currentTime - lastDebugTime >= 10000) {
+        lastDebugTime = currentTime;
+        Serial.print("[FIRST CYCLE] Time elapsed: ");
+        Serial.print(timeElapsed / 1000);
+        Serial.print("s, Time remaining: ");
+        Serial.print(timeRemaining / 1000);
+        Serial.println("s (waiting for BLE connection...)");
+      }
     }
     
     // Check if it's time to execute cycle
     if (currentTime >= firstCycleEndTime) {
-      Serial.println("First cycle BLE wait period complete - executing transmission");
+      Serial.println("\n========================================");
+      Serial.println("FIRST CYCLE: BLE wait period complete");
+      Serial.print("Total wait time: ");
+      Serial.print(timeElapsed / 1000);
+      Serial.println(" seconds");
+      Serial.println("Executing transmission...");
+      Serial.println("========================================\n");
       
       CycleResult result = executeCycleTransmission();
       
@@ -460,6 +485,10 @@ void loop() {
       firstCycleComplete = true;
       cycleStartTime = currentTime;
       
+      Serial.print("First cycle complete. Next cycle will start in ");
+      Serial.print(NVSConfig::getCycleTime());
+      Serial.println(" seconds");
+      
       // Turn off BLE after first cycle completes (was kept on during first cycle period)
       if (BLEConfig::isEnabled()) {
         Serial.println("First cycle complete - turning off BLE");
@@ -472,9 +501,44 @@ void loop() {
     
     uint32_t cycleTimeSeconds = NVSConfig::getCycleTime();
     unsigned long long cycleTimeMs = (unsigned long long)cycleTimeSeconds * 1000ULL;
+    unsigned long long timeElapsed = currentTime - cycleStartTime;
+    unsigned long long timeRemaining = (timeElapsed < cycleTimeMs) ? (cycleTimeMs - timeElapsed) : 0;
+    
+    // Debug output every 60 seconds (or when close to cycle time)
+    static unsigned long long lastDebugTime = 0;
+    bool shouldDebug = false;
+    
+    if (timeRemaining > 0 && timeRemaining <= 10000) {
+      // Less than 10 seconds remaining - debug every second
+      shouldDebug = (currentTime - lastDebugTime >= 1000);
+    } else if (timeRemaining > 0) {
+      // More than 10 seconds remaining - debug every 60 seconds
+      shouldDebug = (currentTime - lastDebugTime >= 60000);
+    }
+    
+    if (shouldDebug && timeElapsed > 0) {
+      lastDebugTime = currentTime;
+      Serial.print("[CYCLE TIMING] Cycle time: ");
+      Serial.print(cycleTimeSeconds);
+      Serial.print("s, Elapsed: ");
+      Serial.print(timeElapsed / 1000);
+      Serial.print("s, Remaining: ");
+      Serial.print(timeRemaining / 1000);
+      Serial.print("s, Next cycle at: ");
+      Serial.print((cycleStartTime + cycleTimeMs) / 1000);
+      Serial.println("s");
+    }
     
     if (currentTime - cycleStartTime >= cycleTimeMs) {
-      Serial.println("Normal cycle: executing transmission");
+      Serial.println("\n========================================");
+      Serial.println("NORMAL CYCLE: Cycle time reached");
+      Serial.print("Cycle time: ");
+      Serial.print(cycleTimeSeconds);
+      Serial.print(" seconds, Elapsed: ");
+      Serial.print(timeElapsed / 1000);
+      Serial.println(" seconds");
+      Serial.println("Executing transmission...");
+      Serial.println("========================================\n");
       
       CycleResult result = executeCycleTransmission();
       
@@ -495,6 +559,13 @@ void loop() {
       }
       
       cycleStartTime = currentTime;
+      lastDebugTime = currentTime; // Reset debug timer
+      
+      Serial.print("Cycle complete. Next cycle will start in ");
+      Serial.print(cycleTimeSeconds);
+      Serial.print(" seconds (at ");
+      Serial.print((cycleStartTime + cycleTimeMs) / 1000);
+      Serial.println("s)");
     }
   }
   
