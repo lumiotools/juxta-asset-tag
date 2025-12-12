@@ -1,16 +1,16 @@
 // BLE Configuration for WiFi Credential Setup
+// Using NimBLE for better stability and memory management
 
 #ifndef BLE_CONFIG_H
 #define BLE_CONFIG_H
 
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include "NimBLEDevice.h"
+#include "NimBLEServer.h"
+#include "NimBLEUtils.h"
+#include "NimBLEDescriptor.h"
 #include "nvs_config.h"
 #include "battery_monitor.h"
 #include "time_sync.h"
-#include "esp_bt.h"
 
 // Forward declarations for status LED control
 extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
@@ -30,15 +30,15 @@ extern void stopStatusLEDBlink(long long startTime);
 class BLEConfig {
 private:
   static char bleDeviceName[64];
-  static BLEServer* pServer;
-  static BLEService* pService;
-  static BLECharacteristic* pSSIDCharacteristic;
-  static BLECharacteristic* pPasswordCharacteristic;
-  static BLECharacteristic* pGPSActiveCharacteristic;
-  static BLECharacteristic* pCycleTimeCharacteristic;
-  static BLECharacteristic* pStatusCharacteristic;
-  static BLECharacteristic* pDataCharacteristic;
-  static BLECharacteristic* pCurrentSSIDCharacteristic;
+  static NimBLEServer* pServer;
+  static NimBLEService* pService;
+  static NimBLECharacteristic* pSSIDCharacteristic;
+  static NimBLECharacteristic* pPasswordCharacteristic;
+  static NimBLECharacteristic* pGPSActiveCharacteristic;
+  static NimBLECharacteristic* pCycleTimeCharacteristic;
+  static NimBLECharacteristic* pStatusCharacteristic;
+  static NimBLECharacteristic* pDataCharacteristic;
+  static NimBLECharacteristic* pCurrentSSIDCharacteristic;
   static bool deviceConnected;
   static bool oldDeviceConnected;
   static String receivedSSID;
@@ -54,10 +54,14 @@ private:
   static bool bleDisabled;  // Flag to track if BLE is permanently disabled
 
   // BLE Server Callbacks
-  class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
+  class MyServerCallbacks: public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
       deviceConnected = true;
-      mtuSize = 23; // Default MTU size, will be updated after negotiation
+      mtuSize = connInfo.getMTU(); // Get actual MTU from connection
+      if (mtuSize < 23) mtuSize = 23; // Default to minimum if not set
+      
+      Serial.print("BLE Client connected - MTU: ");
+      Serial.println(mtuSize);
       
       // Load current SSID, device_id, timestamp, and battery
       String currentSSID = NVSConfig::getWiFiSSID();
@@ -83,59 +87,50 @@ private:
       }
     }
 
-    void onDisconnect(BLEServer* pServer) {
+    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
       deviceConnected = false;
+      Serial.print("BLE Client disconnected - reason: ");
+      Serial.println(reason);
+    }
+    
+    void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) {
+      mtuSize = MTU;
+      Serial.print("BLE MTU updated to: ");
+      Serial.println(mtuSize);
     }
   };
 
   // SSID Characteristic Callbacks
-  class SSIDCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic* pCharacteristic) {
-      // Start blue LED blinking on receive
-      // startStatusLEDBlink(0, 0, 255);
-      
-      String value = pCharacteristic->getValue();
+  class SSIDCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+      std::string value = pCharacteristic->getValue();
       if (value.length() > 0) {
-        receivedSSID = value;
+        receivedSSID = String(value.c_str());
       }
-      
-      // Stop LED blinking and restore to green
-      // stopStatusLEDBlink();
     }
   };
 
   // Password Characteristic Callbacks
-  class PasswordCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic* pCharacteristic) {
-      // Start blue LED blinking on receive
-      // startStatusLEDBlink(0, 0, 255);
-      
-      String value = pCharacteristic->getValue();
+  class PasswordCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+      std::string value = pCharacteristic->getValue();
       if (value.length() > 0) {
-        receivedPassword = value;
+        receivedPassword = String(value.c_str());
         // Check if all credentials are received (SSID and password)
         if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
           credentialsReceived = true;
         }
       }
-      
-      // Stop LED blinking and restore to green
-      // stopStatusLEDBlink();
     }
   };
 
   // GPS Active Characteristic Callbacks
-  class GPSActiveCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic* pCharacteristic) {
-      // Start blue LED blinking on receive
-      // startStatusLEDBlink(0, 0, 255);
-      
-      // Read raw byte data (sent as Uint8Array from web interface)
-      String value = pCharacteristic->getValue();
+  class GPSActiveCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+      std::string value = pCharacteristic->getValue();
       if (value.length() > 0) {
         receivedGPSActive = (uint8_t)value[0]; // Read first byte as uint8_t (0 or 1)
         // Save GPS active setting immediately to NVS (independent of WiFi credentials)
-        // NVS key: "gps_active" in namespace "wifi_config"
         bool gpsActiveSaved = NVSConfig::setGPSActive(receivedGPSActive);
         gpsActiveReceived = true;
         Serial.print("GPS Active received: ");
@@ -150,24 +145,20 @@ private:
           credentialsReceived = true;
         }
       }
-      
-      // Stop LED blinking and restore to green
-      // stopStatusLEDBlink();
     }
   };
 
   // Cycle Time Characteristic Callbacks
-  class CycleTimeCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic* pCharacteristic) {
+  class CycleTimeCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
       // Start blue LED blinking on receive
       long long startTime = startStatusLEDBlink(0, 0, 255);
       
       // Read cycle time as string (sent as string from web interface, value in seconds)
-      String value = pCharacteristic->getValue();
+      std::string value = pCharacteristic->getValue();
       if (value.length() > 0) {
-        receivedCycleTime = value.toInt(); // Convert string to uint32_t (seconds)
+        receivedCycleTime = String(value.c_str()).toInt(); // Convert string to uint32_t (seconds)
         // Save cycle time immediately to NVS (independent of WiFi credentials)
-        // NVS key: "cycle_time" in namespace "wifi_config"
         bool cycleTimeSaved = NVSConfig::setCycleTime(receivedCycleTime);
         cycleTimeReceived = true;
         Serial.print("Cycle Time received: ");
@@ -202,11 +193,15 @@ public:
       snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta AssetTag v2.0.0");
     }
     
-    // Initialize BLE Device
-    BLEDevice::init(bleDeviceName);
+    // Initialize NimBLE Device (NimBLE handles init/deinit properly, safe to call after deinit)
+    // NimBLE can safely handle init() even if already initialized
+    NimBLEDevice::init(bleDeviceName);
+    
+    // Set power (optional, can help with power consumption)
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Maximum power
     
     // Create BLE Server
-    pServer = BLEDevice::createServer();
+    pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
     
     // Create BLE Service
@@ -215,50 +210,50 @@ public:
     // Create SSID Characteristic
     pSSIDCharacteristic = pService->createCharacteristic(
       SSID_CHAR_UUID,
-      BLECharacteristic::PROPERTY_WRITE
+      NIMBLE_PROPERTY::WRITE
     );
     pSSIDCharacteristic->setCallbacks(new SSIDCallbacks());
     
     // Create Password Characteristic
     pPasswordCharacteristic = pService->createCharacteristic(
       PASSWORD_CHAR_UUID,
-      BLECharacteristic::PROPERTY_WRITE
+      NIMBLE_PROPERTY::WRITE
     );
     pPasswordCharacteristic->setCallbacks(new PasswordCallbacks());
     
     // Create GPS Active Characteristic
     pGPSActiveCharacteristic = pService->createCharacteristic(
       GPS_ACTIVE_CHAR_UUID,
-      BLECharacteristic::PROPERTY_WRITE
+      NIMBLE_PROPERTY::WRITE
     );
     pGPSActiveCharacteristic->setCallbacks(new GPSActiveCallbacks());
     
     // Create Cycle Time Characteristic
     pCycleTimeCharacteristic = pService->createCharacteristic(
       CYCLE_TIME_CHAR_UUID,
-      BLECharacteristic::PROPERTY_WRITE
+      NIMBLE_PROPERTY::WRITE
     );
     pCycleTimeCharacteristic->setCallbacks(new CycleTimeCallbacks());
     
     // Create Status Characteristic (simplified - no notify)
     pStatusCharacteristic = pService->createCharacteristic(
       STATUS_CHAR_UUID,
-      BLECharacteristic::PROPERTY_READ
+      NIMBLE_PROPERTY::READ
     );
     pStatusCharacteristic->setValue("Ready");
     
     // Create Data Characteristic for sensor data transmission
     pDataCharacteristic = pService->createCharacteristic(
       DATA_CHAR_UUID,
-      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
     );
-    pDataCharacteristic->addDescriptor(new BLE2902());
+    // Add CCCD descriptor for notifications (NimBLE creates this automatically, but we can set it explicitly)
     pDataCharacteristic->setValue("{}");
     
     // Create Current SSID Characteristic (read-only to show saved WiFi)
     pCurrentSSIDCharacteristic = pService->createCharacteristic(
       CURRENT_SSID_CHAR_UUID,
-      BLECharacteristic::PROPERTY_READ
+      NIMBLE_PROPERTY::READ
     );
     String currentSSID = NVSConfig::getWiFiSSID();
     if (currentSSID.length() > 0) {
@@ -270,10 +265,10 @@ public:
     // Start the service
     pService->start();
     
-    // Start advertising (simplified)
-    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+    // Start advertising
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
-    BLEDevice::startAdvertising();
+    NimBLEDevice::startAdvertising();
     
     deviceConnected = false;
     oldDeviceConnected = false;
@@ -286,6 +281,8 @@ public:
     cycleTimeReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
+    
+    Serial.println("NimBLE initialized and advertising");
     
     return true;
   }
@@ -300,7 +297,9 @@ public:
     // Handle disconnection
     if (!deviceConnected && oldDeviceConnected) {
       delay(500); // Give the bluetooth stack the chance to get things ready
-      pServer->startAdvertising(); // Restart advertising
+      if (pServer != nullptr) {
+        NimBLEDevice::startAdvertising(); // Restart advertising
+      }
       oldDeviceConnected = deviceConnected;
     }
     
@@ -350,7 +349,7 @@ public:
   // Restart advertising
   static void restartAdvertising() {
     if (!deviceConnected && !bleDisabled) {
-      BLEDevice::startAdvertising();
+      NimBLEDevice::startAdvertising();
     }
   }
   
@@ -362,23 +361,18 @@ public:
     // Disconnect any connected clients first (prevents heap corruption)
     if (pServer != nullptr && deviceConnected) {
       Serial.println("Disconnecting BLE client...");
-      pServer->disconnect(pServer->getConnId());
-      delay(500); // Wait for graceful disconnect
+      // NimBLE will handle disconnection when we stop advertising
+      // The connection will be closed automatically
+      delay(500); // Wait for any ongoing operations to complete
     }
     
     // Stop advertising
     if (pServer != nullptr) {
-      pServer->getAdvertising()->stop();
+      NimBLEDevice::getAdvertising()->stop();
       delay(100); // Let advertising stop complete
     }
     
-    // Now safe to deinitialize
-    BLEDevice::deinit(true);
-    
-    // Small delay after deinit
-    delay(100);
-    
-    // Clear all pointers to prevent any accidental access
+    // Clear all pointers before deinit to prevent any accidental access
     pServer = nullptr;
     pService = nullptr;
     pSSIDCharacteristic = nullptr;
@@ -388,6 +382,11 @@ public:
     pStatusCharacteristic = nullptr;
     pDataCharacteristic = nullptr;
     pCurrentSSIDCharacteristic = nullptr;
+    
+    // NimBLE handles deinit properly - safe to call and re-init later
+    // Just call deinit - NimBLE handles checking if already deinitialized
+    NimBLEDevice::deinit();
+    delay(100); // Small delay after deinit
     
     // Set disabled flag
     bleDisabled = true;
@@ -402,6 +401,8 @@ public:
     credentialsReceived = false;
     gpsActiveReceived = false;
     cycleTimeReceived = false;
+    
+    Serial.println("BLE stopped and deinitialized (NimBLE can be safely re-initialized)");
   }
   
   // Check if BLE is enabled (not permanently disabled)
@@ -410,20 +411,15 @@ public:
   }
   
   // Get BLE RSSI signal strength (returns dBm, or -100 if not connected)
-  // Note: ESP32 BLE server RSSI is not directly available from established connections
-  // This function returns -100 if not connected, or attempts to get RSSI via esp_bt_gap_get_rssi()
   static int getRSSI() {
     if (bleDisabled || !deviceConnected || pServer == nullptr) {
       return -100; // Return invalid RSSI if not connected
     }
     
-    // Try to get RSSI using ESP32 BLE GAP API
-    // This requires the connection handle, which we can get from the server
+    // Try to get RSSI using NimBLE
     if (pServer->getConnectedCount() > 0) {
-      // For ESP32, we can try to get RSSI, but it's not always available
+      // For NimBLE, we can try to get RSSI from connection info
       // Return a reasonable default when connected (typical BLE connection RSSI)
-      // In practice, BLE connections are typically -70 to -90 dBm when in range
-      // We'll return -75 as a reasonable default for an active connection
       return -75; // Default/estimated BLE RSSI when connected (good signal)
     }
     
@@ -497,15 +493,15 @@ public:
 
 // Static member definitions
 char BLEConfig::bleDeviceName[64] = "";
-BLEServer* BLEConfig::pServer = nullptr;
-BLEService* BLEConfig::pService = nullptr;
-BLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pGPSActiveCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pCycleTimeCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
-BLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
+NimBLEServer* BLEConfig::pServer = nullptr;
+NimBLEService* BLEConfig::pService = nullptr;
+NimBLECharacteristic* BLEConfig::pSSIDCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pPasswordCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pGPSActiveCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pCycleTimeCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pStatusCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pDataCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
 bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
@@ -521,4 +517,3 @@ const char* BLEConfig::deviceVersion = "v2.0.0";
 bool BLEConfig::bleDisabled = false;
 
 #endif
-

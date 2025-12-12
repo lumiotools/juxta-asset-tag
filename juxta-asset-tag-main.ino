@@ -190,7 +190,12 @@ void setup() {
   // bool x = spiFlash.eraseChip();
   // String y = x?"true":"false";
   // Serial.print("erased :");
-  // Serial.println(y);
+  // Serial.println(y);  
+  // // Reset read and write pointers to 0 after chip erase
+  // if (x) {
+  //   unifiedCSVStorage.clear(); // This sets both pointers to 0 and saves to NVS
+  //   Serial.println("Read and write pointers reset to 0");
+  // }
   // delay(-100);
   
   // Initialize transmission handler and data queue (loads from flash, calculates max size on first boot)
