@@ -32,6 +32,13 @@ private:
   static const char* IMU_TOTAL_READINGS_KEY;
   static const char* CSV_WRITE_PTR_KEY;
   static const char* CSV_READ_PTR_KEY;
+  static const char* GPS_ACCURACY_THRESHOLD_KEY;
+  static const char* GPS_READ_CYCLE_TIME_KEY;
+  static const char* INITIAL_POSITION_LAT_KEY;
+  static const char* INITIAL_POSITION_LON_KEY;
+  static const char* SCENARIO_STATE_KEY;
+  static const char* LAST_KNOWN_POSITION_LAT_KEY;
+  static const char* LAST_KNOWN_POSITION_LON_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -314,6 +321,28 @@ public:
   static bool hasLastGPSLocation() {
     return (readU32NVS(GPS_LAST_FIX_KEY, 0) == 1);
   }
+  
+  // GPS Accuracy Threshold (declaration only, no default value)
+  static float getGPSAccuracyThreshold();
+  static bool setGPSAccuracyThreshold(float threshold);
+  
+  // GPS Read Cycle Time (declaration only, no default value)
+  static uint32_t getGPSReadCycleTime();
+  static bool setGPSReadCycleTime(uint32_t cycleTimeSeconds);
+  
+  // Initial Position from UI (Scenario 4)
+  static bool setInitialPosition(double latitude, double longitude);
+  static bool getInitialPosition(double& latitude, double& longitude);
+  static bool hasInitialPosition();
+  static bool clearInitialPosition();
+  
+  // Scenario State (persisted through deep sleep, reset on power_on)
+  static uint8_t getScenarioState();
+  static bool setScenarioState(uint8_t scenario);
+  
+  // Last Known Position (used for lat/long prefix in model server transmission)
+  static bool saveLastKnownPosition(double latitude, double longitude);
+  static bool getLastKnownPosition(double& latitude, double& longitude);
 
 };
 
@@ -343,5 +372,104 @@ const char* NVSConfig::IMU_READ_PTR_KEY = "imu_read_ptr";
 const char* NVSConfig::IMU_TOTAL_READINGS_KEY = "imu_total_readings";
 const char* NVSConfig::CSV_WRITE_PTR_KEY = "csv_write_ptr";
 const char* NVSConfig::CSV_READ_PTR_KEY = "csv_read_ptr";
+const char* NVSConfig::GPS_ACCURACY_THRESHOLD_KEY = "gps_acc_thresh";
+const char* NVSConfig::GPS_READ_CYCLE_TIME_KEY = "gps_read_cycle";
+const char* NVSConfig::INITIAL_POSITION_LAT_KEY = "init_pos_lat";
+const char* NVSConfig::INITIAL_POSITION_LON_KEY = "init_pos_lon";
+const char* NVSConfig::SCENARIO_STATE_KEY = "scenario_state";
+const char* NVSConfig::LAST_KNOWN_POSITION_LAT_KEY = "last_known_lat";
+const char* NVSConfig::LAST_KNOWN_POSITION_LON_KEY = "last_known_lon";
+
+// GPS Accuracy Threshold implementation
+float NVSConfig::getGPSAccuracyThreshold() {
+  // Read as string to preserve float precision
+  String thresholdStr = readStringNVS(GPS_ACCURACY_THRESHOLD_KEY);
+  if (thresholdStr.length() == 0) {
+    return 0.0; // No value set
+  }
+  return thresholdStr.toFloat();
+}
+
+bool NVSConfig::setGPSAccuracyThreshold(float threshold) {
+  char thresholdStr[20];
+  snprintf(thresholdStr, sizeof(thresholdStr), "%.2f", threshold);
+  return writeStringNVS(GPS_ACCURACY_THRESHOLD_KEY, thresholdStr);
+}
+
+// GPS Read Cycle Time implementation
+uint32_t NVSConfig::getGPSReadCycleTime() {
+  return readU32NVS(GPS_READ_CYCLE_TIME_KEY, 0);
+}
+
+bool NVSConfig::setGPSReadCycleTime(uint32_t cycleTimeSeconds) {
+  return writeU32NVS(GPS_READ_CYCLE_TIME_KEY, cycleTimeSeconds);
+}
+
+// Initial Position implementation
+bool NVSConfig::setInitialPosition(double latitude, double longitude) {
+  char latStr[20], lonStr[20];
+  snprintf(latStr, sizeof(latStr), "%.7f", latitude);
+  snprintf(lonStr, sizeof(lonStr), "%.7f", longitude);
+  bool success = writeStringNVS(INITIAL_POSITION_LAT_KEY, latStr);
+  success &= writeStringNVS(INITIAL_POSITION_LON_KEY, lonStr);
+  return success;
+}
+
+bool NVSConfig::getInitialPosition(double& latitude, double& longitude) {
+  String latStr = readStringNVS(INITIAL_POSITION_LAT_KEY);
+  String lonStr = readStringNVS(INITIAL_POSITION_LON_KEY);
+  
+  if (latStr.length() == 0 || lonStr.length() == 0) {
+    return false;
+  }
+  
+  latitude = latStr.toFloat();
+  longitude = lonStr.toFloat();
+  return true;
+}
+
+bool NVSConfig::hasInitialPosition() {
+  String latStr = readStringNVS(INITIAL_POSITION_LAT_KEY);
+  String lonStr = readStringNVS(INITIAL_POSITION_LON_KEY);
+  return (latStr.length() > 0 && lonStr.length() > 0);
+}
+
+bool NVSConfig::clearInitialPosition() {
+  bool success = writeStringNVS(INITIAL_POSITION_LAT_KEY, "");
+  success &= writeStringNVS(INITIAL_POSITION_LON_KEY, "");
+  return success;
+}
+
+// Scenario State implementation
+uint8_t NVSConfig::getScenarioState() {
+  return readU8NVS(SCENARIO_STATE_KEY, 0);
+}
+
+bool NVSConfig::setScenarioState(uint8_t scenario) {
+  return writeU8NVS(SCENARIO_STATE_KEY, scenario);
+}
+
+// Last Known Position implementation (for lat/long prefix)
+bool NVSConfig::saveLastKnownPosition(double latitude, double longitude) {
+  char latStr[20], lonStr[20];
+  snprintf(latStr, sizeof(latStr), "%.7f", latitude);
+  snprintf(lonStr, sizeof(lonStr), "%.7f", longitude);
+  bool success = writeStringNVS(LAST_KNOWN_POSITION_LAT_KEY, latStr);
+  success &= writeStringNVS(LAST_KNOWN_POSITION_LON_KEY, lonStr);
+  return success;
+}
+
+bool NVSConfig::getLastKnownPosition(double& latitude, double& longitude) {
+  String latStr = readStringNVS(LAST_KNOWN_POSITION_LAT_KEY);
+  String lonStr = readStringNVS(LAST_KNOWN_POSITION_LON_KEY);
+  
+  if (latStr.length() == 0 || lonStr.length() == 0) {
+    return false;
+  }
+  
+  latitude = latStr.toFloat();
+  longitude = lonStr.toFloat();
+  return true;
+}
 
 #endif

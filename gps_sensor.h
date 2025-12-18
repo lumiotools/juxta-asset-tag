@@ -9,6 +9,14 @@
 // GPS pin definitions
 #define GPS_TX_PIN D7      // GPS_TX connects to ESP32 RX
 #define GPS_RX_PIN D6      // GPS_RX connects to ESP32 TX
+#define GPS_POWER_PIN
+// GPS_POWER_PIN - Define pin number here for GPS power control
+// Example: #define GPS_POWER_PIN D3
+// IMPORTANT: If GPS_POWER_PIN is defined but empty (no value), define it with a pin number
+// If not defined at all, it will default to 0 (disabled) below
+#if !defined(GPS_POWER_PIN)
+  #define GPS_POWER_PIN 0  // Default: disabled (0 = no power control)
+#endif
 
 // Structure to hold GPS data
 struct GPSData {
@@ -260,12 +268,49 @@ private:
   }
 
 public:
+  // GPS power control functions
+  static void powerOn() {
+    // GPS_POWER_PIN must be defined with a pin number (e.g., #define GPS_POWER_PIN D3)
+    // If defined as empty or 0, power control is disabled
+    if (GPS_POWER_PIN > 0) {
+      pinMode(GPS_POWER_PIN, OUTPUT);
+      digitalWrite(GPS_POWER_PIN, HIGH);
+      delay(500); // Give GPS time to power up
+      Serial.print("GPS power turned ON (pin ");
+      Serial.print(GPS_POWER_PIN);
+      Serial.println(")");
+    } else {
+      Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+    }
+  }
+  
+  static void powerOff() {
+    if (GPS_POWER_PIN > 0) {
+      pinMode(GPS_POWER_PIN, OUTPUT);
+      digitalWrite(GPS_POWER_PIN, LOW);
+      Serial.print("GPS power turned OFF (pin ");
+      Serial.print(GPS_POWER_PIN);
+      Serial.println(")");
+    } else {
+      Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+    }
+  }
+  
   bool begin() {
     Serial.println("=== AT6558 GPS Configuration ===");
     Serial.print("GPS TX (to ESP RX): ");
     Serial.println(GPS_TX_PIN);
     Serial.print("GPS RX (to ESP TX): ");
     Serial.println(GPS_RX_PIN);
+    #if defined(GPS_POWER_PIN) && GPS_POWER_PIN > 0
+      Serial.print("GPS Power Pin: ");
+      Serial.println(GPS_POWER_PIN);
+    #else
+      Serial.println("GPS Power Pin: Not configured");
+    #endif
+    
+    // Power on GPS first
+    powerOn();
     
     // Initialize Serial1 at 9600 baud for configuration
     Serial1.begin(9600, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
@@ -278,6 +323,8 @@ public:
     Serial1.println("$PCAS04,1*18"); // GPS only
     delay(100);
     Serial1.println("$PCAS01,5*19"); // 115200 baud
+    // delay(100);
+    // Serial1.println("$PCAS04,2*3F\r\n"); // low power mode
     delay(100);
     Serial1.println("$PCAS00*01"); // Save config
     delay(300);
@@ -366,6 +413,14 @@ public:
     }
   }
   
+  // GPS accuracy detection function (placeholder - returns manual true/false)
+  // TODO: Implement actual accuracy threshold checking based on HDOP
+  bool isHighAccuracy() {
+    // Empty function - manual true/false return for now
+    // Will be implemented with HDOP threshold checking later
+    return true; // Placeholder: return true for high accuracy
+  }
+
 };
 
 #endif

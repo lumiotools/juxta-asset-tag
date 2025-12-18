@@ -13,6 +13,7 @@
 #include "ble_config.h"
 #include "cycle_handler.h"
 #include "unified_csv_storage.h"
+#include "gps_scenario_handler.h"
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
@@ -46,6 +47,9 @@ TransmissionHandler transmissionHandler;
 
 // Cycle handler for data transmission operations
 CycleHandler* cycleHandler = nullptr;
+
+// GPS Scenario Handler
+GPSScenarioHandler* gpsScenarioHandler = nullptr;
 
 // Create sensor instances
 IMUSensor imuSensor;
@@ -211,6 +215,7 @@ void setup() {
   
   // Determine if this is first cycle (power-on or reset button) vs subsequent (deep sleep wake-up)
   bool isFirstCycle = (resetReason == ESP_RST_POWERON || resetReason == ESP_RST_EXT);
+  bool isPowerOn = (resetReason == ESP_RST_POWERON);
   
   // Initialize Battery Monitor ADC
   BatteryMonitor::initializeADC();
@@ -245,6 +250,22 @@ void setup() {
     Serial.println("GPS initialization failed - continuing without GPS");
   }
   
+  // Initialize GPS Scenario Handler
+  Serial.println("Initializing GPS Scenario Handler...");
+  gpsScenarioHandler = new GPSScenarioHandler(&gpsSensor);
+  gpsScenarioHandler->begin();
+  
+  // Reset scenario state on power_on (not deep sleep)
+  if (isPowerOn) {
+    gpsScenarioHandler->resetOnPowerOn();
+  }
+  
+  // Start GPS fix acquisition period (2 minutes) on power-on
+  if (isPowerOn && gpsInitialized) {
+    gpsScenarioHandler->startGPSFixAcquisition();
+    Serial.println("Starting 2-minute GPS fix acquisition period...");
+  }
+  
   // One-time credential setup (comment out after first upload)
   // NVSConfig::setWiFiSSID("GarageNeo");
   // NVSConfig::setWiFiPassword("G@r@ge#123");
@@ -270,8 +291,9 @@ void setup() {
   Serial.println("Initializing BLE...");
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
-  BLEConfig::begin();
   bleStartTime = TimeSync::getCurrentTimeMillis();
+  BLEConfig::setBLEStartTime(bleStartTime); // Set BLE start time for countdown timer
+  BLEConfig::begin();
   // Initialize cycle timing
   cycleStartTime = TimeSync::getCurrentTimeMillis();
   lastImuReadTime = micros(); // Initialize IMU read timing
@@ -291,6 +313,11 @@ void setup() {
     0  // Status LED pixel 0
   );
   
+  // Set GPS scenario handler in cycle handler
+  if (gpsScenarioHandler != nullptr) {
+    cycleHandler->setGPSScenarioHandler(gpsScenarioHandler);
+  }
+  
   // Set restore color based on sensor status
   if (imuInitialized && gpsInitialized && flashInitialized) {
     cycleHandler->setStatusLEDRestoreColor(0, 255, 0); // Green
@@ -299,18 +326,9 @@ void setup() {
   }
   
   // IMU data is stored in external flash (5MB) - no RAM buffer needed
-  // Start IMU reading ticker at 100Hz (10ms intervals)
-  if (imuInitialized && unifiedCSVStorage.isInitialized()) {
-    imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
-    Serial.println("IMU sampling: 100Hz (stored as CSV to flash)");
-  } else {
-    if (!imuInitialized) {
-      Serial.println("IMU ticker not started - sensor failed");
-    }
-    if (!unifiedCSVStorage.isInitialized()) {
-      Serial.println("IMU ticker not started - CSV storage failed");
-    }
-  }
+  // DO NOT start IMU reading ticker yet - will start after configuration time is complete
+  // IMU reading will be started in loop() after first cycle/configuration period completes
+  Serial.println("IMU ticker will start after configuration time completes");
   
   Serial.println("Setup complete - ready for operation");
   delay(100);
@@ -344,10 +362,86 @@ void loop() {
   // Current time
   unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
   
+  // ========== GPS SCENARIO HANDLING ==========
+  // Handle GPS scenarios and fix acquisition
+  if (gpsScenarioHandler != nullptr && gpsInitialized) {
+    // Check if 2-minute GPS fix acquisition period is complete
+    if (!firstCycleComplete && gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+      // Determine scenario based on GPS fix status
+      GPSScenario scenario = gpsScenarioHandler->determineScenario();
+      Serial.print("GPS fix acquisition complete - Scenario determined: ");
+      Serial.println(scenario);
+      
+      // Handle Scenario 3: No fix found - deep sleep
+      if (scenario == SCENARIO_3_NO_FIX) {
+        gpsScenarioHandler->handleScenario3();
+        Serial.println("Entering deep sleep for 30 seconds...");
+        esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
+        esp_deep_sleep_start();
+        return; // Will not reach here
+      }
+    }
+    
+    // Handle GPS fix attempt after transmission (Scenario 2)
+    static unsigned long long lastGPSReadTime = 0;
+    uint32_t gpsReadCycleTime = NVSConfig::getGPSReadCycleTime();
+    
+    if (gpsScenarioHandler->getCurrentScenario() == SCENARIO_2_LOW_ACCURACY) {
+      // Check if GPS fix attempt is in progress
+      if (gpsScenarioHandler->isGPSFixAttemptComplete()) {
+        // Fix attempt complete - check for fix and switch scenarios
+        GPSScenario newScenario = gpsScenarioHandler->determineScenario();
+        if (newScenario == SCENARIO_1_HIGH_ACCURACY) {
+          Serial.println("High accuracy fix found during fix attempt - switching to Scenario 1");
+        } else {
+          Serial.println("No high accuracy fix found - continuing Scenario 2");
+        }
+        gpsScenarioHandler->endGPSFixAttempt();
+      }
+    }
+    
+    // GPS read cycle time (separate from IMU cycle and transmission cycle)
+    // Only read GPS at configured cycle time (Scenario 1)
+    if (gpsScenarioHandler->getCurrentScenario() == SCENARIO_1_HIGH_ACCURACY && gpsReadCycleTime > 0) {
+      if (lastGPSReadTime == 0) {
+        lastGPSReadTime = currentTime;
+      }
+      
+      unsigned long long gpsReadCycleMs = (unsigned long long)gpsReadCycleTime * 1000ULL;
+      if (currentTime - lastGPSReadTime >= gpsReadCycleMs) {
+        // Read GPS data at configured cycle time
+        if (gps != nullptr) {
+          gps->update();
+          GPSData gpsData = gps->getGPSData();
+          if (gpsData.hasValidFix) {
+            // Store high accuracy GPS in reference position (internal flash/NVS)
+            gpsScenarioHandler->setReferencePosition(gpsData.latitude, gpsData.longitude);
+            Serial.print("GPS read at cycle time: (");
+            Serial.print(gpsData.latitude, 7);
+            Serial.print(", ");
+            Serial.print(gpsData.longitude, 7);
+            Serial.println(")");
+          }
+        }
+        lastGPSReadTime = currentTime;
+      }
+    } else {
+      lastGPSReadTime = 0; // Reset if not in Scenario 1
+    }
+  }
+  
   // ========== IMU READING (INTERRUPT-DRIVEN) ==========
   // IMU data reading triggered by ticker ISR at 100Hz (10ms intervals)
+  // Only start IMU reading after configuration time is complete
+  static bool imuTickerStarted = false;
+  if (!imuTickerStarted && firstCycleComplete && imuInitialized && unifiedCSVStorage.isInitialized()) {
+    imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
+    imuTickerStarted = true;
+    Serial.println("IMU sampling started: 100Hz (stored as CSV to flash)");
+  }
+  
   // Check if ISR flagged that it's time to read IMU
-  if (imuDataReady && flashInitialized) {
+  if (imuDataReady && flashInitialized && imuTickerStarted) {
     imuDataReady = false; // Clear flag
     
     // Read IMU data and accumulate in buffer
@@ -386,6 +480,19 @@ void loop() {
   // Update BLE to handle connections and process received data
   if (BLEConfig::isEnabled()) {
     BLEConfig::update();
+    
+    // Check if initial position was received via BLE
+    // This is handled in BLE callback, but we need to ensure GPS is off and scenario is updated
+    if (NVSConfig::hasInitialPosition() && gpsScenarioHandler != nullptr && gpsInitialized) {
+      // Turn off GPS immediately (already done in BLE callback, but ensure it's off)
+      GPSSensor::powerOff();
+      
+      // Update scenario to Scenario 4
+      GPSScenario scenario = gpsScenarioHandler->determineScenario();
+      if (scenario == SCENARIO_4_UI_POSITION) {
+        Serial.println("Initial position from UI active - Scenario 4");
+      }
+    }
   }
   
   // ========== USB STATE MONITORING ==========
@@ -409,7 +516,7 @@ void loop() {
   
   if (!firstCycleComplete) {
     // ===== FIRST CYCLE: BLE Configuration Window =====
-    // Wait for 1 minute OR (connection time + 30 seconds), whichever is longer
+    // Wait for connection time + 1 minute (if connected), or 1 minute from start (if not connected)
     
     // Check if BLE just connected
     if (BLEConfig::isConnected() && !bleConnectedDuringFirstCycle) {
@@ -427,8 +534,8 @@ void loop() {
     
     if (bleConnectedDuringFirstCycle) {
       // User connected - calculate both options
-      unsigned long long connectionPlusThirty = bleConnectionTime + 30000; // +30s
-      unsigned long long minimumOneMinute = bleStartTime + 30000; // 1 min from start
+      unsigned long long connectionPlusThirty = bleConnectionTime + 60000; // +1 min
+      unsigned long long minimumOneMinute = bleStartTime + 600000; // 1 min from start
       
       // Use whichever is longer
       firstCycleEndTime = (connectionPlusThirty > minimumOneMinute) 
@@ -498,6 +605,23 @@ void loop() {
       
       firstCycleComplete = true;
       cycleStartTime = currentTime;
+      
+      // Determine GPS scenario if not already determined
+      if (gpsScenarioHandler != nullptr && gpsInitialized) {
+        if (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+          // If 2-minute period not complete, complete it now
+          gpsScenarioHandler->startGPSFixAcquisition();
+          // Wait for remaining time or complete immediately
+          while (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+            delay(100);
+            gpsSensor.update();
+            gpsScenarioHandler->determineScenario();
+          }
+        }
+        GPSScenario scenario = gpsScenarioHandler->determineScenario();
+        Serial.print("GPS Scenario after first cycle: ");
+        Serial.println(scenario);
+      }
       
       Serial.print("First cycle complete. Next cycle will start in ");
       Serial.print(NVSConfig::getCycleTime());

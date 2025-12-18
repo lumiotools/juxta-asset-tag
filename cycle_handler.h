@@ -16,6 +16,8 @@
 #include "ble_config.h"
 #include "unified_csv_storage.h"
 #include "flash_reader.h"
+#include "gps_scenario_handler.h"
+#include "customwifi.h"
 #include <Adafruit_NeoPixel.h>
 
 // Forward declaration for function defined in main .ino file
@@ -48,6 +50,7 @@ private:
   TransmissionHandler* transmissionHandler;
   BatteryIndicatorLED* batteryLED;
   Adafruit_NeoPixel* statusLED;
+  GPSScenarioHandler* gpsScenarioHandler;
   
   // Device info
   const char* deviceId;
@@ -849,9 +852,15 @@ public:
     batteryLED = batLED;
     statusLED = statLED;
     statusLEDPixel = ledPixel;
+    gpsScenarioHandler = nullptr;
     restoreR = 0;
     restoreG = 255;
     restoreB = 0;
+  }
+  
+  // Set GPS scenario handler
+  void setGPSScenarioHandler(GPSScenarioHandler* scenarioHandler) {
+    gpsScenarioHandler = scenarioHandler;
   }
   
   // Set status LED restore color
@@ -1097,6 +1106,58 @@ public:
   }
   */
   
+  // Helper: Send IMU batch to model server with lat/long prefix
+  // Format: (lat, long), imuObj1, imuObj2, ...
+  bool sendBatchToModelServer(const String& imuData, double currentLat, double currentLon, double& deltaLat, double& deltaLon) {
+    // Create prefixed data: (lat, long), imuData
+    String prefixedData = "(";
+    prefixedData += String(currentLat, 7);
+    prefixedData += ",";
+    prefixedData += String(currentLon, 7);
+    prefixedData += "),";
+    prefixedData += imuData;
+    
+    Serial.print("Sending batch to model server with position (");
+    Serial.print(currentLat, 7);
+    Serial.print(", ");
+    Serial.print(currentLon, 7);
+    Serial.print("), IMU data length: ");
+    Serial.print(imuData.length());
+    Serial.println(" bytes");
+    
+    return CustomWiFi::sendToModelServer(prefixedData, deltaLat, deltaLon);
+  }
+  
+  // Helper: Send position to backend server (BLE or WiFi)
+  bool sendPositionToBackend(double lat, double lon, GPSScenario scenario) {
+    // Get device ID, battery percentage, and timestamp
+    const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
+    int batteryPercent = BatteryMonitor::getBatteryPercentage();
+    unsigned long long timestamp = TimeSync::getCurrentTimeMillis();
+    
+    // Create position data string with all required fields
+    // Format: device_id,battery%,timestamp,scenario,lat,lon
+    char positionData[200];
+    snprintf(positionData, sizeof(positionData), "%s,%d,%llu,%d,%.7f,%.7f", 
+             devId, batteryPercent, timestamp, scenario, lat, lon);
+    
+    Serial.print("Sending position to backend server: device_id=");
+    Serial.print(devId);
+    Serial.print(", battery=");
+    Serial.print(batteryPercent);
+    Serial.print("%, timestamp=");
+    Serial.print(timestamp);
+    Serial.print(", scenario=");
+    Serial.print(scenario);
+    Serial.print(", location=(");
+    Serial.print(lat, 7);
+    Serial.print(", ");
+    Serial.print(lon, 7);
+    Serial.println(")");
+    
+    return transmissionHandler->handleDataTransmission(String(positionData));
+  }
+  
   // Main cycle execution - reads CSV entries from unified storage and sends directly
   // Parameters: Unified CSV storage handler
   // Returns: CycleResult indicating transmission outcome
@@ -1114,6 +1175,20 @@ public:
     
     Serial.println("========== CYCLE EXECUTION START ==========");
     
+    // Get current scenario and check accuracy at transmission cycle time
+    GPSScenario currentScenario = SCENARIO_NONE;
+    if (gpsScenarioHandler != nullptr) {
+      // Check GPS fix lost during Scenario 1 (only at transmission time)
+      if (gpsScenarioHandler->getCurrentScenario() == SCENARIO_1_HIGH_ACCURACY) {
+        gpsScenarioHandler->checkGPSFixLost();
+      }
+      
+      // Determine scenario based on current GPS status (only at transmission time)
+      currentScenario = gpsScenarioHandler->determineScenario();
+      Serial.print("Current GPS Scenario: ");
+      Serial.println(currentScenario);
+    }
+    
     // Get current storage state
     uint32_t readPtr = csvStorage->getReadPtr();
     uint32_t writePtr = csvStorage->getWritePtr();
@@ -1130,6 +1205,232 @@ public:
       return CYCLE_SUCCESS_STORED; // No data to send is not a failure
     }
     
+    // Scenario-based transmission logic
+    if (currentScenario == SCENARIO_1_HIGH_ACCURACY) {
+      // Scenario 1: Send high accuracy GPS to backend server
+      Serial.println("\n========== SCENARIO 1: HIGH ACCURACY GPS ==========");
+      
+      if (gps != nullptr && gpsScenarioHandler != nullptr) {
+        GPSData gpsData = gps->getGPSData();
+        if (gpsData.hasValidFix) {
+          // Send high accuracy GPS position to backend server
+          bool sent = sendPositionToBackend(gpsData.latitude, gpsData.longitude, currentScenario);
+          
+          if (sent) {
+            // Update reference position to current high accuracy GPS
+            gpsScenarioHandler->updatePositionAfterTransmission(gpsData.latitude, gpsData.longitude);
+            Serial.println("High accuracy GPS position sent to backend server");
+            setStatusLED(0, 255, 0);
+            delay(1000);
+            setStatusLED(0, 0, 0);
+            turnOffBatteryLED();
+            return CYCLE_SUCCESS_WIFI; // Or BLE depending on what was used
+          }
+        }
+      }
+    } else if (currentScenario == SCENARIO_2_LOW_ACCURACY || currentScenario == SCENARIO_4_UI_POSITION) {
+      // Scenario 2 or 4: Send IMU data to model server with lat/long prefix
+      Serial.println("\n========== SCENARIO 2/4: MODEL SERVER TRANSMISSION ==========");
+      
+      if (gpsScenarioHandler == nullptr || !gpsScenarioHandler->hasReferencePosition()) {
+        Serial.println("ERROR: No reference position available for Scenario 2/4");
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        return CYCLE_FAILED;
+      }
+      
+      // Get reference position from NVS (last known position)
+      double currentLat, currentLon;
+      gpsScenarioHandler->getReferencePosition(currentLat, currentLon);
+      
+      Serial.print("Starting position from NVS: (");
+      Serial.print(currentLat, 7);
+      Serial.print(", ");
+      Serial.print(currentLon, 7);
+      Serial.println(")");
+      
+      // Connect to WiFi for model server (WiFi only for model server)
+      String ssid = NVSConfig::getWiFiSSID();
+      String password = NVSConfig::getWiFiPassword();
+      
+      if (ssid.length() == 0 || password.length() == 0) {
+        Serial.println("ERROR: WiFi credentials not available for model server");
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        return CYCLE_FAILED;
+      }
+      
+      // Double-check credentials are still available in flash before connecting
+      String verifySSID = NVSConfig::getWiFiSSID();
+      String verifyPassword = NVSConfig::getWiFiPassword();
+      if (verifySSID.length() == 0 || verifyPassword.length() == 0) {
+        Serial.println("ERROR: WiFi credentials not found in flash before connection attempt");
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        return CYCLE_FAILED;
+      }
+      
+      Serial.println("Connecting to WiFi for model server...");
+      bool wifiConnected = CustomWiFi::connectWiFi();
+      
+      if (!wifiConnected) {
+        Serial.println("ERROR: WiFi connection failed for model server");
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        return CYCLE_FAILED;
+      }
+      
+      attemptTimeSyncIfNeeded();
+      
+      // Read IMU data in batches and send to model server with iterative position updates
+      // Calculate safe batch size
+      size_t freeHeap = ESP.getFreeHeap();
+      size_t maxChunkBytes = (freeHeap * 25) / 100; // Use 25% of free heap
+      if (maxChunkBytes > 10000) maxChunkBytes = 10000;
+      if (maxChunkBytes < 4000) maxChunkBytes = 4000;
+      
+      uint32_t batchNumber = 0;
+      bool allBatchesSent = true;
+      double finalLat = currentLat;
+      double finalLon = currentLon;
+      
+      while (csvStorage->hasDataToRead()) {
+        batchNumber++;
+        
+        // Build batch of IMU entries
+        String batch = "";
+        batch.reserve(maxChunkBytes);
+        uint32_t entriesInBatch = 0;
+        size_t batchBytes = 0;
+        uint32_t startReadPtr = csvStorage->getReadPtr();
+        uint32_t batchEndPtr = startReadPtr;
+        
+        while (csvStorage->hasDataToRead() && entriesInBatch < 10 && batchBytes < maxChunkBytes) {
+          String entry = csvStorage->readNextCSVEntry();
+          if (entry.length() == 0) break;
+          
+          size_t entrySize = entry.length() + (batch.length() > 0 ? 1 : 0);
+          if (batchBytes + entrySize > maxChunkBytes && entriesInBatch > 0) break;
+          
+          if (batch.length() > 0) batch += "\n";
+          batch += entry;
+          batchBytes += entry.length() + (entriesInBatch > 0 ? 1 : 0);
+          entriesInBatch++;
+          batchEndPtr = csvStorage->getLastEntryEndPtr();
+        }
+        
+        if (entriesInBatch == 0) break;
+        
+        Serial.print("\n[Batch ");
+        Serial.print(batchNumber);
+        Serial.print("] Sending ");
+        Serial.print(entriesInBatch);
+        Serial.print(" entries with position (");
+        Serial.print(finalLat, 7);
+        Serial.print(", ");
+        Serial.print(finalLon, 7);
+        Serial.println(")");
+        
+        // Send batch to model server with current position
+        double deltaLat = 0.0, deltaLon = 0.0;
+        bool sent = sendBatchToModelServer(batch, finalLat, finalLon, deltaLat, deltaLon);
+        
+        if (sent) {
+          // Update position: new = old + delta
+          finalLat += deltaLat;
+          finalLon += deltaLon;
+          
+          Serial.print("Batch sent successfully. Delta: (");
+          Serial.print(deltaLat, 7);
+          Serial.print(", ");
+          Serial.print(deltaLon, 7);
+          Serial.print("), New position: (");
+          Serial.print(finalLat, 7);
+          Serial.print(", ");
+          Serial.print(finalLon, 7);
+          Serial.println(")");
+          
+          // Mark entries as sent
+          csvStorage->setReadPtr(batchEndPtr);
+        } else {
+          Serial.println("Batch transmission failed");
+          allBatchesSent = false;
+          csvStorage->markAsFailed();
+          break;
+        }
+        
+        delay(500); // Delay between batches
+        yield();
+      }
+      
+      // Disconnect WiFi after model server transmission
+      CustomWiFi::disconnectWiFi();
+      
+      if (allBatchesSent) {
+        // Send final computed position to backend server (BLE or WiFi)
+        Serial.println("\nSending final computed position to backend server...");
+        
+        // Try BLE first, then WiFi
+        bool bleWasAlreadyOn = BLEConfig::isEnabled();
+        if (!BLEConfig::isEnabled()) {
+          BLEConfig::begin();
+          delay(500);
+        }
+        
+        bool positionSent = false;
+        unsigned long bleStartTime = millis();
+        while (millis() - bleStartTime < 5000) {
+          BLEConfig::update();
+          if (BLEConfig::isConnected()) {
+            positionSent = sendPositionToBackend(finalLat, finalLon, currentScenario);
+            if (positionSent) {
+              Serial.println("Position sent via BLE");
+              break;
+            }
+          }
+          delay(100);
+        }
+        
+        if (!positionSent) {
+          // Try WiFi
+          if (CustomWiFi::connectWiFi()) {
+            positionSent = sendPositionToBackend(finalLat, finalLon, currentScenario);
+            if (positionSent) {
+              Serial.println("Position sent via WiFi");
+            }
+            CustomWiFi::disconnectWiFi();
+          }
+        }
+        
+        if (!bleWasAlreadyOn && BLEConfig::isEnabled()) {
+          BLEConfig::stop();
+        }
+        
+        // Update reference position to processed value from last delta
+        if (gpsScenarioHandler != nullptr) {
+          gpsScenarioHandler->updatePositionAfterTransmission(finalLat, finalLon);
+        }
+        
+        // After transmission, start GPS fix attempt (Scenario 2)
+        if (currentScenario == SCENARIO_2_LOW_ACCURACY && gpsScenarioHandler != nullptr) {
+          gpsScenarioHandler->startGPSFixAttempt();
+          Serial.println("GPS fix attempt started (1 minute)");
+        }
+        
+        setStatusLED(0, 255, 0);
+        delay(1000);
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        return positionSent ? CYCLE_SUCCESS_WIFI : CYCLE_SUCCESS_STORED;
+      } else {
+        setStatusLED(0, 0, 0);
+        turnOffBatteryLED();
+        csvStorage->saveState();
+        return CYCLE_SUCCESS_STORED;
+      }
+    }
+    
+    // Default: Use existing FlashReader for other scenarios or fallback
     // Create FlashReader instance for modular data transmission
     FlashReader flashReader(csvStorage, transmissionHandler);
     
@@ -1215,7 +1516,7 @@ public:
       BLEConfig::stop();
     }
     
-    // ========== STEP 2: WIFI TRANSMISSION ATTEMPT ==========
+    // ========== STEP 2: WIFI TRANSMISSION ATTEMPT (Fallback for other scenarios) ==========
     Serial.println("\n========== STEP 2: WIFI TRANSMISSION ==========");
     
     String ssid = NVSConfig::getWiFiSSID();
