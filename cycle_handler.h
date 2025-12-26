@@ -854,7 +854,7 @@ public:
     statusLEDPixel = ledPixel;
     gpsScenarioHandler = nullptr;
     restoreR = 0;
-    restoreG = 255;
+    restoreG = 0;
     restoreB = 0;
   }
   
@@ -956,7 +956,7 @@ public:
       
       if (bleSent) {
         Serial.println("SUCCESS: Data sent via BLE");
-        setStatusLED(0, 255, 0); // Green - success
+        setStatusLED(0, 0, 0); // Off - success
         delay(1000);
         
         // For first cycle, keep BLE on (main loop will turn it off after first cycle period)
@@ -1047,7 +1047,7 @@ public:
         
         if (wifiSent) {
           Serial.println("SUCCESS: Data sent via WiFi");
-          setStatusLED(0, 255, 0); // Green - success
+          setStatusLED(0, 0, 0); // Off - success
           delay(1000);
           
           // LED already restored by stopStatusLEDBlink() in CustomWiFi::sendSensorData()
@@ -1106,14 +1106,28 @@ public:
   }
   */
   
-  // Helper: Send IMU batch to model server with lat/long prefix
-  // Format: (lat, long), imuObj1, imuObj2, ...
-  bool sendBatchToModelServer(const String& imuData, double currentLat, double currentLon, double& deltaLat, double& deltaLon) {
-    // Create prefixed data: (lat, long), imuData
+  // Helper: Send IMU batch to model server with lat/long/HDOP prefix
+  // Format: (lat, long, hdop), imuObj1, imuObj2, ...
+  bool sendBatchToModelServer(const String& imuData, double currentLat, double currentLon, double& deltaLat, double& deltaLon, bool isFirstBatch = false) {
+    // Determine HDOP value
+    float hdopValue = -1.0; // Default to -1 for calculated positions
+    
+    if (isFirstBatch && gps != nullptr) {
+      // For first batch, check if GPS has a valid fix
+      GPSData gpsData = gps->getGPSData();
+      if (gpsData.hasValidFix) {
+        hdopValue = gpsData.hdop;
+      }
+    }
+    // For subsequent batches (calculated positions), hdopValue remains -1.0
+    
+    // Create prefixed data: (lat, long, hdop), imuData
     String prefixedData = "(";
     prefixedData += String(currentLat, 7);
     prefixedData += ",";
     prefixedData += String(currentLon, 7);
+    prefixedData += ",";
+    prefixedData += String(hdopValue, 2);
     prefixedData += "),";
     prefixedData += imuData;
     
@@ -1121,6 +1135,8 @@ public:
     Serial.print(currentLat, 7);
     Serial.print(", ");
     Serial.print(currentLon, 7);
+    Serial.print(", HDOP: ");
+    Serial.print(hdopValue, 2);
     Serial.print("), IMU data length: ");
     Serial.print(imuData.length());
     Serial.println(" bytes");
@@ -1130,22 +1146,25 @@ public:
   
   // Helper: Send position to backend server (BLE or WiFi)
   bool sendPositionToBackend(double lat, double lon, GPSScenario scenario) {
-    // Get device ID, battery percentage, and timestamp
+    // Get device ID, battery percentage, voltage, and timestamp
     const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
     int batteryPercent = BatteryMonitor::getBatteryPercentage();
+    float batteryVoltage = BatteryMonitor::readBatteryVoltage();
     unsigned long long timestamp = TimeSync::getCurrentTimeMillis();
     
     // Create position data string with all required fields
-    // Format: device_id,battery%,timestamp,scenario,lat,lon
+    // Format: device_id,battery%,voltage,timestamp,scenario,lat,lon
     char positionData[200];
-    snprintf(positionData, sizeof(positionData), "%s,%d,%llu,%d,%.7f,%.7f", 
-             devId, batteryPercent, timestamp, scenario, lat, lon);
+    snprintf(positionData, sizeof(positionData), "%s,%d,%.2f,%llu,%d,%.7f,%.7f", 
+             devId, batteryPercent, batteryVoltage, timestamp, scenario, lat, lon);
     
     Serial.print("Sending position to backend server: device_id=");
     Serial.print(devId);
     Serial.print(", battery=");
     Serial.print(batteryPercent);
-    Serial.print("%, timestamp=");
+    Serial.print("% (");
+    Serial.print(batteryVoltage, 2);
+    Serial.print("V), timestamp=");
     Serial.print(timestamp);
     Serial.print(", scenario=");
     Serial.print(scenario);
@@ -1220,7 +1239,7 @@ public:
             // Update reference position to current high accuracy GPS
             gpsScenarioHandler->updatePositionAfterTransmission(gpsData.latitude, gpsData.longitude);
             Serial.println("High accuracy GPS position sent to backend server");
-            setStatusLED(0, 255, 0);
+            setStatusLED(0, 0, 0);
             delay(1000);
             setStatusLED(0, 0, 0);
             turnOffBatteryLED();
@@ -1332,8 +1351,9 @@ public:
         Serial.println(")");
         
         // Send batch to model server with current position
+        // First batch uses GPS fix HDOP if available, subsequent batches use -1 (calculated position)
         double deltaLat = 0.0, deltaLon = 0.0;
-        bool sent = sendBatchToModelServer(batch, finalLat, finalLon, deltaLat, deltaLon);
+        bool sent = sendBatchToModelServer(batch, finalLat, finalLon, deltaLat, deltaLon, batchNumber == 1);
         
         if (sent) {
           // Update position: new = old + delta
@@ -1411,13 +1431,10 @@ public:
           gpsScenarioHandler->updatePositionAfterTransmission(finalLat, finalLon);
         }
         
-        // After transmission, start GPS fix attempt (Scenario 2)
-        if (currentScenario == SCENARIO_2_LOW_ACCURACY && gpsScenarioHandler != nullptr) {
-          gpsScenarioHandler->startGPSFixAttempt();
-          Serial.println("GPS fix attempt started (1 minute)");
-        }
+        // Note: GPS fix attempt cycle is now continuous and independent of transmission time
+        // The cycle is managed in the main loop based on GPS turn-off time
         
-        setStatusLED(0, 255, 0);
+        setStatusLED(0, 0, 0);
         delay(1000);
         setStatusLED(0, 0, 0);
         turnOffBatteryLED();
@@ -1490,7 +1507,7 @@ public:
       
       if (allSent) {
         Serial.println("\n✓✓✓ SUCCESS: All CSV entries sent via BLE ✓✓✓");
-        setStatusLED(0, 255, 0); // Green
+        setStatusLED(0, 0, 0); // Off
         delay(1000);
         
         if (!bleWasAlreadyOn) {
@@ -1547,7 +1564,7 @@ public:
           
           if (allSent) {
             Serial.println("\n✓✓✓ SUCCESS: All CSV entries sent via WiFi ✓✓✓");
-            setStatusLED(0, 255, 0); // Green
+            setStatusLED(0, 0, 0); // Off
             delay(1000);
             setStatusLED(0, 0, 0);
             turnOffBatteryLED();

@@ -34,6 +34,7 @@ private:
   static const char* CSV_READ_PTR_KEY;
   static const char* GPS_ACCURACY_THRESHOLD_KEY;
   static const char* GPS_READ_CYCLE_TIME_KEY;
+  static const char* GPS_ON_AFTER_KEY;
   static const char* INITIAL_POSITION_LAT_KEY;
   static const char* INITIAL_POSITION_LON_KEY;
   static const char* SCENARIO_STATE_KEY;
@@ -330,6 +331,10 @@ public:
   static uint32_t getGPSReadCycleTime();
   static bool setGPSReadCycleTime(uint32_t cycleTimeSeconds);
   
+  // GPS On After (delay in seconds before turning GPS on again in Scenario 2)
+  static uint32_t getGPSOnAfter();
+  static bool setGPSOnAfter(uint32_t seconds);
+  
   // Initial Position from UI (Scenario 4)
   static bool setInitialPosition(double latitude, double longitude);
   static bool getInitialPosition(double& latitude, double& longitude);
@@ -374,6 +379,7 @@ const char* NVSConfig::CSV_WRITE_PTR_KEY = "csv_write_ptr";
 const char* NVSConfig::CSV_READ_PTR_KEY = "csv_read_ptr";
 const char* NVSConfig::GPS_ACCURACY_THRESHOLD_KEY = "gps_acc_thresh";
 const char* NVSConfig::GPS_READ_CYCLE_TIME_KEY = "gps_read_cycle";
+const char* NVSConfig::GPS_ON_AFTER_KEY = "gps_on_after";
 const char* NVSConfig::INITIAL_POSITION_LAT_KEY = "init_pos_lat";
 const char* NVSConfig::INITIAL_POSITION_LON_KEY = "init_pos_lon";
 const char* NVSConfig::SCENARIO_STATE_KEY = "scenario_state";
@@ -403,6 +409,15 @@ uint32_t NVSConfig::getGPSReadCycleTime() {
 
 bool NVSConfig::setGPSReadCycleTime(uint32_t cycleTimeSeconds) {
   return writeU32NVS(GPS_READ_CYCLE_TIME_KEY, cycleTimeSeconds);
+}
+
+// GPS On After implementation
+uint32_t NVSConfig::getGPSOnAfter() {
+  return readU32NVS(GPS_ON_AFTER_KEY, 60); // Default: 60 seconds
+}
+
+bool NVSConfig::setGPSOnAfter(uint32_t seconds) {
+  return writeU32NVS(GPS_ON_AFTER_KEY, seconds);
 }
 
 // Initial Position implementation

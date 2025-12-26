@@ -131,6 +131,16 @@ public:
   IMUData getIMUData() {
     return data;
   }
+  
+  // Public access to register read/write for motion detection configuration
+  // These methods allow motion_sleep_manager to configure interrupts
+  void writeRegister16Public(uint8_t reg, uint16_t value) {
+    writeRegister16(reg, value);
+  }
+  
+  uint16_t readRegister16Public(uint8_t reg) {
+    return readRegister16(reg);
+  }
 
 private:
   // Soft reset similar to test/imu.ino

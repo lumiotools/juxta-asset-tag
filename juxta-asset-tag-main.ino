@@ -14,10 +14,16 @@
 #include "cycle_handler.h"
 #include "unified_csv_storage.h"
 #include "gps_scenario_handler.h"
+#include "button_handler.h"
+#include "motion_sleep_manager.h"
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
 #include <Ticker.h>
+#include "driver/gpio.h"
+
+// Power latch pin (IO14) configuration
+#define POWER_LATCH_PIN D14
 
 // Device ID and Version Configuration (hardcoded to save memory)
 const char* DEVICE_ID = "ASSET_TAG_WJ";  // Change this for each device
@@ -33,7 +39,7 @@ Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ8
 Ticker statusLedTicker;
 volatile bool statusLedBlinkState = false;
 volatile uint8_t blinkR = 0, blinkG = 0, blinkB = 0;
-uint8_t restoreR = 0, restoreG = 255, restoreB = 0; // Default to green
+uint8_t restoreR = 0, restoreG = 0, restoreB = 0; // Default to off
 
 // IMU reading ticker for 100Hz sampling
 Ticker imuReadTicker;
@@ -61,6 +67,29 @@ UnifiedCSVStorage unifiedCSVStorage;
 bool imuInitialized = false;
 bool gpsInitialized = false;
 bool flashInitialized = false;
+
+// Motion detection variables (for deep sleep)
+volatile bool motionInterruptFlag = false;
+unsigned long lastMotionTime = 0;
+unsigned long noMotionStartTime = 0;
+bool noMotionTracking = false;
+
+// Helper function to set GPIO 14 (power latch) with proper pull-up/pull-down configuration
+void setPowerLatchPin(bool high) {
+  if (high) {
+    // Set HIGH: Configure as OUTPUT with pull-up
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLUP_ONLY);
+    digitalWrite(POWER_LATCH_PIN, HIGH);
+    Serial.println("Power latch pin (IO14) set HIGH with pull-up");
+  } else {
+    // Set LOW: Configure as OUTPUT with pull-down
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLDOWN_ONLY);
+    digitalWrite(POWER_LATCH_PIN, LOW);
+    Serial.println("Power latch pin (IO14) set LOW with pull-down");
+  }
+}
 
 // Configuration: Cycle duration is now configurable via BLE and stored in NVS
 // Default is 900 seconds (15 minutes) if not set via BLE
@@ -117,12 +146,12 @@ void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void updateStatusLED() {
-  // Green if all sensors (IMU, GPS, and Flash) initialized, Red if any failed
+  // Off if all sensors (IMU, GPS, and Flash) initialized, Red if any failed
   if (imuInitialized && gpsInitialized && flashInitialized) {
     restoreR = 0;
-    restoreG = 255;
+    restoreG = 0;
     restoreB = 0;
-    setPixelAndShow(0, 0, 255, 0); // Green on pixel 0
+    setPixelAndShow(0, 0, 0, 0); // Off on pixel 0
   } else {
     restoreR = 255;
     restoreG = 0;
@@ -164,10 +193,14 @@ void stopStatusLEDBlink(long long t) {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(100);
   statusLED.begin();  // Initialize NeoPixel first
   setPixelAndShow(0, 255, 0, 255); // Magenta/Purple on pixel 0 (unique boot color)
-  delay(1000);
+  delay(5000); //wait 5 seconds for button to be pressed
+  if (ButtonHandler::isPressed()) {
+    Serial.println("Button pressed - restarting ESP...");
+    setPowerLatchPin(true); // Set HIGH with pull-up to keep device power on
+  }
   pinMode(D2,INPUT);
   
   // Initialize NVS for WiFi credentials storage
@@ -221,15 +254,18 @@ void setup() {
   BatteryMonitor::initializeADC();
   delay(100);
   
+  // Initialize Button Handler
+  ButtonHandler::begin();
+  
   // Initialize Status LED first (both pixels on same pin)
   // statusLED.begin();  // Initialize GPIO first!
   statusLED.setBrightness(70);
   statusLED.show();
   updateStatusLED(); // Show red initially on pixel 0 (not initialized)
   
-  // Initialize Battery Indicator LED (uses shared statusLED instance, pixel 1)
-  batteryIndicatorLED.begin(&statusLED, 1);
-  batteryIndicatorLED.updateBatteryLED(); // Set initial color based on battery on pixel 1
+  // Initialize Battery Indicator LED (simple single-color LED)
+  batteryIndicatorLED.begin(); // Uses BATTERY_LED_PIN from battery_indicator_led.h
+  batteryIndicatorLED.updateBatteryLED(); // Initialize state
   delay(100);
   
   // Initialize IMU sensor
@@ -237,6 +273,15 @@ void setup() {
   imuInitialized = imuSensor.begin();
   if (imuInitialized) {
     Serial.println("IMU initialized successfully");
+    
+    // Configure BMI323 interrupts for motion detection
+    Serial.println("Configuring BMI323 motion detection interrupts...");
+    if (MotionSleepManager::configureBMI323Interrupts(&imuSensor)) {
+      Serial.println("BMI323 interrupts configured successfully");
+      MotionSleepManager::setupMotionISR();
+    } else {
+      Serial.println("WARNING: BMI323 interrupt configuration failed - deep sleep motion detection disabled");
+    }
   } else {
     Serial.println("IMU initialization failed - continuing without IMU");
   }
@@ -320,7 +365,7 @@ void setup() {
   
   // Set restore color based on sensor status
   if (imuInitialized && gpsInitialized && flashInitialized) {
-    cycleHandler->setStatusLEDRestoreColor(0, 255, 0); // Green
+    cycleHandler->setStatusLEDRestoreColor(0, 0, 0); // Off
   } else {
     cycleHandler->setStatusLEDRestoreColor(255, 0, 0); // Red
   }
@@ -362,6 +407,21 @@ void loop() {
   // Current time
   unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
   
+  // ========== BUTTON HANDLER UPDATE ==========
+  // Handle button press events (long press for power off, double press for restart)
+  ButtonHandler::update();
+  
+  // ========== BATTERY LED UPDATE ==========
+  // Update battery LED blinking state (non-blocking)
+  batteryIndicatorLED.update();
+  
+  // Check battery threshold crossing periodically (every 5 seconds)
+  static unsigned long lastBatteryCheck = 0;
+  if (currentTime - lastBatteryCheck >= 5000) {
+    batteryIndicatorLED.updateBatteryLED(); // Check for threshold crossing
+    lastBatteryCheck = currentTime;
+  }
+  
   // ========== GPS SCENARIO HANDLING ==========
   // Handle GPS scenarios and fix acquisition
   if (gpsScenarioHandler != nullptr && gpsInitialized) {
@@ -380,14 +440,30 @@ void loop() {
         esp_deep_sleep_start();
         return; // Will not reach here
       }
+      
+      // NEW: Handle Scenario 2 transition - turn off GPS and start continuous cycle
+      if (scenario == SCENARIO_2_LOW_ACCURACY) {
+        // GPS has been ON for 2 minutes (acquisition period)
+        // Turn it OFF now to start the continuous cycle
+        GPSSensor::powerOff();
+        gpsScenarioHandler->recordGPSOffTime();  // Record when GPS was turned off
+        Serial.println("GPS turned off after 2-minute acquisition period");
+        Serial.println("Starting continuous GPS cycle (wait 'GPS on after' seconds, then 1-minute fix attempts)");
+      }
+      
+      // Scenario 1: GPS stays ON (high accuracy fix found)
+      // Scenario 4: GPS already OFF (UI position provided)
     }
     
-    // Handle GPS fix attempt after transmission (Scenario 2)
+    // Handle continuous GPS fix attempt cycle (Scenario 2)
     static unsigned long long lastGPSReadTime = 0;
     uint32_t gpsReadCycleTime = NVSConfig::getGPSReadCycleTime();
     
     if (gpsScenarioHandler->getCurrentScenario() == SCENARIO_2_LOW_ACCURACY) {
-      // Check if GPS fix attempt is in progress
+      // Check if it's time to start next GPS fix attempt (after "GPS on after" delay)
+      gpsScenarioHandler->checkAndStartGPSFixAttempt();
+      
+      // Check if GPS fix attempt is in progress and complete
       if (gpsScenarioHandler->isGPSFixAttemptComplete()) {
         // Fix attempt complete - check for fix and switch scenarios
         GPSScenario newScenario = gpsScenarioHandler->determineScenario();
@@ -396,7 +472,7 @@ void loop() {
         } else {
           Serial.println("No high accuracy fix found - continuing Scenario 2");
         }
-        gpsScenarioHandler->endGPSFixAttempt();
+        gpsScenarioHandler->endGPSFixAttempt();  // This will schedule the next attempt
       }
     }
     
@@ -432,12 +508,57 @@ void loop() {
   
   // ========== IMU READING (INTERRUPT-DRIVEN) ==========
   // IMU data reading triggered by ticker ISR at 100Hz (10ms intervals)
-  // Only start IMU reading after configuration time is complete
+  // Start IMU based on GPS scenario:
+  // - Scenario 1: Start when GPS fix is found
+  // - Scenario 2: Start after 2-minute GPS fix acquisition period
+  // - Scenario 4: Can start immediately (UI position provided)
   static bool imuTickerStarted = false;
-  if (!imuTickerStarted && firstCycleComplete && imuInitialized && unifiedCSVStorage.isInitialized()) {
-    imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
-    imuTickerStarted = true;
-    Serial.println("IMU sampling started: 100Hz (stored as CSV to flash)");
+  if (!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized()) {
+    bool shouldStartIMU = false;
+    
+    if (gpsScenarioHandler != nullptr && gpsInitialized) {
+      GPSScenario currentScenario = gpsScenarioHandler->getCurrentScenario();
+      
+      if (currentScenario == SCENARIO_1_HIGH_ACCURACY) {
+        // Scenario 1: Start when GPS has valid fix (already determined as high accuracy)
+        GPSData gpsData = gpsSensor.getGPSData();
+        if (gpsData.hasValidFix && gpsSensor.isHighAccuracy()) {
+          shouldStartIMU = true;
+          Serial.println("Scenario 1: High accuracy GPS fix found - starting IMU sampling");
+        }
+      } else if (currentScenario == SCENARIO_NONE) {
+        // Still in acquisition period - check if high accuracy fix found early
+        GPSData gpsData = gpsSensor.getGPSData();
+        if (gpsData.hasValidFix && gpsSensor.isHighAccuracy()) {
+          // High accuracy fix found during acquisition - start IMU (will be Scenario 1)
+          shouldStartIMU = true;
+          Serial.println("High accuracy GPS fix found during acquisition - starting IMU sampling (Scenario 1)");
+        }
+      } else if (currentScenario == SCENARIO_2_LOW_ACCURACY) {
+        // Scenario 2: Start after 2-minute GPS fix acquisition period is complete
+        if (gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+          shouldStartIMU = true;
+          Serial.println("Scenario 2: 2-minute GPS acquisition period complete - starting IMU sampling");
+        }
+      } else if (currentScenario == SCENARIO_4_UI_POSITION) {
+        // Scenario 4: Can start immediately (UI position provided)
+        shouldStartIMU = true;
+        Serial.println("Scenario 4: UI position provided - starting IMU sampling");
+      }
+      // Scenario 3 (NO_FIX) will not start IMU - device goes to deep sleep
+    } else {
+      // If GPS is not initialized, start IMU after first cycle (fallback behavior)
+      if (firstCycleComplete) {
+        shouldStartIMU = true;
+        Serial.println("GPS not available - starting IMU sampling after first cycle (fallback)");
+      }
+    }
+    
+    if (shouldStartIMU) {
+      imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
+      imuTickerStarted = true;
+      Serial.println("IMU sampling started: 100Hz (stored as CSV to flash)");
+    }
   }
   
   // Check if ISR flagged that it's time to read IMU
@@ -534,8 +655,10 @@ void loop() {
     
     if (bleConnectedDuringFirstCycle) {
       // User connected - calculate both options
-      unsigned long long connectionPlusThirty = bleConnectionTime + 60000; // +1 min
-      unsigned long long minimumOneMinute = bleStartTime + 600000; // 1 min from start
+      // Get extension time from BLE config (adds 30s each time button is pressed)
+      unsigned long long extensionTime = BLEConfig::getConfigTimeExtension();
+      unsigned long long connectionPlusThirty = bleConnectionTime + 60000 + extensionTime; // +1 min + extension
+      unsigned long long minimumOneMinute = bleStartTime + 600000 + extensionTime; // 1 min from start + extension
       
       // Use whichever is longer
       firstCycleEndTime = (connectionPlusThirty > minimumOneMinute) 
@@ -559,8 +682,9 @@ void loop() {
         Serial.println("s ago)");
       }
     } else {
-      // No connection yet - default 1 minute wait
-      firstCycleEndTime = bleStartTime + 60000;
+      // No connection yet - default 1 minute wait + extension time
+      unsigned long long extensionTime = BLEConfig::getConfigTimeExtension();
+      firstCycleEndTime = bleStartTime + 60000 + extensionTime;
       timeRemaining = (firstCycleEndTime > currentTime) ? (firstCycleEndTime - currentTime) : 0;
       
       // Debug output every 10 seconds
@@ -707,15 +831,36 @@ void loop() {
     }
   }
   
+  // ========== MOTION DETECTION & DEEP SLEEP ==========
+  // Only enable deep sleep motion detection after first cycle completes
+  // Don't sleep during BLE configuration window
+  if (firstCycleComplete && imuInitialized && MotionSleepManager::isConfigured()) {
+    // Track no-motion duration
+    bool shouldSleep = MotionSleepManager::trackNoMotionDuration();
+    
+    if (shouldSleep) {
+      // 5 minutes of no motion - enter deep sleep
+      // Configure GPIO 14 HIGH with pull-up before entering deep sleep
+      setPowerLatchPin(true);
+      MotionSleepManager::enterDeepSleep(&imuSensor);
+      // Will not reach here - device will wake from motion interrupt
+    }
+  }
+  
   // ========== LIGHT SLEEP (POWER SAVING) ==========
   // Enter light sleep to save power when no immediate tasks
   // Timer wakeup every 10ms ensures ticker interrupt is processed
   // Only after first cycle to keep BLE responsive during initial connection
-  if (firstCycleComplete && !imuDataReady) {
+  // Skip light sleep if motion detection is active (to allow motion tracking)
+  if (firstCycleComplete && !imuDataReady && (!imuInitialized || !MotionSleepManager::isConfigured() || !noMotionTracking)) {
     esp_sleep_enable_timer_wakeup(10000); // Wake every 10ms (10,000 microseconds)
     esp_light_sleep_start();
   } else if (!firstCycleComplete) {
     // During first cycle, keep CPU responsive for BLE with minimal delay
     delay(1);
+  } else if (noMotionTracking) {
+    // During no-motion tracking, use small delay instead of light sleep
+    // This ensures motion interrupt flag is checked frequently
+    delay(10);
   }
 }

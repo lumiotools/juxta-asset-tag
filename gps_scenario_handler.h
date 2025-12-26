@@ -21,6 +21,7 @@ private:
   GPSSensor* gps;
   GPSScenario currentScenario;
   unsigned long long gpsFixStartTime;  // Time when GPS fix acquisition started
+  unsigned long long gpsFixEndTime;  // Time when GPS was turned off (for continuous cycle in Scenario 2)
   unsigned long long lastTransmissionTime;  // Time of last transmission cycle
   double referenceLatitude;   // Reference position (stored in NVS)
   double referenceLongitude;   // Reference position (stored in NVS)
@@ -36,6 +37,7 @@ public:
     gps = gpsSensor;
     currentScenario = SCENARIO_NONE;
     gpsFixStartTime = 0;
+    gpsFixEndTime = 0;
     lastTransmissionTime = 0;
     referenceLatitude = 0.0;
     referenceLongitude = 0.0;
@@ -164,12 +166,21 @@ public:
   void updatePositionAfterTransmission(double lat, double lon) {
     setReferencePosition(lat, lon);
     lastTransmissionTime = TimeSync::getCurrentTimeMillis();
+    // Note: GPS fix attempt cycle is now continuous and independent of transmission time
   }
   
   // Handle Scenario 3: Deep sleep and retry
   void handleScenario3() {
     Serial.println("Scenario 3: No fix found - entering deep sleep for 30 seconds...");
     // Deep sleep will be handled in main loop
+  }
+  
+  // Record when GPS was turned off (called after 2-minute acquisition or after fix attempt)
+  void recordGPSOffTime() {
+    gpsFixEndTime = TimeSync::getCurrentTimeMillis();
+    gpsFixStartTime = 0;  // Clear start time since GPS is now off
+    Serial.print("GPS off time recorded: ");
+    Serial.println(gpsFixEndTime);
   }
   
   // Handle GPS fix attempt after transmission (Scenario 2)
@@ -189,7 +200,54 @@ public:
   // End GPS fix attempt (turn off GPS)
   void endGPSFixAttempt() {
     GPSSensor::powerOff();
+    recordGPSOffTime();  // Record when GPS was turned off
     Serial.println("GPS fix attempt ended - GPS powered off");
+    // Note: Next GPS fix attempt will be scheduled automatically by checkAndStartGPSFixAttempt()
+    // based on gpsFixEndTime + "GPS on after" delay
+  }
+  
+  // Check if it's time to start next GPS fix attempt (called from main loop)
+  // Returns true if GPS was started, false otherwise
+  bool checkAndStartGPSFixAttempt() {
+    if (currentScenario != SCENARIO_2_LOW_ACCURACY) {
+      return false;  // Only for Scenario 2
+    }
+    
+    // If GPS is already on, don't schedule
+    if (gpsFixStartTime != 0) {
+      return false;  // GPS already on
+    }
+    
+    // If GPS was never turned off, this shouldn't happen in Scenario 2
+    // (GPS should have been turned off after 2-minute period or after fix attempt)
+    if (gpsFixEndTime == 0) {
+      // This is a safety check - if somehow we're in Scenario 2 and GPS was never turned off,
+      // turn it off now and start the cycle
+      Serial.println("WARNING: Scenario 2 but GPS off time not recorded - turning off GPS now");
+      recordGPSOffTime();
+      return false;  // Will start on next check after delay
+    }
+    
+    // Check if "GPS on after" delay has elapsed since GPS was turned off
+    unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
+    uint32_t gpsOnAfterSeconds = NVSConfig::getGPSOnAfter();
+    unsigned long long gpsOnAfterDelayMs = (unsigned long long)gpsOnAfterSeconds * 1000ULL;
+    unsigned long long nextGPSOnTime = gpsFixEndTime + gpsOnAfterDelayMs;
+    
+    if (currentTime >= nextGPSOnTime) {
+      startGPSFixAttempt();
+      return true;
+    }
+    
+    return false;  // Not time yet
+  }
+  
+  // Set current scenario directly (for BLE callback)
+  void setCurrentScenario(GPSScenario scenario) {
+    currentScenario = scenario;
+    NVSConfig::setScenarioState((uint8_t)scenario);
+    Serial.print("Scenario set to: ");
+    Serial.println(scenario);
   }
   
   // Check if GPS fix is lost during Scenario 1
@@ -212,6 +270,7 @@ public:
   void resetOnPowerOn() {
     currentScenario = SCENARIO_NONE;
     gpsFixStartTime = 0;
+    gpsFixEndTime = 0;
     NVSConfig::setScenarioState((uint8_t)SCENARIO_NONE);
     Serial.println("Scenario state reset on power_on");
   }

@@ -9,10 +9,18 @@
 #include "time_sync.h"
 #include "esp_bt.h"
 #include "gps_sensor.h"
+#include "unified_csv_storage.h"
+#include "gps_scenario_handler.h"
 
 // Forward declarations for status LED control
 extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
 extern void stopStatusLEDBlink(long long startTime);
+
+// Forward declarations for external objects
+class UnifiedCSVStorage;
+class GPSScenarioHandler;
+extern UnifiedCSVStorage unifiedCSVStorage;
+extern GPSScenarioHandler* gpsScenarioHandler;
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -26,6 +34,8 @@ extern void stopStatusLEDBlink(long long startTime);
 #define INITIAL_POSITION_CHAR_UUID "12345678-1234-1234-1234-123456789ac4"
 #define GPS_READ_CYCLE_CHAR_UUID "12345678-1234-1234-1234-123456789ac5"
 #define GPS_ACCURACY_THRESHOLD_CHAR_UUID "12345678-1234-1234-1234-123456789ac6"
+#define GPS_ON_AFTER_CHAR_UUID "12345678-1234-1234-1234-123456789ac7"
+#define EXTEND_CONFIG_TIME_CHAR_UUID "12345678-1234-1234-1234-123456789ac8"
 
 // BLE Device Name
 class BLEConfig {
@@ -43,6 +53,8 @@ private:
   static NimBLECharacteristic* pInitialPositionCharacteristic;
   static NimBLECharacteristic* pGPSReadCycleCharacteristic;
   static NimBLECharacteristic* pGPSAccuracyThresholdCharacteristic;
+  static NimBLECharacteristic* pGPSOnAfterCharacteristic;
+  static NimBLECharacteristic* pExtendConfigTimeCharacteristic;
   static bool deviceConnected;
   static bool oldDeviceConnected;
   static String receivedSSID;
@@ -52,12 +64,15 @@ private:
   static String receivedInitialPosition;
   static uint32_t receivedGPSReadCycle;
   static float receivedGPSAccuracyThreshold;
+  static uint32_t receivedGPSOnAfter;
   static bool credentialsReceived;
   static bool gpsActiveReceived;
   static bool cycleTimeReceived;
   static bool initialPositionReceived;
   static bool gpsReadCycleReceived;
   static bool gpsAccuracyThresholdReceived;
+  static bool gpsOnAfterReceived;
+  static unsigned long long configTimeExtension;  // Extension time in milliseconds (added to config period)
   static uint16_t mtuSize;
   static const char* deviceId;
   static const char* deviceVersion;
@@ -85,20 +100,21 @@ private:
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
       
       // Calculate countdown timer (milliseconds remaining for configuration mode)
-      // Configuration mode duration: connection time + 1 minute (60000 ms)
+      // Configuration mode duration: connection time + 1 minute (60000 ms) + extension time
       unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
       unsigned long long connectionTime = currentTime; // Time when connection was established
-      unsigned long long configEndTime = connectionTime + 60000; // +1 minute from connection
+      unsigned long long configEndTime = connectionTime + 60000 + configTimeExtension; // +1 minute from connection + extension
       unsigned long long timeRemaining = (configEndTime > currentTime) ? (configEndTime - currentTime) : 0;
       
-      char jsonBuffer[500];
-      snprintf(jsonBuffer, sizeof(jsonBuffer), 
-               "{\"device_id\":\"%s\",\"device_version\":\"%s\",\"timestamp\":\"%llu\",\"battery\":%d,\"voltage\":%.3f,\"currentSSID\":\"%s\",\"gps_cycle_time\":%d,\"cycle_time\":%d,\"gps_threshold\":%.2f,\"remaining_time\":%llu}",
-               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getGPSActive(), NVSConfig::getCycleTime(), NVSConfig::getGPSAccuracyThreshold(), timeRemaining);
+      char csvBuffer[650];
+      snprintf(csvBuffer, sizeof(csvBuffer), 
+               "%s,%s,%llu,%d,%.3f,%s,%d,%d,%.2f,%d,%d,%llu",
+               devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getGPSReadCycleTime(), NVSConfig::getCycleTime(), NVSConfig::getGPSAccuracyThreshold(), NVSConfig::getGPSOnAfter(), NVSConfig::getGPSActive(), timeRemaining);
       
-      // Send JSON data via Current SSID Characteristic (only once on connection)
+      // Send CSV data via Current SSID Characteristic (only once on connection)
+      // Format: device_id,device_version,timestamp,battery,voltage,currentSSID,gps_cycle_time,transmission_time,gps_threshold,gps_on_after,gps_active,remaining_time
       if (pCurrentSSIDCharacteristic != nullptr) {
-        pCurrentSSIDCharacteristic->setValue(std::string(jsonBuffer));
+        pCurrentSSIDCharacteristic->setValue(std::string(csvBuffer));
       }
     }
 
@@ -167,6 +183,47 @@ private:
         Serial.print(gpsActiveSaved ? "Saved to NVS (key: gps_active)" : "Failed to save to NVS");
         Serial.print(" - Current NVS value: ");
         Serial.println(NVSConfig::getGPSActive());
+        
+        // Handle GPS OFF -> Scenario 4 transition
+        if (receivedGPSActive == 0) {
+          // Check if initial position exists in NVS
+          if (NVSConfig::hasInitialPosition()) {
+            Serial.println("GPS turned OFF - Switching to Scenario 4 and clearing data...");
+            
+            // Switch to Scenario 4
+            if (gpsScenarioHandler != nullptr) {
+              gpsScenarioHandler->setCurrentScenario(SCENARIO_4_UI_POSITION);
+              Serial.println("Scenario switched to Scenario 4");
+            }
+            
+            // Clear external flash
+            if (unifiedCSVStorage.isInitialized()) {
+              unifiedCSVStorage.clear();
+              Serial.println("External flash cleared");
+            }
+            
+            // Clear initial position
+            bool cleared = NVSConfig::clearInitialPosition();
+            Serial.print("Initial position cleared: ");
+            Serial.println(cleared ? "Success" : "Failed");
+            
+            // Clear last known position (save zero values)
+            bool lastKnownCleared = NVSConfig::saveLastKnownPosition(0.0, 0.0);
+            Serial.print("Last known position cleared: ");
+            Serial.println(lastKnownCleared ? "Success" : "Failed");
+            
+            // Turn off GPS
+            GPSSensor::powerOff();
+            Serial.println("GPS powered off");
+            
+            // Save scenario state to NVS
+            if (gpsScenarioHandler != nullptr) {
+              NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
+            }
+          } else {
+            Serial.println("GPS turned OFF but no initial position in NVS - skipping Scenario 4 transition");
+          }
+        }
         
         // Check if all credentials are received (SSID and password) for WiFi credentials saving
         if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
@@ -268,6 +325,39 @@ private:
         Serial.println(saved ? "Saved to NVS" : "Failed to save");
       }
     }
+  };
+  
+  // GPS On After Characteristic Callbacks
+  class GPSOnAfterCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+      long long startTime = startStatusLEDBlink(0, 0, 255);
+      
+      std::string stdValue = pCharacteristic->getValue();
+      String value = String(stdValue.c_str());
+      if (value.length() > 0) {
+        receivedGPSOnAfter = value.toInt();
+        bool saved = NVSConfig::setGPSOnAfter(receivedGPSOnAfter);
+        gpsOnAfterReceived = true;
+        Serial.print("GPS On After received: ");
+        Serial.print(receivedGPSOnAfter);
+        Serial.print(" seconds - ");
+        Serial.print(saved ? "Saved to NVS" : "Failed to save");
+        Serial.print(" - Current NVS value: ");
+        Serial.println(NVSConfig::getGPSOnAfter());
+      }
+      
+      stopStatusLEDBlink(startTime);
+    }
+  };
+  
+  // Extend Config Time Characteristic Callbacks
+  class ExtendConfigTimeCallbacks: public NimBLECharacteristicCallbacks {
+      void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+        // Read seconds from message (always contains an integer) and extend configuration period by that amount
+        uint32_t seconds = String(pCharacteristic->getValue().c_str()).toInt();
+        configTimeExtension += (unsigned long long)seconds * 1000ULL; // Convert to milliseconds and add
+        // No indication or response - silent extension
+      }
   };
 
 public:
@@ -379,6 +469,20 @@ public:
     );
     pGPSAccuracyThresholdCharacteristic->setCallbacks(new GPSAccuracyThresholdCallbacks());
     
+    // Create GPS On After Characteristic
+    pGPSOnAfterCharacteristic = pService->createCharacteristic(
+      GPS_ON_AFTER_CHAR_UUID,
+      NIMBLE_PROPERTY::WRITE
+    );
+    pGPSOnAfterCharacteristic->setCallbacks(new GPSOnAfterCallbacks());
+    
+    // Create Extend Config Time Characteristic
+    pExtendConfigTimeCharacteristic = pService->createCharacteristic(
+      EXTEND_CONFIG_TIME_CHAR_UUID,
+      NIMBLE_PROPERTY::WRITE
+    );
+    pExtendConfigTimeCharacteristic->setCallbacks(new ExtendConfigTimeCallbacks());
+    
     // Start the service
     pService->start();
     
@@ -419,6 +523,8 @@ public:
     initialPositionReceived = false;
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
+    gpsOnAfterReceived = false;
+    configTimeExtension = 0; // Reset extension time
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
     
@@ -482,6 +588,11 @@ public:
     return deviceConnected;
   }
   
+  // Get configuration time extension (in milliseconds)
+  static unsigned long long getConfigTimeExtension() {
+    return configTimeExtension;
+  }
+  
   // Restart advertising
   static void restartAdvertising() {
     if (!deviceConnected && !bleDisabled) {
@@ -530,6 +641,8 @@ public:
     pInitialPositionCharacteristic = nullptr;
     pGPSReadCycleCharacteristic = nullptr;
     pGPSAccuracyThresholdCharacteristic = nullptr;
+    pGPSOnAfterCharacteristic = nullptr;
+    pExtendConfigTimeCharacteristic = nullptr;
     
     // Set disabled flag
     bleDisabled = true;
@@ -657,6 +770,8 @@ NimBLECharacteristic* BLEConfig::pCurrentSSIDCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pInitialPositionCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pGPSReadCycleCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pGPSAccuracyThresholdCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pGPSOnAfterCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pExtendConfigTimeCharacteristic = nullptr;
 bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
@@ -666,12 +781,15 @@ uint32_t BLEConfig::receivedCycleTime = 900;
 String BLEConfig::receivedInitialPosition = "";
 uint32_t BLEConfig::receivedGPSReadCycle = 0;
 float BLEConfig::receivedGPSAccuracyThreshold = 0.0;
+uint32_t BLEConfig::receivedGPSOnAfter = 60;
 bool BLEConfig::credentialsReceived = false;
 bool BLEConfig::gpsActiveReceived = false;
 bool BLEConfig::cycleTimeReceived = false;
 bool BLEConfig::initialPositionReceived = false;
 bool BLEConfig::gpsReadCycleReceived = false;
 bool BLEConfig::gpsAccuracyThresholdReceived = false;
+bool BLEConfig::gpsOnAfterReceived = false;
+unsigned long long BLEConfig::configTimeExtension = 0;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
 const char* BLEConfig::deviceVersion = "v2.0.0";

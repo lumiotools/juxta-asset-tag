@@ -1,0 +1,167 @@
+CONTEXT:
+
+I have a working ESP32-S3 project with BMI323 IMU sensor connected via I2C. The sensor is already initialized and reading accel/gyro data successfully. The BMI323 interrupt pins (INT1/INT2) have NOT been configured yet.
+
+HARDWARE CONNECTIONS:
+
+- BMI323 INT1 → ESP32-S3 GPIO 6
+- BMI323 INT2 → ESP32-S3 GPIO 7 (optional)
+- I2C already working (SDA/SCL configured)
+
+TASK:
+
+Add deep sleep power management to my existing code:
+
+1. Configure BMI323 interrupts:
+   - Enable INT1 pin: active HIGH, push-pull, latched mode
+   - Configure any-motion detection (threshold adjustable for moderate sensitivity)
+   - Configure no-motion detection
+   - Map any-motion interrupt → INT1
+   - Map no-motion interrupt → INT1 (or INT2 if better)
+
+2. Add motion tracking:
+   - Create ISR for GPIO 6 (motion interrupt)
+   - Track no-motion duration with millis() or timer
+   - Print countdown: "No motion: 1/5 minutes", "2/5 minutes", etc.
+
+3. Deep sleep implementation:
+   - After 5 consecutive minutes of no motion → enter deep sleep
+   - Configure ESP32-S3 ext0 wake: esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 1)
+   - Before sleep: set BMI323 to low-power mode (keep motion detection active)
+   - Power latch management: GPIO 14 (IO14) controls power latch circuit
+     - Before deep sleep: Set IO14 HIGH, enable GPIO hold: gpio_hold_en(GPIO_NUM_14)
+     - This keeps power latch ON during deep sleep (prevents power loss)
+     - After wake-up: Release GPIO hold: gpio_hold_dis(GPIO_NUM_14)
+
+4. Wake-up handling:
+   - Check wake reason: esp_sleep_get_wakeup_cause()
+   - Print wake reason (motion detected vs timer vs other)
+   - Release GPIO hold on IO14: gpio_hold_dis(GPIO_NUM_14) - Critical: must release before using pin normally
+   - Clear BMI323 interrupt status
+   - Resume normal operation
+
+REQUIREMENTS:
+
+- Use BMI323 SensorAPI functions (bmi323_set_int_pin_config, bmi323_map_interrupt, etc.)
+- Include proper error checking (rslt != BMI323_OK)
+- Add Serial.println debug messages for each step
+- Keep code modular - separate functions for sleep/wake/config
+- Preserve all my existing sensor configuration
+- Don't modify my existing I2C read/write functions
+
+CONSTRAINTS:
+
+- Must work with existing BMI323 initialization
+- Must not break current accel/gyro readings
+- Should be copy-paste ready
+- Include all necessary #includes if adding new libraries
+
+
+================================================================================
+IMPLEMENTATION PLAN - Detailed Changes Required
+================================================================================
+
+1. NEW HEADER FILE: motion_sleep_manager.h
+   - Create a dedicated module to handle all motion detection and deep sleep logic
+   - Functions to include:
+     - configureBMI323Interrupts() - Configure INT1/INT2 pins, any-motion, no-motion
+     - setupMotionISR() - Attach ISR to GPIO 6
+     - handleMotionInterrupt() - ISR handler (sets flag, clears interrupt)
+     - trackNoMotionDuration() - Track no-motion time, print countdown
+     - enterDeepSleep() - Configure ESP32 wake sources, set BMI323 low-power, enable GPIO hold on IO14, enter sleep
+     - handleWakeup() - Check wake reason, release GPIO hold on IO14, clear BMI323 interrupts, resume
+
+2. MODIFY imu_sensor.h
+   - Add BMI323 SensorAPI integration (include bmi323.h or equivalent)
+   - Keep existing I2C read/write functions for compatibility
+   - Add new methods:
+     - configureInterrupts() - Use bmi323_set_int_pin_config(), bmi323_map_interrupt()
+     - configureMotionDetection() - Any-motion and no-motion thresholds
+     - setLowPowerMode() - Low-power mode while keeping motion detection active
+     - clearInterruptStatus() - Clear interrupt flags after wake
+   - Preserve existing begin(), update(), getIMUData() functionality
+
+3. MODIFY juxta-asset-tag-main.ino
+   - Add includes:
+     - #include "motion_sleep_manager.h"
+     - BMI323 SensorAPI header (if not in imu_sensor.h)
+   - Add global variables:
+     - volatile bool motionInterruptFlag = false; - ISR flag
+     - unsigned long lastMotionTime = 0; - Track last motion
+     - unsigned long noMotionStartTime = 0; - Start of no-motion period
+     - bool noMotionTracking = false; - Whether tracking no-motion
+     - const unsigned long NO_MOTION_SLEEP_MS = 300000; - 5 minutes
+   - In setup():
+     - After IMU initialization, call configureBMI323Interrupts()
+     - Call setupMotionISR() to attach ISR to GPIO 6
+     - Check wake reason with esp_sleep_get_wakeup_cause()
+     - If wake from motion interrupt, call handleWakeup()
+   - In loop():
+     - Check motionInterruptFlag in main loop (not ISR)
+     - On motion: reset no-motion timer, print "Motion detected"
+     - Call trackNoMotionDuration() periodically
+     - If 5 minutes no-motion: call enterDeepSleep()
+
+4. BMI323 SensorAPI Integration Details
+   - Interrupt pin configuration:
+     - bmi323_set_int_pin_config() - INT1 active HIGH, push-pull, latched
+   - Motion detection:
+     - bmi323_configure_any_motion() - Threshold (e.g., 0.5g), duration
+     - bmi323_configure_no_motion() - Threshold, duration (5 minutes)
+   - Interrupt mapping:
+     - bmi323_map_interrupt() - Map any-motion → INT1, no-motion → INT1 (or INT2)
+   - Low-power mode:
+     - bmi323_set_power_mode() - Suspend accel/gyro but keep motion detection active
+
+5. GPIO Configuration
+   - GPIO 6: Input with pull-down, attach interrupt on RISING edge (BMI323 motion interrupt)
+   - GPIO 7: Optional INT2 (if using separate no-motion interrupt)
+   - GPIO 14 (IO14): Power latch control pin
+     - Must be set HIGH and held during deep sleep to keep power latch ON
+     - Use gpio_hold_en(GPIO_NUM_14) before sleep, gpio_hold_dis(GPIO_NUM_14) after wake
+     - Without hold, power latch will turn off during deep sleep and device won't wake
+
+6. Deep Sleep Configuration
+   - esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 1) - Wake on HIGH
+   - Before sleep: 
+     * Set IO14 HIGH: digitalWrite(14, HIGH); pinMode(14, OUTPUT);
+     * Enable GPIO hold: gpio_hold_en(GPIO_NUM_14); - Keeps power latch ON during sleep
+     * Disable WiFi/BLE, set BMI323 low-power, print "Entering deep sleep..."
+   - After wake: 
+     * Release GPIO hold FIRST: gpio_hold_dis(GPIO_NUM_14); - Critical before using IO14
+     * Check esp_sleep_get_wakeup_cause(), print reason, reinitialize sensors if needed
+
+7. Motion Tracking Logic
+   - On motion interrupt: set flag, record lastMotionTime = millis(), reset noMotionStartTime = 0
+   - In main loop: if millis() - lastMotionTime > threshold, start tracking no-motion
+   - Every minute: print "No motion: X/5 minutes"
+   - After 5 minutes: enter deep sleep
+
+8. Error Handling
+   - Check all BMI323 API return values (rslt != BMI323_OK)
+   - Print error messages for failed configurations
+   - Fallback: if interrupt config fails, continue without deep sleep
+
+9. Integration Points
+   - Preserve existing IMU reading (100Hz ticker)
+   - Motion detection runs in parallel
+   - Deep sleep only after first cycle completes (respect firstCycleComplete flag)
+   - Don't sleep during BLE configuration window
+   - Power latch management: IO14 must be held HIGH during deep sleep to maintain power
+     - GPIO hold is essential - without it, power latch will turn off and device won't wake
+     - Always release hold immediately after wake-up before any IO14 operations
+
+10. Code Structure
+    - Keep modular: separate functions for each feature
+    - Add debug Serial.println() messages at each step
+    - Use existing timing infrastructure (TimeSync::getCurrentTimeMillis())
+
+================================================================================
+NOTES:
+================================================================================
+
+- This will integrate seamlessly with your existing code without breaking current functionality
+- Motion detection runs alongside your 100Hz IMU sampling
+- Deep sleep only activates after the no-motion period
+- All existing sensor readings and transmission cycles remain intact
+
