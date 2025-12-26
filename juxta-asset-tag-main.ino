@@ -196,6 +196,26 @@ void setup() {
   delay(100);
   statusLED.begin();  // Initialize NeoPixel first
   setPixelAndShow(0, 255, 0, 255); // Magenta/Purple on pixel 0 (unique boot color)
+  
+  // Check if waking from deep sleep - handle wake-up FIRST
+  esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
+  bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT0);
+  if (wokeFromDeepSleep) {
+    // Waking from deep sleep due to motion interrupt
+    // Initialize IMU first (needed for wake-up handler to clear interrupt status)
+    Serial.println("Waking from deep sleep - initializing IMU for wake-up handling...");
+    imuInitialized = imuSensor.begin();
+    if (imuInitialized) {
+      MotionSleepManager::handleWakeup(&imuSensor);
+    } else {
+      Serial.println("WARNING: IMU initialization failed on wake-up - calling handleWakeup with nullptr");
+      MotionSleepManager::handleWakeup(nullptr); // Still release GPIO hold
+    }
+  }
+  
+  // Initialize Button Handler early (before button check)
+  ButtonHandler::begin();
+  
   delay(5000); //wait 5 seconds for button to be pressed
   if (ButtonHandler::isPressed()) {
     Serial.println("Button pressed - restarting ESP...");
@@ -254,9 +274,6 @@ void setup() {
   BatteryMonitor::initializeADC();
   delay(100);
   
-  // Initialize Button Handler
-  ButtonHandler::begin();
-  
   // Initialize Status LED first (both pixels on same pin)
   // statusLED.begin();  // Initialize GPIO first!
   statusLED.setBrightness(70);
@@ -268,9 +285,14 @@ void setup() {
   batteryIndicatorLED.updateBatteryLED(); // Initialize state
   delay(100);
   
-  // Initialize IMU sensor
-  Serial.println("Initializing IMU sensor...");
-  imuInitialized = imuSensor.begin();
+  // Initialize IMU sensor (skip if already initialized from wake-up handling)
+  if (!imuInitialized) {
+    Serial.println("Initializing IMU sensor...");
+    imuInitialized = imuSensor.begin();
+  } else {
+    Serial.println("IMU already initialized (from deep sleep wake-up)");
+  }
+  
   if (imuInitialized) {
     Serial.println("IMU initialized successfully");
     

@@ -133,6 +133,10 @@ public:
     blinkStartTime = millis();
   }
 
+  // Update blinking state (call this in loop for non-blocking blink)
+  void update() {
+    updateBlink(); // Call private method to handle blinking
+  }
   
 };
 

@@ -186,8 +186,12 @@ public:
     CustomWiFi::disconnectWiFi();
     
     // Configure power latch (IO14) - CRITICAL for maintaining power during sleep
-    // Note: GPIO 14 pin configuration (pinMode, pull-up/pull-down) should be done in main file
+    // Note: setPowerLatchPin(true) should be called in main file before enterDeepSleep()
+    // This ensures pin is configured as OUTPUT with pull-up and set HIGH
+    // Then we use gpio_hold_en to maintain the state during deep sleep
     Serial.println("Configuring power latch (IO14) for deep sleep...");
+    // Ensure pin is HIGH before holding (should already be set by setPowerLatchPin in main)
+    gpio_set_level(GPIO_NUM_14, 1);  // Ensure HIGH state
     gpio_hold_en(GPIO_NUM_14);  // Hold IO14 HIGH during deep sleep
     Serial.println("Power latch held HIGH - power will remain on during deep sleep");
     
