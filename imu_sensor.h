@@ -1,13 +1,16 @@
 // IMU Sensor Module - BMI323 (I2C) wrapper
+// Integrated with Bosch BMI323 SensorAPI
 
 #ifndef IMU_SENSOR_H
 #define IMU_SENSOR_H
 
 #include <Wire.h>
+// Include Bosch BMI323 library from local libs folder
+#include "libs/BMI3XY_SensorAPI-main/bmi323.h"
 
 // IMU pin definitions
-#define I2C_SDA_PIN D4     // IMU_SDA
-#define I2C_SCL_PIN D5     // IMU_SCL
+#define I2C_SDA_PIN 0     // IMU_SDA
+#define I2C_SCL_PIN 1     // IMU_SCL
 
 // Structure to hold all IMU data
 struct IMUData {
@@ -23,16 +26,22 @@ struct IMUData {
   float temperature;
 };
 
-// I2C constants and registers (BMI323-ish sensor used in test/imu.ino)
+// I2C constants
 #define IMU_I2C_ADDRESS 0x69
-#define IMU_ACC_CONF  0x20  // Page 91 in BMI323
-#define IMU_GYR_CONF  0x21  // Page 93 in BMI323
-#define IMU_CMD       0x7E  // Page 65 in BMI323
+
+// Forward declarations for I2C interface functions
+extern "C" {
+  int8_t bmi3_i2c_read_wrapper(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
+  int8_t bmi3_i2c_write_wrapper(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
+  void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr);
+}
 
 class IMUSensor {
 private:
   IMUData data;
-  // No internal `isInitialized` flag; callers may track initialization status using `begin()` return value.
+  struct bmi3_dev bmi3Device;  // Bosch API device structure
+  bool boschApiInitialized = false;
+  
   // Storage for converted values
   float accelX_m_s2 = 0.0f;
   float accelY_m_s2 = 0.0f;
@@ -42,18 +51,52 @@ private:
   float gyroZ_dps = 0.0f;
   float temperature_c = 0.0f;
 
+  // Initialize Bosch API device structure with I2C interface
+  bool initializeBoschAPI() {
+    // Initialize I2C with custom pins
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    Wire.setClock(400000); // 400kHz I2C speed
+    delay(100);
+
+    // Initialize Bosch API device structure
+    memset(&bmi3Device, 0, sizeof(bmi3Device));
+    
+    // Set interface type
+    bmi3Device.intf = BMI3_I2C_INTF;
+    
+    // Set I2C address
+    uint8_t dev_addr = IMU_I2C_ADDRESS;
+    bmi3Device.intf_ptr = &dev_addr;
+    
+    // Set function pointers
+    bmi3Device.read = bmi3_i2c_read_wrapper;
+    bmi3Device.write = bmi3_i2c_write_wrapper;
+    bmi3Device.delay_us = bmi3_delay_us_wrapper;
+    
+    // Set read/write length
+    bmi3Device.read_write_len = 8;
+    
+    // Initialize BMI323 using Bosch API
+    int8_t rslt = bmi323_init(&bmi3Device);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: BMI323 initialization failed with code: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    Serial.println("BMI323 initialized successfully using Bosch API");
+    boschApiInitialized = true;
+    return true;
+  }
+
   // Check if IMU device is connected on I2C bus
   bool checkDeviceConnection() {
     Wire.beginTransmission(IMU_I2C_ADDRESS);
     uint8_t error = Wire.endTransmission();
     
     if (error == 0) {
-      // Device responded, verify by reading a register
-      uint16_t chipId = readRegister16(0x00); // Try to read chip ID register (if available)
-      // If we got here without I2C error, device is present
       return true;
     } else {
-      // Device not found (NACK)
       return false;
     }
   }
@@ -68,11 +111,6 @@ public:
     Serial.print(I2C_SCL_PIN);
     Serial.println(")...");
 
-    // Initialize I2C with custom pins
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-    Wire.setClock(400000); // 400kHz I2C speed
-    delay(100);
-
     // Check if device is connected
     if (!checkDeviceConnection()) {
       Serial.println("ERROR: IMU device not detected on I2C bus!");
@@ -82,34 +120,76 @@ public:
       return false;
     }
 
-    Serial.println("IMU device detected, configuring...");
-    softReset();
+    Serial.println("IMU device detected, initializing Bosch API...");
+    
+    // Initialize Bosch API
+    if (!initializeBoschAPI()) {
+      return false;
+    }
 
-    // Configure ACC and GYR registers -- these are the same values used in test/imu.ino
-    writeRegister16(IMU_ACC_CONF, 0x753D);  // accelerometer settings
-    writeRegister16(IMU_GYR_CONF, 0x758D);  // gyroscope settings
-    delay(500); 
-
-    // Verify configuration by reading back
-    uint16_t accConf = readRegister16(IMU_ACC_CONF);
-    uint16_t gyrConf = readRegister16(IMU_GYR_CONF);
-
-    Serial.print("ACC Conf: ");
-    Serial.println(accConf, HEX);
-    Serial.print("GYR Conf: ");
-    Serial.println(gyrConf, HEX);
-
-    // if (accConf == 0x0000 && gyrConf == 0x0000) {
-    //   Serial.println("WARNING: IMU register readback failed - device may not be responding correctly");
-    //   return false;
-    // }
-
+    // Configure accelerometer and gyroscope using Bosch API
+    struct bmi3_sens_config config[2] = { { 0 } };
+    
+    config[0].type = BMI323_ACCEL;
+    config[1].type = BMI323_GYRO;
+    
+    // Get default configurations
+    int8_t rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to get sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    // Configure accelerometer: Normal mode, 100Hz ODR, ±2g range
+    config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;  // Enable accel by setting mode
+    config[0].cfg.acc.odr = BMI3_ACC_ODR_100HZ;
+    config[0].cfg.acc.range = BMI3_ACC_RANGE_2G;
+    config[0].cfg.acc.bwp = BMI3_ACC_BW_ODR_QUARTER;
+    config[0].cfg.acc.avg_num = BMI3_ACC_AVG4;
+    
+    // Configure gyroscope: Normal mode, 100Hz ODR, ±125dps range
+    config[1].cfg.gyr.gyr_mode = BMI3_GYR_MODE_NORMAL;  // Enable gyro by setting mode
+    config[1].cfg.gyr.odr = BMI3_GYR_ODR_100HZ;
+    config[1].cfg.gyr.range = BMI3_GYR_RANGE_125DPS;
+    config[1].cfg.gyr.bwp = BMI3_GYR_BW_ODR_HALF;
+    config[1].cfg.gyr.avg_num = BMI3_GYR_AVG1;
+    
+    // Set configurations
+    rslt = bmi323_set_sensor_config(config, 2, &bmi3Device);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to set sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    // Sensors are enabled by setting their mode (acc_mode/gyr_mode) above
+    // No need to call bmi323_select_sensor for basic accel/gyro
+    
+    delay(100); // Allow sensor to stabilize
+    
     Serial.println("IMU sensor initialized successfully");
     return true;
   }
   
+  // Get Bosch API device structure (for motion detection configuration)
+  struct bmi3_dev* getBoschDevice() {
+    if (boschApiInitialized) {
+      return &bmi3Device;
+    }
+    return nullptr;
+  }
+  
+  // Check if Bosch API is initialized
+  bool isBoschApiInitialized() {
+    return boschApiInitialized;
+  }
+  
   // This function is used to update the IMU data and read data from the IMU.
   void update() {
+    if (!boschApiInitialized) {
+      return;
+    }
 
     readAllSensors();
 
@@ -122,8 +202,6 @@ public:
     data.gyroscope.y = gyroY_dps;
     data.gyroscope.z = gyroZ_dps;
 
-    // No quaternion/euler or magnetometer data available from this simple I2C read
-
     // Temperature not stored (disabled for CSV format)
     // data.temperature = temperature_c;
   }
@@ -131,92 +209,98 @@ public:
   IMUData getIMUData() {
     return data;
   }
-  
-  // Public access to register read/write for motion detection configuration
-  // These methods allow motion_sleep_manager to configure interrupts
-  void writeRegister16Public(uint8_t reg, uint16_t value) {
-    writeRegister16(reg, value);
-  }
-  
-  uint16_t readRegister16Public(uint8_t reg) {
-    return readRegister16(reg);
-  }
 
 private:
-  // Soft reset similar to test/imu.ino
-  void softReset(){ 
-    writeRegister16(IMU_CMD, 0xDEAF);
-    delay(50);
-  }
-
-  // Write 16-bit register via I2C
-  void writeRegister16(uint16_t reg, uint16_t value) {
-    Wire.beginTransmission(IMU_I2C_ADDRESS);
-    Wire.write((uint8_t)reg);
-    // Low
-    Wire.write(value & 0xFF);
-    // High
-    Wire.write((value >> 8) & 0xFF);
-    Wire.endTransmission();
-  }
-
-  // Read 16-bit register via I2C
-  uint16_t readRegister16(uint8_t reg) {
-    Wire.beginTransmission(IMU_I2C_ADDRESS);
-    Wire.write(reg);
-    Wire.endTransmission(false);
-
-    Wire.requestFrom(IMU_I2C_ADDRESS, (uint8_t)2);
-    uint8_t lo = 0, hi = 0;
-    if (Wire.available()) lo = Wire.read();
-    if (Wire.available()) hi = Wire.read();
-
-    return (uint16_t)(lo | (hi << 8));
-  }
-
-  // Read accel/gyro/temp block beginning at register 0x03
+  // Read accel/gyro/temp using Bosch API
   void readAllSensors() {
-    Wire.beginTransmission(IMU_I2C_ADDRESS);
-    Wire.write(0x03);   // ACC data start
-    Wire.endTransmission(false);
-
-    Wire.requestFrom(IMU_I2C_ADDRESS, (uint8_t)16);  // now reading 16 bytes
-    uint8_t dataRaw[16];
-    int i = 0;
-    while (Wire.available() && i < 16) {
-      dataRaw[i++] = Wire.read();
+    if (!boschApiInitialized) {
+      return;
     }
 
-    int offset = 2;  // discard dummy bytes
-
-    int16_t x = (int16_t)(dataRaw[offset + 0] | (dataRaw[offset + 1] << 8));
-    int16_t y = (int16_t)(dataRaw[offset + 2] | (dataRaw[offset + 3] << 8));
-    int16_t z = (int16_t)(dataRaw[offset + 4] | (dataRaw[offset + 5] << 8));
-
-    int16_t gyro_x = (int16_t)(dataRaw[offset + 6]  | (dataRaw[offset + 7]  << 8));
-    int16_t gyro_y = (int16_t)(dataRaw[offset + 8]  | (dataRaw[offset + 9]  << 8));
-    int16_t gyro_z = (int16_t)(dataRaw[offset + 10] | (dataRaw[offset + 11] << 8));
-
-    int16_t temp_raw = (int16_t)(dataRaw[offset + 12] | (dataRaw[offset + 13] << 8));
-
-    accelX_m_s2 = lsbToM2S(x);
-    accelY_m_s2 = lsbToM2S(y);
-    accelZ_m_s2 = lsbToM2S(z);
-
-    const float GYRO_SENS_125DPS = 262.1f; // as in test/imu.ino
-    gyroX_dps = gyro_x / GYRO_SENS_125DPS;
-    gyroY_dps = gyro_y / GYRO_SENS_125DPS;
-    gyroZ_dps = gyro_z / GYRO_SENS_125DPS;
-
-    temperature_c = (float)temp_raw / 512.0f + 23.0f;
-  }
-
-  // Convert LSB to m/s^2
-  float lsbToM2S(int16_t rawData) {
-    const float sensitivity = 16384.0f; // for ±2g
+    struct bmi3_sensor_data sensor_data[2] = { { 0 } };
+    
+    sensor_data[0].type = BMI323_ACCEL;
+    sensor_data[1].type = BMI323_GYRO;
+    
+    int8_t rslt = bmi323_get_sensor_data(sensor_data, 2, &bmi3Device);
+    if (rslt != BMI323_OK) {
+      // Error reading sensor data
+      return;
+    }
+    
+    // Convert accelerometer data (LSB to m/s^2)
+    // For ±2g range: 16384 LSB/g
+    const float accelSensitivity = 16384.0f; // LSB/g for ±2g
     const float gToM2S = 9.80665f;
-    return (rawData / sensitivity) * gToM2S;
+    
+    accelX_m_s2 = ((float)sensor_data[0].sens_data.acc.x / accelSensitivity) * gToM2S;
+    accelY_m_s2 = ((float)sensor_data[0].sens_data.acc.y / accelSensitivity) * gToM2S;
+    accelZ_m_s2 = ((float)sensor_data[0].sens_data.acc.z / accelSensitivity) * gToM2S;
+    
+    // Convert gyroscope data (LSB to dps)
+    // For ±125dps range: 262.144 LSB/dps
+    const float gyroSensitivity = 262.144f; // LSB/dps for ±125dps
+    
+    gyroX_dps = (float)sensor_data[1].sens_data.gyr.x / gyroSensitivity;
+    gyroY_dps = (float)sensor_data[1].sens_data.gyr.y / gyroSensitivity;
+    gyroZ_dps = (float)sensor_data[1].sens_data.gyr.z / gyroSensitivity;
+    
+    // Read temperature if needed (as part of sensor data)
+    struct bmi3_sensor_data temp_sensor = { 0 };
+    temp_sensor.type = BMI323_TEMP;
+    int8_t temp_rslt = bmi323_get_sensor_data(&temp_sensor, 1, &bmi3Device);
+    if (temp_rslt == BMI323_OK) {
+      temperature_c = (float)temp_sensor.sens_data.temp.temp_data / 512.0f + 23.0f;
+    }
   }
 };
+
+// I2C interface wrapper functions for Bosch API
+// These functions bridge Arduino Wire library with Bosch API
+
+extern "C" {
+  int8_t bmi3_i2c_read_wrapper(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+    uint8_t device_addr = *(uint8_t*)intf_ptr;
+    
+    Wire.beginTransmission(device_addr);
+    Wire.write(reg_addr);
+    if (Wire.endTransmission(false) != 0) {
+      return -1; // Communication error
+    }
+    
+    Wire.requestFrom(device_addr, (uint8_t)len);
+    uint32_t i = 0;
+    while (Wire.available() && i < len) {
+      reg_data[i++] = Wire.read();
+    }
+    
+    if (i != len) {
+      return -1; // Didn't read all bytes
+    }
+    
+    return 0; // Success
+  }
+  
+  int8_t bmi3_i2c_write_wrapper(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+    uint8_t device_addr = *(uint8_t*)intf_ptr;
+    
+    Wire.beginTransmission(device_addr);
+    Wire.write(reg_addr);
+    for (uint32_t i = 0; i < len; i++) {
+      Wire.write(reg_data[i]);
+    }
+    
+    if (Wire.endTransmission() != 0) {
+      return -1; // Communication error
+    }
+    
+    return 0; // Success
+  }
+  
+  void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr) {
+    (void)intf_ptr; // Unused
+    delayMicroseconds(period);
+  }
+}
 
 #endif

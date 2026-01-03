@@ -1,5 +1,5 @@
 // Motion Sleep Manager - Handles motion detection and deep sleep power management
-// Integrates BMI323 motion detection with ESP32-S3 deep sleep
+// Integrates BMI323 motion detection with ESP32-C6 deep sleep
 
 #ifndef MOTION_SLEEP_MANAGER_H
 #define MOTION_SLEEP_MANAGER_H
@@ -11,19 +11,31 @@
 #include "ble_config.h"
 #include "customwifi.h"
 #include "driver/gpio.h"
+// Include Bosch BMI323 library from local libs folder
+#include "libs/BMI3XY_SensorAPI-main/bmi323.h"
 
 // GPIO pin definitions
-#define MOTION_INT_PIN D6      // BMI323 INT1 → ESP32-S3 GPIO 6
-#define MOTION_INT2_PIN D7     // BMI323 INT2 → ESP32-S3 GPIO 7 (optional)
-#define POWER_LATCH_PIN D14    // Power latch control pin (IO14)
+#define MOTION_INT_PIN 22     // BMI323 INT1 → ESP32-C6 GPIO 22
+// Note: MOTION_INT2_PIN removed - not required
+#define POWER_LATCH_PIN 4     // Power latch control pin (IO4)
 
 // Timing constants
-#define NO_MOTION_SLEEP_MS 300000  // 5 minutes in milliseconds
-#define NO_MOTION_COUNTDOWN_INTERVAL_MS 60000  // Print countdown every 1 minute
+#define NO_MOTION_SLEEP_MS 300000  // 5 minutes in milliseconds (300 seconds)
+#define NO_MOTION_COUNTDOWN_INTERVAL_MS 30000  // Print countdown every 30 seconds
 
 // Motion detection thresholds (adjustable)
-#define ANY_MOTION_THRESHOLD 0.5f  // 0.5g threshold for any-motion detection
-#define NO_MOTION_THRESHOLD 0.1f   // 0.1g threshold for no-motion detection
+// Note: These are converted to slope_thres values for Bosch API
+// slope_thres range: 0-4095 (higher = more sensitive)
+// Approximate conversion: 0.1g ≈ 1638 LSB, but slope_thres is different
+// Using values from example: slope_thres = 9 for moderate sensitivity
+#define ANY_MOTION_SLOPE_THRES 9      // Slope threshold for any-motion (0-4095)
+#define NO_MOTION_SLOPE_THRES 9       // Slope threshold for no-motion (0-4095)
+#define MOTION_HYSTERESIS 5            // Hysteresis (0-1023)
+#define MOTION_WAIT_TIME 5             // Wait time (0-7)
+// Duration: 5 minutes = 300 seconds = 300 * 50Hz = 15000 samples (at 50Hz ODR)
+// But we'll use a shorter duration and let hardware trigger, then track in software
+#define NO_MOTION_DURATION_SAMPLES 15000  // 5 minutes at 50Hz (300s * 50)
+#define ANY_MOTION_DURATION_SAMPLES 1     // Immediate detection
 
 // Global motion tracking variables
 extern volatile bool motionInterruptFlag;
@@ -37,77 +49,142 @@ private:
   static bool motionISRAttached;
   
 public:
-  // Configure BMI323 interrupts for motion detection
+  // Configure BMI323 interrupts for motion detection using Bosch API
   // Returns true if successful, false otherwise
   static bool configureBMI323Interrupts(IMUSensor* imu) {
-    if (imu == nullptr) {
-      Serial.println("ERROR: IMU sensor not available for interrupt configuration");
+    if (imu == nullptr || !imu->isBoschApiInitialized()) {
+      Serial.println("ERROR: IMU sensor not available or Bosch API not initialized");
       return false;
     }
     
-    Serial.println("Configuring BMI323 interrupts for motion detection...");
+    struct bmi3_dev* dev = imu->getBoschDevice();
+    if (dev == nullptr) {
+      Serial.println("ERROR: Failed to get Bosch device structure");
+      return false;
+    }
     
-    // Note: This implementation uses direct register access
-    // BMI323 interrupt configuration registers need to be set based on datasheet
-    // The actual register addresses and values may need adjustment
+    Serial.println("Configuring BMI323 interrupts for motion detection using Bosch API...");
+    
+    int8_t rslt;
     
     // Configure INT1 pin: active HIGH, push-pull, latched mode
-    // Register 0x53: INT1_IO_CTRL
-    // Bit 0: INT1 output enable (1 = enabled)
-    // Bit 1: INT1 output type (0 = push-pull, 1 = open-drain)
-    // Bit 2: INT1 active level (0 = active LOW, 1 = active HIGH)
-    // Bit 3: INT1 latch (0 = pulsed, 1 = latched)
-    // Value: 0x0F = enabled, push-pull, active HIGH, latched
-    uint16_t int1Config = 0x0F;  // Enable, push-pull, HIGH, latched
-    imu->writeRegister16Public(0x53, int1Config);
-    Serial.println("INT1 pin configured: active HIGH, push-pull, latched");
+    struct bmi3_int_pin_config int_cfg = { 0 };
+    int_cfg.pin_type = BMI3_INT1;
+    int_cfg.int_latch = BMI3_INT_NON_LATCH;  // Non-latched (pulsed) for immediate detection
+    int_cfg.pin_cfg[0].lvl = BMI3_INT_ACTIVE_HIGH;
+    int_cfg.pin_cfg[0].od = BMI3_INT_PUSH_PULL;
+    int_cfg.pin_cfg[0].output_en = BMI3_INT_OUTPUT_ENABLE;
+    
+    rslt = bmi3_set_int_pin_config(&int_cfg, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to configure INT1 pin: ");
+      Serial.println(rslt);
+      return false;
+    }
+    Serial.println("INT1 pin configured: active HIGH, push-pull, non-latched");
+    
+    // Configure accelerometer (required for motion detection)
+    struct bmi3_sens_config config[3] = { { 0 } };
+    config[0].type = BMI323_ACCEL;
+    config[1].type = BMI323_ANY_MOTION;
+    config[2].type = BMI323_NO_MOTION;
+    
+    // Get default configurations
+    rslt = bmi323_get_sensor_config(config, 3, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to get sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    // Configure accelerometer (ensure it's enabled)
+    config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;  // Enable accel
+    config[0].cfg.acc.odr = BMI3_ACC_ODR_50HZ;  // 50Hz for motion detection
+    config[0].cfg.acc.range = BMI3_ACC_RANGE_2G;
+    config[0].cfg.acc.bwp = BMI3_ACC_BW_ODR_QUARTER;
+    config[0].cfg.acc.avg_num = BMI3_ACC_AVG4;
     
     // Configure any-motion detection
-    // Register 0x5C: ANY_MOTION_CONFIG
-    // Threshold and duration settings
-    // Threshold: 0.5g = ~8192 LSB (for ±2g range, 16384 LSB/g)
-    uint16_t anyMotionThreshold = (uint16_t)(ANY_MOTION_THRESHOLD * 16384.0f);
-    uint16_t anyMotionConfig = (anyMotionThreshold & 0x7FFF) | 0x8000; // Enable + threshold
-    imu->writeRegister16Public(0x5C, anyMotionConfig);
-    Serial.print("Any-motion threshold configured: ");
-    Serial.print(ANY_MOTION_THRESHOLD);
-    Serial.println("g");
+    config[1].cfg.any_motion.slope_thres = ANY_MOTION_SLOPE_THRES;
+    config[1].cfg.any_motion.hysteresis = MOTION_HYSTERESIS;
+    config[1].cfg.any_motion.duration = ANY_MOTION_DURATION_SAMPLES;
+    config[1].cfg.any_motion.acc_ref_up = 1;  // Always update reference
+    config[1].cfg.any_motion.wait_time = MOTION_WAIT_TIME;
     
     // Configure no-motion detection
-    // Register 0x5D: NO_MOTION_CONFIG
-    // Threshold: 0.1g, Duration: 5 minutes (300 seconds)
-    // Duration in samples at 800Hz ODR: 300 * 800 = 240000 samples
-    uint16_t noMotionThreshold = (uint16_t)(NO_MOTION_THRESHOLD * 16384.0f);
-    uint16_t noMotionConfig = (noMotionThreshold & 0x7FFF) | 0x8000; // Enable + threshold
-    imu->writeRegister16Public(0x5D, noMotionConfig);
-    Serial.print("No-motion threshold configured: ");
-    Serial.print(NO_MOTION_THRESHOLD);
-    Serial.println("g");
+    // Note: We'll use a shorter hardware duration and track the full 5 minutes in software
+    // This allows us to get interrupts for any-motion to reset the timer
+    config[2].cfg.no_motion.slope_thres = NO_MOTION_SLOPE_THRES;
+    config[2].cfg.no_motion.hysteresis = MOTION_HYSTERESIS;
+    config[2].cfg.no_motion.duration = NO_MOTION_DURATION_SAMPLES;  // 5 minutes at 50Hz
+    config[2].cfg.no_motion.acc_ref_up = 1;  // Always update reference
+    config[2].cfg.no_motion.wait_time = MOTION_WAIT_TIME;
+    
+    // Set configurations
+    rslt = bmi323_set_sensor_config(config, 3, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to set sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    Serial.print("Any-motion configured: slope_thres=");
+    Serial.print(ANY_MOTION_SLOPE_THRES);
+    Serial.print(", duration=");
+    Serial.println(ANY_MOTION_DURATION_SAMPLES);
+    
+    Serial.print("No-motion configured: slope_thres=");
+    Serial.print(NO_MOTION_SLOPE_THRES);
+    Serial.print(", duration=");
+    Serial.print(NO_MOTION_DURATION_SAMPLES);
+    Serial.println(" samples (5 minutes at 50Hz)");
+    
+    // Enable any-motion and no-motion features
+    struct bmi3_feature_enable feature = { 0 };
+    feature.any_motion_x_en = BMI323_ENABLE;
+    feature.any_motion_y_en = BMI323_ENABLE;
+    feature.any_motion_z_en = BMI323_ENABLE;
+    feature.no_motion_x_en = BMI323_ENABLE;
+    feature.no_motion_y_en = BMI323_ENABLE;
+    feature.no_motion_z_en = BMI323_ENABLE;
+    
+    rslt = bmi323_select_sensor(&feature, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to enable motion features: ");
+      Serial.println(rslt);
+      return false;
+    }
+    Serial.println("Motion features enabled");
     
     // Map interrupts to INT1
-    // Register 0x58: INT_MAP_DATA
-    // Bit 0: Any-motion → INT1
-    // Bit 1: No-motion → INT1
-    uint16_t intMap = 0x03; // Map both any-motion and no-motion to INT1
-    imu->writeRegister16Public(0x58, intMap);
+    struct bmi3_map_int map_int = { 0 };
+    map_int.any_motion_out = BMI3_INT1;
+    map_int.no_motion_out = BMI3_INT1;
+    
+    rslt = bmi323_map_interrupt(map_int, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to map interrupts: ");
+      Serial.println(rslt);
+      return false;
+    }
     Serial.println("Interrupts mapped to INT1");
     
     interruptsConfigured = true;
-    Serial.println("BMI323 interrupt configuration complete");
+    Serial.println("BMI323 interrupt configuration complete using Bosch API");
     return true;
   }
   
-  // Setup motion interrupt ISR on GPIO 6
+  // Setup motion interrupt ISR on GPIO 22
   static void setupMotionISR() {
     if (motionISRAttached) {
       return; // Already attached
     }
     
-    Serial.println("Setting up motion interrupt ISR on GPIO 6...");
+    Serial.println("Setting up motion interrupt ISR on GPIO 22...");
     pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);
     attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), handleMotionInterrupt, RISING);
     motionISRAttached = true;
-    Serial.println("Motion ISR attached to GPIO 6 (RISING edge)");
+    Serial.println("Motion ISR attached to GPIO 22 (RISING edge)");
   }
   
   // ISR handler for motion interrupt (called from interrupt context)
@@ -117,19 +194,46 @@ public:
   
   // Track no-motion duration and print countdown
   // Returns true if 5 minutes of no-motion elapsed, false otherwise
-  static bool trackNoMotionDuration() {
+  // Now uses hardware no-motion interrupt from BMI323
+  static bool trackNoMotionDuration(IMUSensor* imu) {
     unsigned long currentTime = TimeSync::getCurrentTimeMillis();
     
-    // Check if motion was detected
+    // Check if motion interrupt was detected (any-motion or no-motion)
     if (motionInterruptFlag) {
       motionInterruptFlag = false; // Clear flag
-      lastMotionTime = currentTime;
-      noMotionStartTime = 0;
-      noMotionTracking = false;
-      Serial.println("Motion detected - resetting no-motion timer");
+      
+      // Read interrupt status to determine which interrupt occurred
+      if (imu != nullptr && imu->isBoschApiInitialized()) {
+        struct bmi3_dev* dev = imu->getBoschDevice();
+        if (dev != nullptr) {
+          uint16_t int_status = 0;
+          int8_t rslt = bmi323_get_int1_status(&int_status, dev);
+          
+          if (rslt == BMI323_OK) {
+            if (int_status & BMI3_INT_STATUS_ANY_MOTION) {
+              // Any-motion detected - reset no-motion timer
+              lastMotionTime = currentTime;
+              noMotionStartTime = 0;
+              noMotionTracking = false;
+              Serial.println("Any-motion detected - resetting no-motion timer");
+            } else if (int_status & BMI3_INT_STATUS_NO_MOTION) {
+              // Hardware no-motion interrupt - device has been still for configured duration
+              Serial.println("Hardware no-motion interrupt detected - ready for deep sleep");
+              return true;
+            }
+          }
+        }
+      } else {
+        // Fallback: treat any interrupt as motion
+        lastMotionTime = currentTime;
+        noMotionStartTime = 0;
+        noMotionTracking = false;
+        Serial.println("Motion interrupt detected - resetting no-motion timer");
+      }
       return false;
     }
     
+    // Software-based tracking as backup (if hardware interrupt doesn't fire)
     // Start tracking no-motion if enough time has passed since last motion
     if (lastMotionTime > 0 && (currentTime - lastMotionTime) > 1000) { // 1 second threshold
       if (!noMotionTracking) {
@@ -143,7 +247,7 @@ public:
       unsigned long minutesElapsed = noMotionElapsed / 60000;
       unsigned long totalMinutes = NO_MOTION_SLEEP_MS / 60000;
       
-      // Print countdown every minute
+      // Print countdown every 30 seconds
       static unsigned long lastCountdownPrint = 0;
       if (noMotionElapsed - lastCountdownPrint >= NO_MOTION_COUNTDOWN_INTERVAL_MS) {
         lastCountdownPrint = noMotionElapsed;
@@ -154,9 +258,9 @@ public:
         Serial.println(" minutes");
       }
       
-      // Check if 5 minutes elapsed
+      // Check if 5 minutes elapsed (software fallback)
       if (noMotionElapsed >= NO_MOTION_SLEEP_MS) {
-        Serial.println("5 minutes of no motion - ready for deep sleep");
+        Serial.println("5 minutes of no motion (software timer) - ready for deep sleep");
         return true;
       }
     }
@@ -169,13 +273,31 @@ public:
     Serial.println("\n========== ENTERING DEEP SLEEP ==========");
     
     // Set BMI323 to low-power mode (keep motion detection active)
-    if (imu != nullptr) {
+    if (imu != nullptr && imu->isBoschApiInitialized()) {
       Serial.println("Setting BMI323 to low-power mode...");
-      // Register 0x7C: PWR_CONF
-      // Set to suspend mode but keep motion detection active
-      // This may need adjustment based on actual BMI323 register map
-      // For now, we'll keep it in normal mode but reduce ODR if possible
-      Serial.println("BMI323 low-power mode configured (motion detection active)");
+      struct bmi3_dev* dev = imu->getBoschDevice();
+      if (dev != nullptr) {
+        // Note: BMI323 motion detection should remain active in low-power modes
+        // The accelerometer needs to stay active for motion detection
+        // We can reduce ODR but keep accel enabled
+        struct bmi3_sens_config config = { 0 };
+        config.type = BMI323_ACCEL;
+        
+        int8_t rslt = bmi323_get_sensor_config(&config, 1, dev);
+        if (rslt == BMI323_OK) {
+          // Reduce ODR to save power while keeping motion detection
+          config.cfg.acc.odr = BMI3_ACC_ODR_50HZ;  // Lower ODR for power saving
+          config.cfg.acc.acc_mode = BMI3_ACC_MODE_LOW_PWR;  // Low power mode
+          
+          rslt = bmi323_set_sensor_config(&config, 1, dev);
+          if (rslt == BMI323_OK) {
+            Serial.println("BMI323 set to low-power mode (motion detection active)");
+          } else {
+            Serial.print("Warning: Failed to set low-power mode: ");
+            Serial.println(rslt);
+          }
+        }
+      }
     }
     
     // Disable WiFi/BLE before sleep
@@ -185,20 +307,22 @@ public:
     }
     CustomWiFi::disconnectWiFi();
     
-    // Configure power latch (IO14) - CRITICAL for maintaining power during sleep
+    // Configure power latch (IO4) - CRITICAL for maintaining power during sleep
     // Note: setPowerLatchPin(true) should be called in main file before enterDeepSleep()
     // This ensures pin is configured as OUTPUT with pull-up and set HIGH
     // Then we use gpio_hold_en to maintain the state during deep sleep
-    Serial.println("Configuring power latch (IO14) for deep sleep...");
+    Serial.println("Configuring power latch (IO4) for deep sleep...");
     // Ensure pin is HIGH before holding (should already be set by setPowerLatchPin in main)
-    gpio_set_level(GPIO_NUM_14, 1);  // Ensure HIGH state
-    gpio_hold_en(GPIO_NUM_14);  // Hold IO14 HIGH during deep sleep
+    gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+    gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep
     Serial.println("Power latch held HIGH - power will remain on during deep sleep");
     
-    // Configure ESP32-S3 wake sources
+    // Configure ESP32-C6 wake sources
+    // ESP32-C6 only supports EXT1 wakeup (not EXT0)
+    // Note: GPIO 22 is used for motion interrupt wakeup
     Serial.println("Configuring wake sources...");
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_6, 1); // Wake on HIGH (motion interrupt)
-    Serial.println("Wake source: GPIO 6 (motion interrupt)");
+    esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_22), ESP_EXT1_WAKEUP_ANY_HIGH); // Wake on HIGH (motion interrupt)
+    Serial.println("Wake source: GPIO 22 (motion interrupt)");
     
     Serial.println("Entering deep sleep...");
     Serial.flush(); // Ensure all messages are sent before sleep
@@ -213,20 +337,20 @@ public:
   static void handleWakeup(IMUSensor* imu) {
     Serial.println("\n========== WAKING FROM DEEP SLEEP ==========");
     
-    // Release GPIO hold on IO14 FIRST - CRITICAL before using pin normally
-    Serial.println("Releasing GPIO hold on IO14...");
-    gpio_hold_dis(GPIO_NUM_14);
+    // Release GPIO hold on IO4 FIRST - CRITICAL before using pin normally
+    Serial.println("Releasing GPIO hold on IO4...");
+    gpio_hold_dis(GPIO_NUM_4);
     Serial.println("GPIO hold released");
     
     // Check wake reason
     esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
     Serial.print("Wake reason: ");
     switch (wakeReason) {
-      case ESP_SLEEP_WAKEUP_EXT0:
-        Serial.println("Motion interrupt (GPIO 6)");
-        break;
       case ESP_SLEEP_WAKEUP_EXT1:
-        Serial.println("External signal (EXT1)");
+        Serial.println("Motion interrupt (GPIO 22)");
+        break;
+      case ESP_SLEEP_WAKEUP_EXT0:
+        Serial.println("External signal (EXT0)");
         break;
       case ESP_SLEEP_WAKEUP_TIMER:
         Serial.println("Timer");
@@ -242,14 +366,22 @@ public:
         break;
     }
     
-    // Clear BMI323 interrupt status
-    if (imu != nullptr) {
+    // Clear BMI323 interrupt status using Bosch API
+    if (imu != nullptr && imu->isBoschApiInitialized()) {
       Serial.println("Clearing BMI323 interrupt status...");
-      // Register 0x1C: INT_STATUS_0 (interrupt status)
-      // Reading this register clears the interrupt flags
-      uint16_t intStatus = imu->readRegister16Public(0x1C);
-      Serial.print("Interrupt status: 0x");
-      Serial.println(intStatus, HEX);
+      struct bmi3_dev* dev = imu->getBoschDevice();
+      if (dev != nullptr) {
+        uint16_t int_status = 0;
+        // Reading interrupt status clears it (clear-on-read)
+        int8_t rslt = bmi323_get_int1_status(&int_status, dev);
+        if (rslt == BMI323_OK) {
+          Serial.print("Interrupt status: 0x");
+          Serial.println(int_status, HEX);
+        } else {
+          Serial.print("Warning: Failed to read interrupt status: ");
+          Serial.println(rslt);
+        }
+      }
     }
     
     // Reset motion tracking variables

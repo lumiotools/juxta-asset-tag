@@ -7,16 +7,10 @@
 #include "time_sync.h"
 
 // GPS pin definitions
-#define GPS_TX_PIN D7      // GPS_TX connects to ESP32 RX
-#define GPS_RX_PIN D6      // GPS_RX connects to ESP32 TX
-#define GPS_POWER_PIN
+#define GPS_TX_PIN 17     // GPS_TX connects to ESP32 RX (RXD0)
+#define GPS_RX_PIN 16     // GPS_RX connects to ESP32 TX (TXD0)
 // GPS_POWER_PIN - Define pin number here for GPS power control
-// Example: #define GPS_POWER_PIN D3
-// IMPORTANT: If GPS_POWER_PIN is defined but empty (no value), define it with a pin number
-// If not defined at all, it will default to 0 (disabled) below
-#if !defined(GPS_POWER_PIN)
-  #define GPS_POWER_PIN 0  // Default: disabled (0 = no power control)
-#endif
+#define GPS_POWER_PIN 19
 
 // Structure to hold GPS data
 struct GPSData {
@@ -302,7 +296,7 @@ public:
     Serial.println(GPS_TX_PIN);
     Serial.print("GPS RX (to ESP TX): ");
     Serial.println(GPS_RX_PIN);
-    #if defined(GPS_POWER_PIN) && GPS_POWER_PIN > 0
+    #if GPS_POWER_PIN > 0
       Serial.print("GPS Power Pin: ");
       Serial.println(GPS_POWER_PIN);
     #else

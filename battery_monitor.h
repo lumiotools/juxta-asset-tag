@@ -5,7 +5,7 @@
 
 class BatteryMonitor {
 private:
-  static const int BATTERY_ADC_PIN = 0;
+  static const int BATTERY_ADC_PIN = 3;
   static constexpr float BATTERY_MAX_VOLTAGE = 4.2f;
   static constexpr float BATTERY_MIN_VOLTAGE = 3.0f;
 
@@ -19,7 +19,7 @@ public:
     uint32_t Vbatt = 0;
     
     for(int i = 0; i < 16; i++) {
-      Vbatt = Vbatt + analogReadMilliVolts(A0); // ADC with correction
+      Vbatt = Vbatt + analogReadMilliVolts(A3); // ADC with correction
     }
     
     float Vbattf = 2 * Vbatt / 16 / 1000.0; // attenuation ratio 1/2, mV --> V

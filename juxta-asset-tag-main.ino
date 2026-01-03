@@ -1,5 +1,8 @@
 // ESP32-S3 Asset Tag - IMU & GPS data transmission
 
+// Note: BMI3XY_SensorAPI-main library is installed in Arduino libraries folder
+// Arduino IDE will automatically compile it - no wrapper needed
+
 #include "imu_sensor.h"
 #include "gps_sensor.h"
 #include "spi_flash_handler.h"
@@ -16,20 +19,31 @@
 #include "gps_scenario_handler.h"
 #include "button_handler.h"
 #include "motion_sleep_manager.h"
+#include "device_id.h"
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
 #include <Ticker.h>
 #include "driver/gpio.h"
 
-// Power latch pin (IO14) configuration
-#define POWER_LATCH_PIN D14
+// Power latch pin (IO4) configuration
+#define POWER_LATCH_PIN 4
 
-// Device ID and Version Configuration (hardcoded to save memory)
-const char* DEVICE_ID = "ASSET_TAG_WJ";  // Change this for each device
+// Device ID and Version Configuration
 const char* DEVICE_VERSION = "v2.0.0";   // Device firmware/hardware version
 
-const int STATUS_LED_PIN = D1;
+// Device ID buffer (generated from MAC address)
+static char deviceIdBuffer[32];  // "ASSET_TAG_" (10) + MAC (12) + null terminator = 23 chars max
+
+// Initialize device ID at global scope (before setup)
+static void initializeDeviceId() {
+  DeviceID::getDeviceId(deviceIdBuffer, sizeof(deviceIdBuffer));
+}
+static bool _deviceIdInitialized = (initializeDeviceId(), true);
+
+const char* DEVICE_ID = deviceIdBuffer;
+
+const int STATUS_LED_PIN = 5;
 const int STATUS_LED_COUNT = 2; // 2 pixels: pixel 0 for device status, pixel 1 for battery status
 
 // Status LED instance
@@ -74,20 +88,20 @@ unsigned long lastMotionTime = 0;
 unsigned long noMotionStartTime = 0;
 bool noMotionTracking = false;
 
-// Helper function to set GPIO 14 (power latch) with proper pull-up/pull-down configuration
+// Helper function to set GPIO 4 (power latch) with proper pull-up/pull-down configuration
 void setPowerLatchPin(bool high) {
   if (high) {
     // Set HIGH: Configure as OUTPUT with pull-up
     pinMode(POWER_LATCH_PIN, OUTPUT);
-    gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLUP_ONLY);
     digitalWrite(POWER_LATCH_PIN, HIGH);
-    Serial.println("Power latch pin (IO14) set HIGH with pull-up");
+    Serial.println("Power latch pin (IO4) set HIGH with pull-up");
   } else {
     // Set LOW: Configure as OUTPUT with pull-down
     pinMode(POWER_LATCH_PIN, OUTPUT);
-    gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLDOWN_ONLY);
     digitalWrite(POWER_LATCH_PIN, LOW);
-    Serial.println("Power latch pin (IO14) set LOW with pull-down");
+    Serial.println("Power latch pin (IO4) set LOW with pull-down");
   }
 }
 
@@ -129,14 +143,13 @@ void attemptTimeSyncIfNeeded() {
   }
 }
 
-// USB detection function for ESP32-S3
-// Checks if USB is connected by verifying USB Serial availability
+// USB detection function for ESP32-C6
+// Checks if USB is connected by reading GPIO 11
 bool isUSBConnected() {
-  // On ESP32-S3, USB Serial JTAG controller is active when USB is connected
-  // Serial object is available when USB is connected and Serial.begin() has been called
-  // This is a reliable method for ESP32-S3 to detect USB connection
-  int v = digitalRead(D2);
-  return v?true: false;  // Returns true if USB Serial is available (USB connected)
+  // On ESP32-C6, GPIO 11 is used for USB detection
+  // Returns true if USB is connected
+  int v = digitalRead(11);
+  return v?true: false;  // Returns true if USB is connected
 }
 
 // Helper function to set pixel color and display
@@ -194,14 +207,23 @@ void stopStatusLEDBlink(long long t) {
 void setup() {
   Serial.begin(115200);
   delay(100);
+  
+  // Device ID already initialized at global scope
+  Serial.print("Device ID: ");
+  Serial.println(DEVICE_ID);
+  
   statusLED.begin();  // Initialize NeoPixel first
   setPixelAndShow(0, 255, 0, 255); // Magenta/Purple on pixel 0 (unique boot color)
   
   // Check if waking from deep sleep - handle wake-up FIRST
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
-  bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT0);
+  bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 || wakeReason == ESP_SLEEP_WAKEUP_EXT0);
   if (wokeFromDeepSleep) {
     // Waking from deep sleep due to motion interrupt
+    // Set power latch HIGH immediately to keep device powered on
+    setPowerLatchPin(true);
+    Serial.println("Waking from deep sleep - power latch set HIGH");
+    
     // Initialize IMU first (needed for wake-up handler to clear interrupt status)
     Serial.println("Waking from deep sleep - initializing IMU for wake-up handling...");
     imuInitialized = imuSensor.begin();
@@ -211,17 +233,18 @@ void setup() {
       Serial.println("WARNING: IMU initialization failed on wake-up - calling handleWakeup with nullptr");
       MotionSleepManager::handleWakeup(nullptr); // Still release GPIO hold
     }
+  } else {
+    // Normal boot - wait for button press and set power latch
+    // Initialize Button Handler early (before button check)
+    ButtonHandler::begin();
+    
+    delay(5000); //wait 5 seconds for button to be pressed
+    if (ButtonHandler::isPressed()) {
+      Serial.println("Button pressed - restarting ESP...");
+      setPowerLatchPin(true); // Set HIGH with pull-up to keep device power on
+    }
   }
-  
-  // Initialize Button Handler early (before button check)
-  ButtonHandler::begin();
-  
-  delay(5000); //wait 5 seconds for button to be pressed
-  if (ButtonHandler::isPressed()) {
-    Serial.println("Button pressed - restarting ESP...");
-    setPowerLatchPin(true); // Set HIGH with pull-up to keep device power on
-  }
-  pinMode(D2,INPUT);
+  // pinMode(POWER_LATCH_PIN,INPUT);
   
   // Initialize NVS for WiFi credentials storage
   NVSConfig::initializeNVS();
@@ -280,8 +303,8 @@ void setup() {
   statusLED.show();
   updateStatusLED(); // Show red initially on pixel 0 (not initialized)
   
-  // Initialize Battery Indicator LED (simple single-color LED)
-  batteryIndicatorLED.begin(); // Uses BATTERY_LED_PIN from battery_indicator_led.h
+  // Initialize Battery Indicator LED (RGB NeoPixel, uses pixel 1)
+  batteryIndicatorLED.begin(&statusLED, 1); // Pass NeoPixel pointer and pixel index 1
   batteryIndicatorLED.updateBatteryLED(); // Initialize state
   delay(100);
   
@@ -508,9 +531,9 @@ void loop() {
       unsigned long long gpsReadCycleMs = (unsigned long long)gpsReadCycleTime * 1000ULL;
       if (currentTime - lastGPSReadTime >= gpsReadCycleMs) {
         // Read GPS data at configured cycle time
-        if (gps != nullptr) {
-          gps->update();
-          GPSData gpsData = gps->getGPSData();
+        if (gpsInitialized) {
+          gpsSensor.update();
+          GPSData gpsData = gpsSensor.getGPSData();
           if (gpsData.hasValidFix) {
             // Store high accuracy GPS in reference position (internal flash/NVS)
             gpsScenarioHandler->setReferencePosition(gpsData.latitude, gpsData.longitude);
@@ -857,8 +880,8 @@ void loop() {
   // Only enable deep sleep motion detection after first cycle completes
   // Don't sleep during BLE configuration window
   if (firstCycleComplete && imuInitialized && MotionSleepManager::isConfigured()) {
-    // Track no-motion duration
-    bool shouldSleep = MotionSleepManager::trackNoMotionDuration();
+    // Track no-motion duration (now uses Bosch API)
+    bool shouldSleep = MotionSleepManager::trackNoMotionDuration(&imuSensor);
     
     if (shouldSleep) {
       // 5 minutes of no motion - enter deep sleep

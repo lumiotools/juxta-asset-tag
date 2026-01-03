@@ -9,8 +9,8 @@
 #include <esp_system.h>
 
 // Pin definitions
-#define BUTTON_PIN D10
-#define DEVICE_POWER_PIN D11
+#define BUTTON_PIN 10
+#define DEVICE_POWER_PIN 4
 
 // Timing constants
 #define LONG_PRESS_TIME_MS 5000  // 5 seconds for long press

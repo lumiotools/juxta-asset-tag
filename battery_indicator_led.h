@@ -1,121 +1,160 @@
-// Battery Indicator LED - Simple single-color LED that indicates battery level
-// Two thresholds: 20% (LED on constantly) and 10% (fast blink for critical)
+// Battery Indicator LED - RGB NeoPixel LED that indicates battery level
+// Uses pixel 1 of shared NeoPixel strip (pixel 0 is for device status)
+// Behavior: 
+//   - >= 20%: OFF
+//   - 10-20%: RED (solid on)
+//   - < 10%: RED (blinking at 500ms intervals, asynchronous)
 
 #ifndef BATTERY_INDICATOR_LED_H
 #define BATTERY_INDICATOR_LED_H
 
 #include <Arduino.h>
 #include "battery_monitor.h"
-
-// Pin definition for battery indicator LED (single-color GPIO)
-#define BATTERY_LED_PIN D12  // Change this to your desired GPIO pin
+#include <Adafruit_NeoPixel.h>
 
 // Battery thresholds
-#define BATTERY_THRESHOLD_1_PERCENT 20  // First threshold: LED on constantly
-#define BATTERY_THRESHOLD_2_PERCENT 10  // Second threshold: fast blinking (critical)
+#define BATTERY_THRESHOLD_PERCENT 20  // LED on (red) when below this percentage
+#define BATTERY_CRITICAL_PERCENT 10   // LED blinks when below this percentage
 
-// Blink timing constants (only used for critical state)
-#define BLINK_ON_TIME_CRITICAL_MS 500  // LED on time for critical blink
-#define BLINK_OFF_TIME_CRITICAL_MS 500 // LED off time for critical blink
+// Blink timing constants
+#define BLINK_INTERVAL_MS 500  // 500ms on/off interval for blinking
 
 // Battery state enum
 enum BatteryBlinkState {
-  BATTERY_OFF,      // Above 20% - LED off
-  BATTERY_NORMAL,  // Below 20% but >= 10% - LED on constantly
-  BATTERY_CRITICAL // Below 10% - fast blink
+  BATTERY_OFF,      // >= 20% - LED off
+  BATTERY_ON,       // 10-20% - LED on (red, solid)
+  BATTERY_BLINKING  // < 10% - LED blinking (red, 500ms)
 };
 
 class BatteryIndicatorLED {
 private:
-  int ledPin;                    // GPIO pin for LED
+  Adafruit_NeoPixel* neopixel;  // Pointer to shared NeoPixel strip
+  uint8_t pixelIndex;            // Pixel index (1 for battery, 0 is device status)
   bool enabled;                  // Track if LED is enabled
-  BatteryBlinkState blinkState; // Current blinking state
-  unsigned long blinkStartTime; // Time when blinking cycle started
+  BatteryBlinkState blinkState;  // Current blinking state
+  unsigned long blinkStartTime;  // Time when blinking cycle started
+  bool blinkOnState;             // Current on/off state during blinking
+  
+  void setPixelColor(uint8_t r, uint8_t g, uint8_t b) {
+    if (neopixel && enabled) {
+      neopixel->setPixelColor(pixelIndex, neopixel->Color(r, g, b));
+      neopixel->show();
+    }
+  }
   
   void ledOn() {
-    if (enabled && ledPin > 0) analogWrite(ledPin, 128); // 50% brightness (128/255)
+    if (!enabled || !neopixel) return;
+    setPixelColor(255, 0, 0); // Red
   }
   
   void ledOff() {
-    if (ledPin > 0) analogWrite(ledPin, 0); // 0% brightness
+    if (neopixel) {
+      neopixel->setPixelColor(pixelIndex, neopixel->Color(0, 0, 0));
+      neopixel->show();
+    }
   }
   
   void updateBlink() {
-    if (!enabled || blinkState == BATTERY_OFF) {
-      ledOff();
+    if (!enabled || !neopixel || blinkState != BATTERY_BLINKING) {
       return;
     }
     
-    if (blinkState == BATTERY_NORMAL) {
-      ledOn();
-      return;
-    }
-    
-    // BATTERY_CRITICAL - fast blinking
+    // Non-blocking blink: toggle every 500ms
     unsigned long currentTime = millis();
     unsigned long elapsed = currentTime - blinkStartTime;
-    unsigned long cycleTime = BLINK_ON_TIME_CRITICAL_MS + BLINK_OFF_TIME_CRITICAL_MS;
-    unsigned long cyclePosition = elapsed % cycleTime;
+    unsigned long cyclePosition = elapsed % (BLINK_INTERVAL_MS * 2); // Full cycle = 1000ms (500ms on + 500ms off)
     
-    if (cyclePosition < BLINK_ON_TIME_CRITICAL_MS) {
-      ledOn();
-    } else {
-      ledOff();
+    bool shouldBeOn = (cyclePosition < BLINK_INTERVAL_MS);
+    
+    if (shouldBeOn != blinkOnState) {
+      blinkOnState = shouldBeOn;
+      if (blinkOnState) {
+        ledOn();
+      } else {
+        ledOff();
+      }
     }
     
-    if (elapsed > 60000) blinkStartTime = currentTime; // Reset every minute
+    // Reset timer every minute to prevent overflow
+    if (elapsed > 60000) {
+      blinkStartTime = currentTime;
+    }
   }
   
 public:
-  BatteryIndicatorLED() : ledPin(BATTERY_LED_PIN), enabled(true), 
-                          blinkState(BATTERY_OFF), blinkStartTime(0) {
+  BatteryIndicatorLED() : neopixel(nullptr), pixelIndex(1), enabled(true), 
+                          blinkState(BATTERY_OFF), blinkStartTime(0), blinkOnState(false) {
   }
 
-  void begin(int pin = BATTERY_LED_PIN) {
-    ledPin = pin;
+  void begin(Adafruit_NeoPixel* np, uint8_t pixel = 1) {
+    neopixel = np;
+    pixelIndex = pixel;
     enabled = true;
     blinkState = BATTERY_OFF;
     blinkStartTime = millis();
-    pinMode(ledPin, OUTPUT);
-    digitalWrite(ledPin, LOW);
+    blinkOnState = false;
     
-    Serial.print("Battery LED initialized on pin ");
-    Serial.print(ledPin);
-    Serial.print(" (thresholds: ");
-    Serial.print(BATTERY_THRESHOLD_1_PERCENT);
-    Serial.print("%/");
-    Serial.print(BATTERY_THRESHOLD_2_PERCENT);
-    Serial.println("%)");
+    // Initialize pixel to off
+    if (neopixel) {
+      neopixel->setPixelColor(pixelIndex, neopixel->Color(0, 0, 0));
+      neopixel->show();
+    }
+    
+    Serial.print("Battery LED initialized on pixel ");
+    Serial.print(pixelIndex);
+    Serial.print(" (thresholds: >= 20% = OFF, 10-20% = RED, < 10% = RED blinking)");
+    Serial.println();
   }
 
   void updateBatteryLED() {
-    if (!enabled || ledPin <= 0) return;
+    if (!enabled || !neopixel) return;
     
     int currentBatteryPercent = BatteryMonitor::getBatteryPercentage();
     BatteryBlinkState newState;
     
-    if (currentBatteryPercent >= BATTERY_THRESHOLD_1_PERCENT) {
+    if (currentBatteryPercent >= BATTERY_THRESHOLD_PERCENT) {
       newState = BATTERY_OFF;
-    } else if (currentBatteryPercent >= BATTERY_THRESHOLD_2_PERCENT) {
-      newState = BATTERY_NORMAL;
+    } else if (currentBatteryPercent >= BATTERY_CRITICAL_PERCENT) {
+      newState = BATTERY_ON;
     } else {
-      newState = BATTERY_CRITICAL;
+      newState = BATTERY_BLINKING;
     }
     
+    // State changed - update LED immediately
     if (newState != blinkState) {
       blinkState = newState;
       blinkStartTime = millis();
+      blinkOnState = false;
       
       if (blinkState == BATTERY_OFF) {
         ledOff();
-      } else if (blinkState == BATTERY_NORMAL) {
+      } else if (blinkState == BATTERY_ON) {
         ledOn();
+      } else if (blinkState == BATTERY_BLINKING) {
+        // Start blinking - turn on first
+        ledOn();
+        blinkOnState = true;
       }
     }
   }
 
+  // Set custom RGB color
+  void setColor(uint8_t r, uint8_t g, uint8_t b) {
+    if (!enabled || !neopixel) return;
+    setPixelColor(r, g, b);
+    // Note: This will override battery state until next updateBatteryLED() call
+  }
+
+  // Turn off LED
+  void turnOff() {
+    ledOff();
+    blinkState = BATTERY_OFF;
+  }
+
   void enable() {
     enabled = true;
+    // Update LED state based on current battery level
+    updateBatteryLED();
   }
 
   void disable() {
@@ -128,16 +167,30 @@ public:
   }
 
   void doubleBlink() {
+    // Optional: Can be used for critical alerts
     if (!enabled) return;
-    blinkState = BATTERY_CRITICAL;
+    blinkState = BATTERY_BLINKING;
     blinkStartTime = millis();
+    ledOn();
+    blinkOnState = true;
   }
 
   // Update blinking state (call this in loop for non-blocking blink)
   void update() {
-    updateBlink(); // Call private method to handle blinking
+    updateBlink(); // Handle asynchronous blinking
+  }
+  
+  // Get current battery percentage (helper method)
+  int getBatteryPercentage() {
+    return BatteryMonitor::getBatteryPercentage();
+  }
+  
+  // Get current battery voltage (helper method)
+  float getBatteryVoltage() {
+    return BatteryMonitor::readBatteryVoltage();
   }
   
 };
 
 #endif
+
