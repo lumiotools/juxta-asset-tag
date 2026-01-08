@@ -480,6 +480,7 @@ void loop() {
       // Handle Scenario 3: No fix found - deep sleep
       if (scenario == SCENARIO_3_NO_FIX) {
         gpsScenarioHandler->handleScenario3();
+        
         Serial.println("Entering deep sleep for 30 seconds...");
         esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
         esp_deep_sleep_start();
@@ -885,6 +886,36 @@ void loop() {
     
     if (shouldSleep) {
       // 5 minutes of no motion - enter deep sleep
+      // First, attempt to transmit any pending data before entering deep sleep
+      if (flashInitialized && unifiedCSVStorage.isInitialized() && unifiedCSVStorage.hasDataToRead()) {
+        Serial.println("\n========== PRE-SLEEP DATA TRANSMISSION ==========");
+        Serial.println("Pending data detected - attempting transmission before deep sleep...");
+        
+        // Attempt to transmit pending data
+        CycleResult result = executeCycleTransmission();
+        
+        // Log transmission result
+        switch(result) {
+          case CYCLE_SUCCESS_BLE:
+            Serial.println("Pre-sleep transmission completed via BLE");
+            break;
+          case CYCLE_SUCCESS_WIFI:
+            Serial.println("Pre-sleep transmission completed via WiFi");
+            break;
+          case CYCLE_SUCCESS_STORED:
+            Serial.println("Pre-sleep data stored to flash (no connection available)");
+            break;
+          case CYCLE_FAILED:
+            Serial.println("Pre-sleep transmission failed - data remains in flash");
+            break;
+        }
+        
+        Serial.println("Pre-sleep transmission attempt complete");
+        Serial.println("========================================\n");
+      } else {
+        Serial.println("No pending data to transmit before deep sleep");
+      }
+      
       // Configure GPIO 14 HIGH with pull-up before entering deep sleep
       setPowerLatchPin(true);
       MotionSleepManager::enterDeepSleep(&imuSensor);

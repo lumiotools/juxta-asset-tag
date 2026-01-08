@@ -32,10 +32,12 @@
 #define NO_MOTION_SLOPE_THRES 9       // Slope threshold for no-motion (0-4095)
 #define MOTION_HYSTERESIS 5            // Hysteresis (0-1023)
 #define MOTION_WAIT_TIME 5             // Wait time (0-7)
-// Duration: 5 minutes = 300 seconds = 300 * 50Hz = 15000 samples (at 50Hz ODR)
-// But we'll use a shorter duration and let hardware trigger, then track in software
-#define NO_MOTION_DURATION_SAMPLES 15000  // 5 minutes at 50Hz (300s * 50)
-#define ANY_MOTION_DURATION_SAMPLES 1     // Immediate detection
+// Duration: Range = 0 to 8191 samples (at 50Hz ODR, each sample = 20ms)
+// Maximum duration: 8191 * 20ms = 163.82 seconds = ~2.73 minutes
+// For 5 minutes, we need to use software tracking with hardware interrupt as trigger
+// Using maximum hardware duration, then tracking in software
+#define NO_MOTION_DURATION_SAMPLES 8191   // Maximum hardware duration (~2.73 minutes at 50Hz)
+#define ANY_MOTION_DURATION_SAMPLES 1     // Immediate detection (1 sample = 20ms)
 
 // Global motion tracking variables
 extern volatile bool motionInterruptFlag;
@@ -67,15 +69,24 @@ public:
     
     int8_t rslt;
     
-    // Configure INT1 pin: active HIGH, push-pull, latched mode
+    // Configure INT1 pin: active HIGH, push-pull, non-latched mode
+    // Get current pin configuration first (best practice from MCU examples)
     struct bmi3_int_pin_config int_cfg = { 0 };
+    rslt = bmi323_get_int_pin_config(&int_cfg, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to get INT1 pin config: ");
+      Serial.println(rslt);
+      return false;
+    }
+    
+    // Modify only the fields we need (preserves other settings)
     int_cfg.pin_type = BMI3_INT1;
     int_cfg.int_latch = BMI3_INT_NON_LATCH;  // Non-latched (pulsed) for immediate detection
     int_cfg.pin_cfg[0].lvl = BMI3_INT_ACTIVE_HIGH;
     int_cfg.pin_cfg[0].od = BMI3_INT_PUSH_PULL;
     int_cfg.pin_cfg[0].output_en = BMI3_INT_OUTPUT_ENABLE;
     
-    rslt = bmi3_set_int_pin_config(&int_cfg, dev);
+    rslt = bmi323_set_int_pin_config(&int_cfg, dev);
     if (rslt != BMI323_OK) {
       Serial.print("ERROR: Failed to configure INT1 pin: ");
       Serial.println(rslt);
@@ -137,9 +148,25 @@ public:
     Serial.print(NO_MOTION_SLOPE_THRES);
     Serial.print(", duration=");
     Serial.print(NO_MOTION_DURATION_SAMPLES);
-    Serial.println(" samples (5 minutes at 50Hz)");
+    Serial.print(" samples (~");
+    Serial.print((NO_MOTION_DURATION_SAMPLES * 20) / 1000);
+    Serial.println(" seconds at 50Hz)");
+    Serial.println("Note: Hardware max is ~2.73 minutes, software tracks full 5 minutes");
     
-    // Enable any-motion and no-motion features
+    // Map interrupts to INT1 (do this before enabling features, matching example order)
+    struct bmi3_map_int map_int = { 0 };
+    map_int.any_motion_out = BMI3_INT1;
+    map_int.no_motion_out = BMI3_INT1;
+    
+    rslt = bmi323_map_interrupt(map_int, dev);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to map interrupts: ");
+      Serial.println(rslt);
+      return false;
+    }
+    Serial.println("Interrupts mapped to INT1");
+    
+    // Enable any-motion and no-motion features (after mapping interrupts)
     struct bmi3_feature_enable feature = { 0 };
     feature.any_motion_x_en = BMI323_ENABLE;
     feature.any_motion_y_en = BMI323_ENABLE;
@@ -155,19 +182,6 @@ public:
       return false;
     }
     Serial.println("Motion features enabled");
-    
-    // Map interrupts to INT1
-    struct bmi3_map_int map_int = { 0 };
-    map_int.any_motion_out = BMI3_INT1;
-    map_int.no_motion_out = BMI3_INT1;
-    
-    rslt = bmi323_map_interrupt(map_int, dev);
-    if (rslt != BMI323_OK) {
-      Serial.print("ERROR: Failed to map interrupts: ");
-      Serial.println(rslt);
-      return false;
-    }
-    Serial.println("Interrupts mapped to INT1");
     
     interruptsConfigured = true;
     Serial.println("BMI323 interrupt configuration complete using Bosch API");

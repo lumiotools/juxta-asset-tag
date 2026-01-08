@@ -7,8 +7,9 @@
 // - BMI323 INT1 → GPIO 22 (for interrupt testing)
 // - I2C Address: 0x69
 
+#include <Arduino.h>
 #include <Wire.h>
-#include "../libs/BMI3XY_SensorAPI-main/bmi323.h"
+#include "../../libs/BMI3XY_SensorAPI-main/bmi323.h"
 
 // I2C pin definitions (ESP32-C6)
 #define I2C_SDA_PIN 0
@@ -31,48 +32,53 @@ struct bmi3_dev bmi3Device = { 0 };
 
 // I2C interface wrapper functions for Bosch API
 extern "C" {
-  int8_t bmi3_i2c_read_wrapper(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr) {
-    uint8_t device_addr = *(uint8_t*)intf_ptr;
-    
-    Wire.beginTransmission(device_addr);
-    Wire.write(reg_addr);
-    if (Wire.endTransmission(false) != 0) {
-      return -1;
-    }
-    
-    Wire.requestFrom(device_addr, (uint8_t)len);
-    uint32_t i = 0;
-    while (Wire.available() && i < len) {
-      reg_data[i++] = Wire.read();
-    }
-    
-    if (i != len) {
-      return -1;
-    }
-    
-    return 0;
+  int8_t bmi3_i2c_read_wrapper(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
+  int8_t bmi3_i2c_write_wrapper(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
+  void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr);
+}
+
+// Implementation of wrapper functions (outside extern "C" to ensure C++ linkage)
+int8_t bmi3_i2c_read_wrapper(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+  uint8_t device_addr = *(uint8_t*)intf_ptr;
+  
+  Wire.beginTransmission(device_addr);
+  Wire.write(reg_addr);
+  if (Wire.endTransmission(false) != 0) {
+    return -1;
   }
   
-  int8_t bmi3_i2c_write_wrapper(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr) {
-    uint8_t device_addr = *(uint8_t*)intf_ptr;
-    
-    Wire.beginTransmission(device_addr);
-    Wire.write(reg_addr);
-    for (uint32_t i = 0; i < len; i++) {
-      Wire.write(reg_data[i]);
-    }
-    
-    if (Wire.endTransmission() != 0) {
-      return -1;
-    }
-    
-    return 0;
+  Wire.requestFrom(device_addr, (uint8_t)len);
+  uint32_t i = 0;
+  while (Wire.available() && i < len) {
+    reg_data[i++] = Wire.read();
   }
   
-  void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr) {
-    (void)intf_ptr;
-    delayMicroseconds(period);
+  if (i != len) {
+    return -1;
   }
+  
+  return 0;
+}
+
+int8_t bmi3_i2c_write_wrapper(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+  uint8_t device_addr = *(uint8_t*)intf_ptr;
+  
+  Wire.beginTransmission(device_addr);
+  Wire.write(reg_addr);
+  for (uint32_t i = 0; i < len; i++) {
+    Wire.write(reg_data[i]);
+  }
+  
+  if (Wire.endTransmission() != 0) {
+    return -1;
+  }
+  
+  return 0;
+}
+
+void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr) {
+  (void)intf_ptr;
+  delayMicroseconds(period);
 }
 
 // Interrupt handler
@@ -205,7 +211,7 @@ void setup() {
   Serial.println(" samples (5 minutes at 50Hz)");
   
   // Enable motion features
-  feature = { 0 };
+  struct bmi3_feature_enable feature = { 0 };
   feature.any_motion_x_en = BMI323_ENABLE;
   feature.any_motion_y_en = BMI323_ENABLE;
   feature.any_motion_z_en = BMI323_ENABLE;
