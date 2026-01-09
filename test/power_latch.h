@@ -41,8 +41,17 @@ void setPowerLatchPin(bool high) {
   }
 }
 
-// Forward declaration
-void powerOff();
+// Power off with 5 second delay
+// Waits 5 seconds before turning off power latch
+void powerOff() {
+  Serial.println("\n========== POWERING OFF ==========");
+  Serial.println("Waiting 5 seconds before power off...");
+  // delay(5000);
+  Serial.println("Turning off power latch...");
+  setPowerLatchPin(false);
+  Serial.println("Power latch turned off");
+  Serial.println("========================================\n");
+}
 
 // Initialize power latch and button
 // Call this in setup()
@@ -82,11 +91,13 @@ void updateButtonHandler() {
     
     // Check for long press (5 seconds)
     if (!longPressTriggered && buttonPressed && (millis() - buttonPressStartTime >= LONG_PRESS_TIME_MS)) {
-      // Long press detected (5 seconds)
+      // Long press detected (5 seconds) - turn off immediately
       longPressTriggered = true;
       Serial.println("\n========== LONG PRESS DETECTED (5s) ==========");
-      Serial.println("Powering off device...");
-      powerOff(); // This will wait 5 seconds then turn off power latch
+      Serial.println("Powering off device immediately...");
+      setPowerLatchPin(false); // Turn off power latch immediately
+      Serial.println("Power latch turned off");
+      Serial.println("========================================\n");
     }
   } else {
     // Button is released
@@ -104,18 +115,6 @@ void updateButtonHandler() {
       longPressTriggered = false;
     }
   }
-}
-
-// Power off with 5 second delay
-// Waits 5 seconds before turning off power latch
-void powerOff() {
-  Serial.println("\n========== POWERING OFF ==========");
-  Serial.println("Waiting 5 seconds before power off...");
-  delay(5000);
-  Serial.println("Turning off power latch...");
-  setPowerLatchPin(false);
-  Serial.println("Power latch turned off");
-  Serial.println("========================================\n");
 }
 
 #endif // POWER_LATCH_H
