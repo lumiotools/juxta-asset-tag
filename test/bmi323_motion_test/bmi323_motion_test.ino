@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "../../libs/BMI3XY_SensorAPI-main/bmi323.h"
+#include "../power_latch.h"
 
 // I2C pin definitions (ESP32-C6)
 #define I2C_SDA_PIN 0
@@ -89,7 +90,10 @@ void IRAM_ATTR handleMotionInterrupt() {
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);
+  // No delay on boot - start immediately
+  
+  // Initialize power latch (set HIGH on boot)
+  initPowerLatch();
   
   Serial.println("\n========================================");
   Serial.println("BMI323 Motion Detection Test");
@@ -282,6 +286,9 @@ void setup() {
 }
 
 void loop() {
+  // Update button handler (check for long press to power off)
+  updateButtonHandler();
+  
   if (!sensorInitialized || !motionDetectionConfigured) {
     delay(1000);
     return;

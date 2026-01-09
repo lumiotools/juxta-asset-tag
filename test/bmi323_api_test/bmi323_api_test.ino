@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "../../libs/BMI3XY_SensorAPI-main/bmi323.h"
+#include "../power_latch.h"
 
 // Note: The library source files are compiled via separate .cpp wrapper files
 // (bmi3_library.cpp and bmi323_library.cpp) in this same directory.
@@ -78,7 +79,10 @@ void bmi3_delay_us_wrapper(uint32_t period, void *intf_ptr) {
 
 void setup() {
   Serial.begin(115200);
-  delay(2000); // Wait for serial monitor
+  // No delay on boot - start immediately
+  
+  // Initialize power latch (set HIGH on boot)
+  initPowerLatch();
   
   Serial.println("\n========================================");
   Serial.println("BMI323 Sensor API Test");
@@ -182,6 +186,9 @@ void setup() {
 }
 
 void loop() {
+  // Update button handler (check for long press to power off)
+  updateButtonHandler();
+  
   if (!sensorInitialized) {
     delay(1000);
     return;

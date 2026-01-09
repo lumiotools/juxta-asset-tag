@@ -18,6 +18,7 @@
 #include <Wire.h>
 #include "../../libs/BMI3XY_SensorAPI-main/bmi323.h"
 #include "esp_sleep.h"
+#include "../power_latch.h"
 
 // I2C pin definitions (ESP32-C6)
 #define I2C_SDA_PIN 0
@@ -281,7 +282,10 @@ void handleWakeup() {
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);
+  // No delay on boot - start immediately
+  
+  // Initialize power latch (set HIGH on boot)
+  initPowerLatch();
   
   Serial.println("\n========================================");
   Serial.println("BMI323 Deep Sleep and Wake Test");
@@ -318,7 +322,7 @@ void setup() {
     } else {
       Serial.print("ERROR: Failed to reinitialize BMI323 after wake-up: ");
       Serial.println(rslt);
-      delay(5000);
+      // powerOff(); // Power off with 5 second delay
       return;
     }
   } else {
@@ -398,6 +402,9 @@ void setup() {
 }
 
 void loop() {
+  // Update button handler (check for long press to power off)
+  updateButtonHandler();
+  
   // This should not be reached during normal test operation
   // Device should be in deep sleep most of the time
   // If we reach here, re-enter deep sleep
