@@ -11,8 +11,8 @@ extern void stopStatusLEDBlink(long long t);
 
 // Server Configuration
 // Note: http.begin() requires full URL with protocol (http:// or https://)
-const char* SERVER_URL = "https://unusable-melody-unhealing.ngrok-free.dev/"; // Backend server with DB (PMC)
-const char* MODEL_SERVER_URL = ""; // Model server (Juxta) - to be configured
+const char* SERVER_URL = "http://192.168.0.2:3000"; // Backend server with DB (PMC)
+const char* MODEL_SERVER_URL = "http://192.168.0.2:3050"; // Model server (Juxta) - to be configured
 const int REQUEST_TIMEOUT = 60000; // 60 seconds (for large batches and slow servers)
 
 class CustomWiFi {

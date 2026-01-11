@@ -14,8 +14,30 @@
 // Include Bosch BMI323 library from local libs folder
 #include "libs/BMI3XY_SensorAPI-main/bmi323.h"
 
+// ============================================================================
+// ESP32-C6 RTC GPIO PINS (for deep sleep wake-up)
+// ============================================================================
+// IMPORTANT: ESP32-C6 can ONLY wake from deep sleep using RTC GPIOs!
+// Only RTC GPIOs (Low-Power GPIOs) can be used with esp_sleep_enable_ext1_wakeup()
+//
+// RTC GPIOs on ESP32-C6 (LP_GPIOs): GPIO 0, 1, 2, 3, 4, 5, 6, 7
+// These are the ONLY GPIOs that can wake from deep sleep!
+//
+// NON-RTC GPIOs (CANNOT wake from deep sleep): GPIO 8-30
+// GPIO 8 and above will NOT work for deep sleep wake-up and will give error!
+//
+// ⚠️ WARNING: MOTION_INT_PIN is currently set to GPIO 25
+// GPIO 25 is NOT an RTC GPIO and CANNOT wake from deep sleep!
+// Deep sleep wake-up will FAIL with current configuration!
+// 
+// TO FIX: Change MOTION_INT_PIN to an RTC GPIO (0-7)
+// Recommended RTC GPIOs: 2, 3, 6, 7 (avoid 0,1,4,5 due to other functions)
+// ============================================================================
+
 // GPIO pin definitions
-#define MOTION_INT_PIN 22     // BMI323 INT1 → ESP32-C6 GPIO 22
+#define MOTION_INT_PIN 25     // BMI323 INT1 → ESP32-C6 GPIO 25
+                              // ⚠️ WARNING: GPIO 25 is NOT RTC-capable!
+                              // Change to GPIO 2, 3, 6, or 7 for deep sleep wake-up
 // Note: MOTION_INT2_PIN removed - not required
 #define POWER_LATCH_PIN 4     // Power latch control pin (IO4)
 
@@ -188,17 +210,21 @@ public:
     return true;
   }
   
-  // Setup motion interrupt ISR on GPIO 22
+  // Setup motion interrupt ISR
   static void setupMotionISR() {
     if (motionISRAttached) {
       return; // Already attached
     }
     
-    Serial.println("Setting up motion interrupt ISR on GPIO 22...");
+    Serial.print("Setting up motion interrupt ISR on GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.println("...");
     pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);
     attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), handleMotionInterrupt, RISING);
     motionISRAttached = true;
-    Serial.println("Motion ISR attached to GPIO 22 (RISING edge)");
+    Serial.print("Motion ISR attached to GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.println(" (RISING edge)");
   }
   
   // ISR handler for motion interrupt (called from interrupt context)
@@ -331,16 +357,68 @@ public:
     gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep
     Serial.println("Power latch held HIGH - power will remain on during deep sleep");
     
+    // CRITICAL: Release any GPIO hold on wake pin before configuring wake-up
+    // GPIO hold can prevent wake-up from working
+    Serial.println("Releasing GPIO hold on wake pin...");
+    gpio_hold_dis((gpio_num_t)MOTION_INT_PIN);
+    
+    // Configure wake pin properly before sleep
+    // For wake-up to work, pin must be configured as INPUT with appropriate pull
+    Serial.print("Configuring wake pin GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.println(" (motion interrupt)...");
+    
+    // Ensure pin is in correct state - release from any hold first
+    gpio_reset_pin((gpio_num_t)MOTION_INT_PIN);
+    pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);  // Pull-down: wakes on HIGH signal
+    gpio_set_direction((gpio_num_t)MOTION_INT_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)MOTION_INT_PIN, GPIO_PULLDOWN_ONLY);
+    
+    // Verify pin state
+    Serial.print("GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.print(" state: ");
+    Serial.println(digitalRead(MOTION_INT_PIN));
+    
     // Configure ESP32-C6 wake sources
     // ESP32-C6 only supports EXT1 wakeup (not EXT0)
-    // Note: GPIO 22 is used for motion interrupt wakeup
-    Serial.println("Configuring wake sources...");
-    esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_22), ESP_EXT1_WAKEUP_ANY_HIGH); // Wake on HIGH (motion interrupt)
-    Serial.println("Wake source: GPIO 22 (motion interrupt)");
+    // IMPORTANT: Only RTC GPIOs (LP_GPIOs) can wake from deep sleep!
+    // RTC GPIOs on ESP32-C6: GPIO 0, 1, 2, 3, 4, 5, 6, 7 ONLY!
+    Serial.println("Configuring wake source (EXT1):");
+    Serial.print("  - GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.print(" (motion interrupt) - ");
+    if (MOTION_INT_PIN >= 0 && MOTION_INT_PIN <= 7) {
+      Serial.println("RTC-capable ✓");
+    } else {
+      Serial.println("NOT RTC-capable ✗");
+      Serial.println("ERROR: GPIO is not RTC-capable! Use GPIO 0-7 only");
+      Serial.println("RTC GPIOs on ESP32-C6: 0, 1, 2, 3, 4, 5, 6, 7");
+      Serial.println("Current MOTION_INT_PIN will NOT work for deep sleep wake-up!");
+      return;
+    }
+    
+    // EXT1 wakeup: wake on GPIO going HIGH
+    esp_err_t wakeup_result = esp_sleep_enable_ext1_wakeup(
+      (1ULL << MOTION_INT_PIN), 
+      ESP_EXT1_WAKEUP_ANY_HIGH
+    );
+    
+    if (wakeup_result != ESP_OK) {
+      Serial.print("ERROR: Failed to configure wake-up sources! Error: ");
+      Serial.println(wakeup_result);
+      Serial.println("Make sure you're using RTC GPIOs (GPIO 0-7 on ESP32-C6)");
+      Serial.println("RTC GPIOs (LP_GPIOs): 0, 1, 2, 3, 4, 5, 6, 7");
+      Serial.println("GPIO 8 and above are NOT RTC-capable and will not work!");
+      return;
+    }
+    Serial.println("Wake sources configured successfully");
     
     Serial.println("Entering deep sleep...");
+    Serial.print("Device will wake on HIGH signal to GPIO ");
+    Serial.println(MOTION_INT_PIN);
     Serial.flush(); // Ensure all messages are sent before sleep
-    delay(100);
+    delay(200);  // Give time for serial to flush
     
     // Enter deep sleep
     esp_deep_sleep_start();
@@ -360,9 +438,19 @@ public:
     esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
     Serial.print("Wake reason: ");
     switch (wakeReason) {
-      case ESP_SLEEP_WAKEUP_EXT1:
-        Serial.println("Motion interrupt (GPIO 22)");
+      case ESP_SLEEP_WAKEUP_EXT1: {
+        Serial.print("EXT1 wake-up from GPIO ");
+        uint64_t wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
+        if (wakeup_pin_mask & (1ULL << MOTION_INT_PIN)) {
+          Serial.print(MOTION_INT_PIN);
+          Serial.println(" (motion interrupt)");
+        } else {
+          Serial.print("unknown (mask: 0x");
+          Serial.print(wakeup_pin_mask, HEX);
+          Serial.println(")");
+        }
         break;
+      }
       case ESP_SLEEP_WAKEUP_EXT0:
         Serial.println("External signal (EXT0)");
         break;

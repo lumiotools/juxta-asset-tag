@@ -43,7 +43,7 @@ static bool _deviceIdInitialized = (initializeDeviceId(), true);
 
 const char* DEVICE_ID = deviceIdBuffer;
 
-const int STATUS_LED_PIN = 5;
+const int STATUS_LED_PIN = 22;
 const int STATUS_LED_COUNT = 2; // 2 pixels: pixel 0 for device status, pixel 1 for battery status
 
 // Status LED instance
