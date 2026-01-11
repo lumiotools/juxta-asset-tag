@@ -168,11 +168,12 @@ private:
       // Start blue LED blinking on receive
       // startStatusLEDBlink(0, 0, 255);
       
-      // Read raw byte data (sent as Uint8Array from web interface)
+      // Read string data (sent as TextEncoder().encode("0") or TextEncoder().encode("1") from web interface)
       std::string stdValue = pCharacteristic->getValue();
       String value = String(stdValue.c_str());
+      value.trim(); // Remove any whitespace
       if (value.length() > 0) {
-        receivedGPSActive = (uint8_t)value[0]; // Read first byte as uint8_t (0 or 1)
+        receivedGPSActive = (uint8_t)value.toInt(); // Convert string "0" or "1" to integer 0 or 1
         // Save GPS active setting immediately to NVS (independent of WiFi credentials)
         // NVS key: "gps_active" in namespace "wifi_config"
         bool gpsActiveSaved = NVSConfig::setGPSActive(receivedGPSActive);
@@ -368,7 +369,7 @@ private:
             configTimeExtension += (unsigned long long)seconds * 1000ULL; // Convert to milliseconds and add
             
             // Debug output to verify extension is being added
-            Serial.print("[EXTEND CONFIG TIME] Received: ");
+            Serial.print("[EXTEND CONFIG TIME] SUCCESS - Received: ");
             Serial.print(seconds);
             Serial.print(" seconds, Previous extension: ");
             Serial.print(previousExtension);
@@ -381,10 +382,12 @@ private:
             Serial.print("[EXTEND CONFIG TIME] ERROR: Invalid value (0 or parse failed). Raw value: '");
             Serial.print(value);
             Serial.print("', Length: ");
-            Serial.println(value.length());
+            Serial.print(value.length());
+            Serial.print(", Parsed int: ");
+            Serial.println(seconds);
           }
         } else {
-          Serial.println("[EXTEND CONFIG TIME] ERROR: Empty value received");
+          Serial.println("[EXTEND CONFIG TIME] ERROR: Empty value received after trim");
         }
       }
   };

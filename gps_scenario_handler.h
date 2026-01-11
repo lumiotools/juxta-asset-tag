@@ -96,15 +96,27 @@ public:
     
     // Check GPS fix status
     if (gpsData.hasValidFix) {
-      // Check accuracy (only at transmission cycle time)
-      if (gps->isHighAccuracy()) {
-        currentScenario = SCENARIO_1_HIGH_ACCURACY;
-        // Store high accuracy GPS in reference position (internal flash/NVS)
-        setReferencePosition(gpsData.latitude, gpsData.longitude);
+      // Validate GPS coordinates before using them
+      // (0,0) is technically valid but unlikely - check if coordinates are reasonable
+      bool validCoordinates = (gpsData.latitude != 0.0 || gpsData.longitude != 0.0) &&
+                               (gpsData.latitude >= -90.0 && gpsData.latitude <= 90.0) &&
+                               (gpsData.longitude >= -180.0 && gpsData.longitude <= 180.0);
+      
+      if (validCoordinates) {
+        // Check accuracy (only at transmission cycle time)
+        if (gps->isHighAccuracy()) {
+          currentScenario = SCENARIO_1_HIGH_ACCURACY;
+          // Store high accuracy GPS in reference position (internal flash/NVS)
+          setReferencePosition(gpsData.latitude, gpsData.longitude);
+        } else {
+          currentScenario = SCENARIO_2_LOW_ACCURACY;
+          // Store low accuracy GPS in reference position (internal flash/NVS)
+          setReferencePosition(gpsData.latitude, gpsData.longitude);
+        }
       } else {
-        currentScenario = SCENARIO_2_LOW_ACCURACY;
-        // Store low accuracy GPS in reference position (internal flash/NVS)
-        setReferencePosition(gpsData.latitude, gpsData.longitude);
+        // GPS reports fix but coordinates are invalid - treat as no fix
+        Serial.println("WARNING: GPS reports fix but coordinates are invalid - treating as no fix");
+        currentScenario = SCENARIO_3_NO_FIX;
       }
     } else {
       currentScenario = SCENARIO_3_NO_FIX;
@@ -123,6 +135,26 @@ public:
   
   // Set reference position (stored in NVS/internal flash)
   void setReferencePosition(double lat, double lon) {
+    // Prevent setting invalid (0,0) position unless it's explicitly from UI
+    // (0,0) is a valid coordinate (Gulf of Guinea), but unlikely to be our actual position
+    // Only allow (0,0) if it's from UI position (Scenario 4)
+    if (lat == 0.0 && lon == 0.0 && currentScenario != SCENARIO_4_UI_POSITION) {
+      // Don't set invalid position - keep existing reference if available
+      if (referencePositionSet) {
+        Serial.println("WARNING: Attempted to set reference position to (0,0) - keeping existing position");
+        return;
+      }
+      // If no existing position, still don't set (0,0) - wait for valid GPS fix
+      Serial.println("WARNING: Attempted to set reference position to (0,0) - skipping (no valid position available)");
+      return;
+    }
+    
+    // Prevent repeated calls with same position
+    if (referencePositionSet && referenceLatitude == lat && referenceLongitude == lon) {
+      // Position already set to this value - don't log again
+      return;
+    }
+    
     referenceLatitude = lat;
     referenceLongitude = lon;
     referencePositionSet = true;

@@ -650,7 +650,9 @@ void loop() {
     
     // Check if initial position was received via BLE
     // This is handled in BLE callback, but we need to ensure GPS is off and scenario is updated
-    if (NVSConfig::hasInitialPosition() && gpsScenarioHandler != nullptr && gpsInitialized) {
+    // Only check once to avoid repeated calls
+    static bool initialPositionProcessed = false;
+    if (!initialPositionProcessed && NVSConfig::hasInitialPosition() && gpsScenarioHandler != nullptr && gpsInitialized) {
       // Turn off GPS immediately (already done in BLE callback, but ensure it's off)
       GPSSensor::powerOff();
       
@@ -658,6 +660,7 @@ void loop() {
       GPSScenario scenario = gpsScenarioHandler->determineScenario();
       if (scenario == SCENARIO_4_UI_POSITION) {
         Serial.println("Initial position from UI active - Scenario 4");
+        initialPositionProcessed = true; // Mark as processed to avoid repeated calls
       }
     }
   }
@@ -781,11 +784,23 @@ void loop() {
         if (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
           // If 2-minute period not complete, complete it now
           gpsScenarioHandler->startGPSFixAcquisition();
-          // Wait for remaining time or complete immediately
+          // Wait for remaining time with timeout to prevent infinite loop
+          unsigned long long waitStartTime = TimeSync::getCurrentTimeMillis();
+          const unsigned long long MAX_WAIT_TIME_MS = 130000; // 2 minutes + 10 seconds buffer
           while (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+            // Check for timeout to prevent infinite loop
+            if (TimeSync::getCurrentTimeMillis() - waitStartTime > MAX_WAIT_TIME_MS) {
+              Serial.println("WARNING: GPS fix acquisition wait timeout - forcing completion");
+              break;
+            }
             delay(100);
             gpsSensor.update();
-            gpsScenarioHandler->determineScenario();
+            // Only call determineScenario() once per second to avoid spam
+            static unsigned long long lastDetermineTime = 0;
+            if (TimeSync::getCurrentTimeMillis() - lastDetermineTime >= 1000) {
+              gpsScenarioHandler->determineScenario();
+              lastDetermineTime = TimeSync::getCurrentTimeMillis();
+            }
           }
         }
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
