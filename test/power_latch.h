@@ -60,7 +60,7 @@ void initPowerLatch() {
   setPowerLatchPin(true);
   
   // Initialize button pin
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);
   
   // Reset button state
   buttonPressed = false;
@@ -76,7 +76,7 @@ void initPowerLatch() {
 // Update button handler - call this in loop()
 // Detects long press (5 seconds) and powers off
 void updateButtonHandler() {
-  bool currentButtonState = (digitalRead(BUTTON_PIN) == LOW); // LOW when pressed (pull-up)
+  bool currentButtonState = (digitalRead(BUTTON_PIN) == HIGH); // HIGH when pressed (pull-down)
   
   if (currentButtonState) {
     // Button is pressed

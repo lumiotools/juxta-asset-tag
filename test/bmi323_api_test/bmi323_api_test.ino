@@ -136,19 +136,16 @@ void setup() {
   Serial.print("BMI323 initialized successfully! Chip ID: 0x");
   Serial.println(bmi3Device.chip_id, HEX);
   
+  // Allow sensor to stabilize after initialization
+  delay(50);
+  
   // Configure accelerometer and gyroscope
   Serial.println("\nConfiguring sensors...");
   
+  // Initialize config structures (GET call is optional - we set all values explicitly)
   struct bmi3_sens_config config[2] = { { 0 } };
   config[0].type = BMI323_ACCEL;
   config[1].type = BMI323_GYRO;
-  
-  rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
-  if (rslt != BMI323_OK) {
-    Serial.print("ERROR: Failed to get sensor config: ");
-    Serial.println(rslt);
-    return;
-  }
   
   // Configure accelerometer: Normal mode, 100Hz ODR, ±2g range
   config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;
@@ -273,7 +270,7 @@ void printErrorCode(int8_t error) {
       Serial.println("Null pointer error");
       break;
     case BMI3_E_COM_FAIL:
-      Serial.println("Communication failure");
+      Serial.println("Communication failure (I2C read/write error or power failure during communication)");
       break;
     case BMI3_E_DEV_NOT_FOUND:
       Serial.println("Device not found");

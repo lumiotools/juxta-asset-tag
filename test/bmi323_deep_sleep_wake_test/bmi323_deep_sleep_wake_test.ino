@@ -2,17 +2,46 @@
 // This test verifies deep sleep functionality with motion-based wake-up
 // Uses Bosch BMI323 SensorAPI directly from libs folder
 // 
+// ============================================================================
+// ESP32-C6 RTC GPIO PINS (for deep sleep wake-up)
+// ============================================================================
+// IMPORTANT: ESP32-C6 can ONLY wake from deep sleep using RTC GPIOs!
+// Only RTC GPIOs (Low-Power GPIOs) can be used with esp_sleep_enable_ext1_wakeup()
+//
+// RTC GPIOs on ESP32-C6 (LP_GPIOs): GPIO 0, 1, 2, 3, 4, 5, 6, 7
+// These are the ONLY GPIOs that can wake from deep sleep!
+//
+// NON-RTC GPIOs (CANNOT wake from deep sleep): GPIO 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, etc.
+// GPIO 8 and above will NOT work for deep sleep wake-up and will give error 258!
+//
+// Pin Usage in this code:
+// - GPIO 0: I2C SDA (RTC-capable, but used for I2C - avoid for wake-up)
+// - GPIO 1: I2C SCL (RTC-capable, but used for I2C - avoid for wake-up)
+// - GPIO 2: Motion interrupt (MOTION_INT_PIN) - RTC-capable ✓ (recommended)
+// - GPIO 3: Available for wake-up - RTC-capable ✓
+// - GPIO 4: Power latch control (RTC-capable, but used for power management - avoid for wake-up)
+// - GPIO 5: Available for wake-up - RTC-capable ✓ (strapping pin - be careful)
+// - GPIO 6: Available for wake-up - RTC-capable ✓ (recommended)
+// - GPIO 7: Available for wake-up - RTC-capable ✓ (recommended)
+// - GPIO 10: Button (BUTTON_PIN) - NOT RTC-capable ✗ (cannot wake from deep sleep)
+//
+// To change wake-up pin: Modify MOTION_INT_PIN definition below
+// Recommended RTC GPIOs for wake-up: 2, 3, 6, 7 (avoid 0,1,4,5 due to other functions)
+// ============================================================================
+//
 // Hardware Connections:
 // - BMI323 SDA → GPIO 0 (I2C_SDA_PIN)
 // - BMI323 SCL → GPIO 1 (I2C_SCL_PIN)
-// - BMI323 INT1 → GPIO 22 (MOTION_INT_PIN)
+// - BMI323 INT1 → GPIO 2 (MOTION_INT_PIN) - MUST be RTC GPIO (0-7) for deep sleep wake-up
+// - Button → GPIO 10 (BUTTON_PIN) - NOT used for deep sleep wake-up
 // - I2C Address: 0x69
 //
 // Test Flow:
 // 1. Initialize BMI323 sensor using Bosch API
 // 2. Configure motion detection interrupts
-// 3. Enter deep sleep (wake on motion interrupt)
-// 4. Wake up from motion interrupt and print message
+// 3. Send '1' through serial monitor to enter deep sleep
+// 4. Wake up from motion interrupt (GPIO 2) when HIGH signal is applied
+// 5. Print wake reason and handle wake-up
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -24,7 +53,17 @@
 #define I2C_SDA_PIN 0
 #define I2C_SCL_PIN 1
 #define IMU_I2C_ADDRESS 0x69
-#define MOTION_INT_PIN 22
+
+// Wake-up pin configuration
+// IMPORTANT: ESP32-C6 can only wake from deep sleep using RTC GPIOs (LP_GPIOs)
+// RTC GPIOs on ESP32-C6: GPIO 0, 1, 2, 3, 4, 5, 6, 7 ONLY!
+// GPIO 8 and above are NOT RTC GPIOs and will give error 258!
+// 
+// Available RTC GPIOs: 0, 1, 2, 3, 4, 5, 6, 7
+// Note: GPIO 0,1 used for I2C; GPIO 4 used for power latch
+// Recommended for wake-up: GPIO 2, 3, 6, 7 (avoid 0,1,4,5 due to other functions)
+// Note: GPIO 5 is a strapping pin - be careful with external signals during boot
+#define MOTION_INT_PIN 5  // RTC-capable GPIO - must be 0-7
 
 // Motion detection configuration
 #define ANY_MOTION_SLOPE_THRES 9      // Slope threshold (0-4095)
@@ -34,11 +73,39 @@
 #define ANY_MOTION_DURATION 1          // Duration in samples (immediate)
 #define NO_MOTION_DURATION 15000       // 5 minutes at 50Hz (300s * 50)
 
+// LED pin for wake-up indication
+#define LED_PIN 11
+
 // Test state
 bool sensorInitialized = false;
 bool motionDetectionConfigured = false;
 struct bmi3_dev bmi3Device = { 0 };
 int wakeCount = 0;
+
+// Wait for serial input '1' to trigger deep sleep
+// Returns true when '1' is received
+bool waitForSerialCommand() {
+  Serial.println("Send '1' through serial monitor to enter deep sleep...");
+  
+  while (true) {
+    if (Serial.available() > 0) {
+      char input = Serial.read();
+      if (input == '1') {
+        Serial.println("Command '1' received - entering deep sleep...");
+        // Clear any remaining serial buffer
+        while (Serial.available() > 0) {
+          Serial.read();
+        }
+        return true;
+      } else if (input != '\n' && input != '\r') {
+        Serial.print("Received: '");
+        Serial.print(input);
+        Serial.println("' - send '1' to enter deep sleep");
+      }
+    }
+    delay(10);  // Small delay to avoid busy waiting
+  }
+}
 
 // I2C interface wrapper functions for Bosch API
 extern "C" {
@@ -214,19 +281,83 @@ bool configureBMI323Interrupts() {
 void enterDeepSleep() {
   Serial.println("\n========== ENTERING DEEP SLEEP ==========");
   
-  // Configure ESP32-C6 wake sources
+  // Turn off LED before entering deep sleep (GPIO 11 is not RTC-capable, will lose state)
+  digitalWrite(LED_PIN, LOW);
+  Serial.println("LED turned OFF (will turn on again after wake-up)");
+  
+  // Configure control pin (GPIO 4 - power latch) HIGH before deep sleep
+  // This ensures power latch remains ON during deep sleep
+  Serial.println("Configuring power latch (GPIO 4) for deep sleep...");
+  setPowerLatchPin(true);  // Set HIGH with pull-up
+  gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+  gpio_hold_en(GPIO_NUM_4);  // Hold GPIO 4 HIGH during deep sleep
+  Serial.println("Power latch held HIGH - power will remain on during deep sleep");
+  
+  // CRITICAL: Release any GPIO hold on wake pin before configuring wake-up
+  // GPIO hold can prevent wake-up from working
+  Serial.println("Releasing GPIO hold on wake pin...");
+  gpio_hold_dis((gpio_num_t)MOTION_INT_PIN);
+  
+  // Configure wake pin properly before sleep
+  // For wake-up to work, pin must be configured as INPUT with appropriate pull
+  Serial.print("Configuring wake pin GPIO ");
+  Serial.print(MOTION_INT_PIN);
+  Serial.println(" (motion interrupt)...");
+  
+  // Ensure pin is in correct state - release from any hold first
+  gpio_reset_pin((gpio_num_t)MOTION_INT_PIN);
+  pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);  // Pull-down: wakes on HIGH signal
+  gpio_set_direction((gpio_num_t)MOTION_INT_PIN, GPIO_MODE_INPUT);
+  gpio_set_pull_mode((gpio_num_t)MOTION_INT_PIN, GPIO_PULLDOWN_ONLY);
+  
+  // Verify pin state
+  Serial.print("GPIO ");
+  Serial.print(MOTION_INT_PIN);
+  Serial.print(" state: ");
+  Serial.println(digitalRead(MOTION_INT_PIN));
+  
+  // Configure ESP32-C6 wake source
   // ESP32-C6 only supports EXT1 wakeup (not EXT0)
-  // Note: GPIO 22 is used for motion interrupt wakeup
-  Serial.println("Configuring wake source: GPIO 22 (motion interrupt)");
-  esp_sleep_enable_ext1_wakeup((1ULL << GPIO_NUM_22), ESP_EXT1_WAKEUP_ANY_HIGH); // Wake on HIGH (motion interrupt)
+  // IMPORTANT: Only RTC GPIOs (LP_GPIOs) can wake from deep sleep!
+  // RTC GPIOs on ESP32-C6: GPIO 0, 1, 2, 3, 4, 5, 6, 7 ONLY!
+  Serial.println("Configuring wake source (EXT1):");
+  Serial.print("  - GPIO ");
+  Serial.print(MOTION_INT_PIN);
+  Serial.print(" (motion interrupt) - ");
+  if (MOTION_INT_PIN >= 0 && MOTION_INT_PIN <= 7) {
+    Serial.println("RTC-capable ✓");
+  } else {
+    Serial.println("NOT RTC-capable ✗");
+    Serial.println("ERROR: GPIO is not RTC-capable! Use GPIO 0-7 only");
+    Serial.println("RTC GPIOs on ESP32-C6: 0, 1, 2, 3, 4, 5, 6, 7");
+    return;
+  }
+  
+  // EXT1 wakeup: wake on GPIO going HIGH
+  // Note: Even for single pin, ESP32-C6 uses EXT1
+  esp_err_t wakeup_result = esp_sleep_enable_ext1_wakeup(
+    (1ULL << MOTION_INT_PIN), 
+    ESP_EXT1_WAKEUP_ANY_HIGH
+  );
+  
+  if (wakeup_result != ESP_OK) {
+    Serial.print("ERROR: Failed to configure wake-up sources! Error: ");
+    Serial.println(wakeup_result);
+    Serial.println("Make sure you're using RTC GPIOs (GPIO 0-7 on ESP32-C6)");
+    Serial.println("RTC GPIOs (LP_GPIOs): 0, 1, 2, 3, 4, 5, 6, 7");
+    Serial.println("GPIO 8 and above are NOT RTC-capable and will not work!");
+    return;
+  }
+  Serial.println("Wake sources configured successfully");
   
   Serial.println("Entering deep sleep...");
+  Serial.println("Apply HIGH signal (3.3V) to wake pins to wake device");
   Serial.flush(); // Ensure all messages are sent before sleep
-  delay(100);
+  delay(200);  // Give time for serial to flush
   
   // Enter deep sleep
   esp_deep_sleep_start();
-  // Will not reach here - device will wake from motion interrupt
+  // Will not reach here - device will wake from interrupt
 }
 
 // Handle wake-up from deep sleep
@@ -237,13 +368,32 @@ void handleWakeup() {
   Serial.print("Wake cycle #");
   Serial.println(wakeCount);
   
+  // Release GPIO hold FIRST (critical before using GPIO 4)
+  // Serial.println("Releasing GPIO hold on power latch pin...");
+  // gpio_hold_dis(GPIO_NUM_4);  // Release hold on GPIO 4
+  // Serial.println("GPIO hold released");
+  
   // Check wake reason
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
   Serial.print("Wake reason: ");
   switch (wakeReason) {
-    case ESP_SLEEP_WAKEUP_EXT1:
-      Serial.println("Motion interrupt (GPIO 22)");
+    case ESP_SLEEP_WAKEUP_EXT1: {
+      // EXT1 wake-up from motion interrupt pin
+      uint64_t wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
+      Serial.print("EXT1 wake-up pin mask: 0x");
+      Serial.println(wakeup_pin_mask, HEX);
+      
+      if (wakeup_pin_mask & (1ULL << MOTION_INT_PIN)) {
+        Serial.print("Motion interrupt (GPIO ");
+        Serial.print(MOTION_INT_PIN);
+        Serial.println(")");
+      } else {
+        Serial.print("EXT1 interrupt (unknown GPIO, mask: 0x");
+        Serial.print(wakeup_pin_mask, HEX);
+        Serial.println(")");
+      }
       break;
+    }
     case ESP_SLEEP_WAKEUP_EXT0:
       Serial.println("External signal (EXT0)");
       break;
@@ -295,9 +445,18 @@ void setup() {
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
   bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 || wakeReason == ESP_SLEEP_WAKEUP_EXT0);
   
+  // Initialize LED pin (GPIO 11) - set HIGH immediately
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+  Serial.println("LED pin (GPIO 11) initialized and set HIGH");
+  
   if (wokeFromDeepSleep) {
     // Waking from deep sleep - handle wake-up first
     Serial.println("Waking from deep sleep - handling wake-up...");
+    
+    // Turn LED on to indicate wake-up (it was off during deep sleep)
+    digitalWrite(LED_PIN, HIGH);
+    Serial.println("LED turned ON after wake-up");
     
     // Initialize I2C first
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -325,6 +484,15 @@ void setup() {
       // powerOff(); // Power off with 5 second delay
       return;
     }
+    
+    // After wake-up, stay awake - do NOT immediately go back to sleep
+    // The device will remain awake and LED will stay on
+    Serial.println("\n========================================");
+    Serial.println("Device is now AWAKE after wake-up");
+    Serial.println("LED should remain ON");
+    Serial.println("Send '1' through serial monitor to enter deep sleep again");
+    Serial.println("========================================\n");
+    return;  // Exit setup() - do NOT call enterDeepSleep() immediately
   } else {
     // Normal boot - initialize everything
     Serial.println("Normal boot - initializing test...");
@@ -377,27 +545,47 @@ void setup() {
     }
     
     // Setup interrupt pin on ESP32
-    Serial.print("\nSetting up interrupt on GPIO ");
+    // IMPORTANT: Only RTC GPIOs (0-7 on ESP32-C6) can wake from deep sleep
+    Serial.print("\nSetting up interrupt pin (RTC GPIO for deep sleep wake-up)...");
+    Serial.print("\n  GPIO ");
     Serial.print(MOTION_INT_PIN);
-    Serial.println("...");
+    Serial.print(" (motion interrupt) - ");
+    if (MOTION_INT_PIN >= 0 && MOTION_INT_PIN <= 7) {
+      Serial.println("RTC-capable ✓");
+    } else {
+      Serial.println("NOT RTC-capable ✗ - will not wake from deep sleep!");
+      Serial.println("ERROR: Use GPIO 0-7 only! GPIO 8+ will not work for deep sleep wake-up");
+    }
     pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);
-    Serial.println("Interrupt pin configured (will be triggered by motion)");
+    
+    // Button pin (not used for deep sleep wake-up, only for normal operation)
+    Serial.print("  GPIO ");
+    Serial.print(BUTTON_PIN);
+    Serial.println(" (button - not used for deep sleep wake-up)");
+    pinMode(BUTTON_PIN, INPUT_PULLDOWN);
+    Serial.println("Interrupt pin configured");
     
     sensorInitialized = true;
     
     Serial.println("\n========================================");
     Serial.println("Test Setup Complete!");
     Serial.println("========================================");
-    Serial.println("Test will enter deep sleep in 3 seconds...");
-    Serial.println("Move the device to wake it up from deep sleep");
+    Serial.println("Send '1' through serial monitor to enter deep sleep");
+    Serial.print("Wake source: Motion interrupt (GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.println(")");
+    Serial.println("NOTE: Apply HIGH signal (3.3V) to GPIO ");
+    Serial.print(MOTION_INT_PIN);
+    Serial.println(" to wake device");
     Serial.println("========================================\n");
     
-    delay(3000);
-  }
-  
-  // Enter deep sleep (will wake on motion interrupt)
-  if (sensorInitialized && motionDetectionConfigured) {
-    enterDeepSleep();
+    // Wait for serial command '1' to enter deep sleep
+    waitForSerialCommand();
+    
+    // Enter deep sleep (will wake on motion interrupt)
+    if (sensorInitialized && motionDetectionConfigured) {
+      enterDeepSleep();
+    }
   }
 }
 
@@ -407,10 +595,9 @@ void loop() {
   
   // This should not be reached during normal test operation
   // Device should be in deep sleep most of the time
-  // If we reach here, re-enter deep sleep
-  Serial.println("Re-entering deep sleep in 2 seconds...");
-  delay(2000);
+  // If we reach here, wait for serial command to re-enter deep sleep
   if (sensorInitialized && motionDetectionConfigured) {
+    waitForSerialCommand();
     enterDeepSleep();
   }
 }

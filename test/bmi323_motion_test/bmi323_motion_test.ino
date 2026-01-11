@@ -298,9 +298,25 @@ void loop() {
   if (motionInterruptFlag) {
     motionInterruptFlag = false;
     
-    // Read interrupt status
+    // Small delay to allow sensor to update interrupt status register
+    delay(500);
+    
+    // Read interrupt status with retry logic
     uint16_t int_status = 0;
-    int8_t rslt = bmi323_get_int1_status(&int_status, &bmi3Device);
+    int8_t rslt = -2; // BMI3_E_COM_FAIL
+    int retry_count = 0;
+    const int max_retries = 3;
+    
+    // Retry reading interrupt status in case of communication failure
+    while (rslt != BMI323_OK && retry_count < max_retries) {
+      rslt = bmi323_get_int1_status(&int_status, &bmi3Device);
+      if (rslt != BMI323_OK) {
+        retry_count++;
+        if (retry_count < max_retries) {
+          delay(1); // Small delay before retry
+        }
+      }
+    }
     
     if (rslt == BMI323_OK) {
       Serial.println("\n*** INTERRUPT DETECTED ***");
@@ -317,10 +333,20 @@ void loop() {
         Serial.println("Device has been still for 5 minutes!");
       }
       
+      // Check for other interrupt types for debugging
+      if (int_status & BMI3_INT_STATUS_ERR) {
+        Serial.println("WARNING: Error status interrupt detected!");
+      }
+      
       Serial.println();
     } else {
-      Serial.print("ERROR reading interrupt status: ");
-      Serial.println(rslt);
+      Serial.print("ERROR reading interrupt status (error ");
+      Serial.print(rslt);
+      Serial.print(") after ");
+      Serial.print(retry_count);
+      Serial.println(" retries");
+      Serial.print("Interrupt pin state: ");
+      Serial.println(digitalRead(MOTION_INT_PIN) ? "HIGH" : "LOW");
     }
   }
   
