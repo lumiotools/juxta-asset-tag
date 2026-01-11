@@ -167,8 +167,7 @@ private:
     void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
       // Start blue LED blinking on receive
       // startStatusLEDBlink(0, 0, 255);
-      
-      // Read string data (sent as TextEncoder().encode("0") or TextEncoder().encode("1") from web interface)
+      // TextEncoder().encode("0") or TextEncoder().encode("1") from web interface)
       std::string stdValue = pCharacteristic->getValue();
       String value = String(stdValue.c_str());
       value.trim(); // Remove any whitespace
