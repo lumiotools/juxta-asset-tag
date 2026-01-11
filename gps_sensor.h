@@ -263,31 +263,65 @@ private:
 
 public:
   // GPS power control functions
+  // Shared static variable to track GPS power state across powerOn/powerOff calls
+  static bool& getGPSPowerState() {
+    static bool gpsPowerState = false; // false = off, true = on
+    return gpsPowerState;
+  }
+  
   static void powerOn() {
     // GPS_POWER_PIN must be defined with a pin number (e.g., #define GPS_POWER_PIN D3)
     // If defined as empty or 0, power control is disabled
     // Note: LOW = GPS ON, HIGH = GPS OFF (inverted logic)
     if (GPS_POWER_PIN > 0) {
+      bool& gpsPowerState = getGPSPowerState();
+      // Only log if GPS is currently off (state change)
+      bool wasOff = !gpsPowerState;
+      
       pinMode(GPS_POWER_PIN, OUTPUT);
       digitalWrite(GPS_POWER_PIN, LOW);
       delay(500); // Give GPS time to power up
-      Serial.print("GPS power turned ON (pin ");
-      Serial.print(GPS_POWER_PIN);
-      Serial.println(" set to LOW)");
+      gpsPowerState = true; // GPS is now on
+      
+      // Only print log message if GPS was actually off (state changed)
+      if (wasOff) {
+        Serial.print("GPS power turned ON (pin ");
+        Serial.print(GPS_POWER_PIN);
+        Serial.println(" set to LOW)");
+      }
     } else {
-      Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+      // Only log once if pin not configured
+      static bool pinNotConfiguredLogged = false;
+      if (!pinNotConfiguredLogged) {
+        Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+        pinNotConfiguredLogged = true;
+      }
     }
   }
   
   static void powerOff() {
     if (GPS_POWER_PIN > 0) {
+      bool& gpsPowerState = getGPSPowerState();
+      // Only log if GPS is currently on (state change)
+      bool wasOn = gpsPowerState;
+      
       pinMode(GPS_POWER_PIN, OUTPUT);
       digitalWrite(GPS_POWER_PIN, HIGH);
-      Serial.print("GPS power turned OFF (pin ");
-      Serial.print(GPS_POWER_PIN);
-      Serial.println(" set to HIGH)");
+      gpsPowerState = false; // GPS is now off
+      
+      // Only print log message if GPS was actually on (state changed)
+      if (wasOn) {
+        Serial.print("GPS power turned OFF (pin ");
+        Serial.print(GPS_POWER_PIN);
+        Serial.println(" set to HIGH)");
+      }
     } else {
-      Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+      // Only log once if pin not configured
+      static bool pinNotConfiguredLogged = false;
+      if (!pinNotConfiguredLogged) {
+        Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
+        pinNotConfiguredLogged = true;
+      }
     }
   }
   
