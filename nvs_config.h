@@ -155,7 +155,7 @@ public:
   static bool setWiFiSSID(const char* ssid) { return writeStringNVS(WIFI_SSID_KEY, ssid); }
   static bool setWiFiPassword(const char* password) { return writeStringNVS(WIFI_PASSWORD_KEY, password); }
 
-  static uint8_t getGPSActive() { return readU8NVS(GPS_ACTIVE_KEY, 0); } // Default to 0 (GPS OFF)
+  static uint8_t getGPSActive() { return readU8NVS(GPS_ACTIVE_KEY, 1); } // Default to 1 (GPS ON)
   static bool setGPSActive(uint8_t gpsActive) { return writeU8NVS(GPS_ACTIVE_KEY, gpsActive); }
 
   static uint32_t getCycleTime() { return readU32NVS(CYCLE_TIME_KEY, 900); } // Default to 900 seconds (15 minutes)
