@@ -63,15 +63,47 @@ void setup() {
   Serial.println("Test Setup Complete!");
   Serial.println("Reading GPS data every 1 second...");
   Serial.println("Hold button for 5 seconds to power off");
+  Serial.println("Serial Commands: Type 'on' to turn GPS ON, 'off' to turn GPS OFF");
   Serial.println("========================================\n");
 }
 
 void loop() {
+  // Check for serial input commands
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    command.toLowerCase();
+    
+    if (command == "on") {
+      Serial.println("Turning GPS ON...");
+      GPSSensor::powerOn();
+      // Reinitialize GPS if needed
+      if (!gpsInitialized) {
+        gpsStartTime = millis();
+        fixAcquired = false;
+        gpsInitialized = gpsSensor.begin();
+        if (gpsInitialized) {
+          Serial.println("GPS initialized successfully");
+        } else {
+          Serial.println("GPS initialization failed");
+        }
+      }
+    } else if (command == "off") {
+      Serial.println("Turning GPS OFF...");
+      GPSSensor::powerOff();
+      gpsInitialized = false;
+    } else if (command.length() > 0) {
+      Serial.print("Unknown command: '");
+      Serial.print(command);
+      Serial.println("'. Use 'on' or 'off' to control GPS.");
+    }
+  }
+  
   // Update button handler (check for long press to power off)
   updateButtonHandler();
   
   if (!gpsInitialized) {
-    delay(1000);
+    delay(10);
     return;
   }
   

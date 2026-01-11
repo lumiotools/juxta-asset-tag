@@ -268,7 +268,7 @@ public:
     // If defined as empty or 0, power control is disabled
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, HIGH);
+      digitalWrite(GPS_POWER_PIN, LOW);  // Reversed logic: LOW = GPS ON
       delay(500); // Give GPS time to power up
       Serial.print("GPS power turned ON (pin ");
       Serial.print(GPS_POWER_PIN);
@@ -281,7 +281,7 @@ public:
   static void powerOff() {
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, LOW);
+      digitalWrite(GPS_POWER_PIN, HIGH);  // Reversed logic: HIGH = GPS OFF
       Serial.print("GPS power turned OFF (pin ");
       Serial.print(GPS_POWER_PIN);
       Serial.println(")");
