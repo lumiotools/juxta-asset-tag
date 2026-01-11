@@ -266,13 +266,14 @@ public:
   static void powerOn() {
     // GPS_POWER_PIN must be defined with a pin number (e.g., #define GPS_POWER_PIN D3)
     // If defined as empty or 0, power control is disabled
+    // Note: LOW = GPS ON, HIGH = GPS OFF (inverted logic)
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, HIGH);
+      digitalWrite(GPS_POWER_PIN, LOW);
       delay(500); // Give GPS time to power up
       Serial.print("GPS power turned ON (pin ");
       Serial.print(GPS_POWER_PIN);
-      Serial.println(")");
+      Serial.println(" set to LOW)");
     } else {
       Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
     }
@@ -281,10 +282,10 @@ public:
   static void powerOff() {
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, LOW);
+      digitalWrite(GPS_POWER_PIN, HIGH);
       Serial.print("GPS power turned OFF (pin ");
       Serial.print(GPS_POWER_PIN);
-      Serial.println(")");
+      Serial.println(" set to HIGH)");
     } else {
       Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
     }

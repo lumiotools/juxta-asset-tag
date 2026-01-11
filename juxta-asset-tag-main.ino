@@ -704,7 +704,7 @@ void loop() {
       // Get extension time from BLE config (adds 30s each time button is pressed)
       unsigned long long extensionTime = BLEConfig::getConfigTimeExtension();
       unsigned long long connectionPlusThirty = bleConnectionTime + 60000 + extensionTime; // +1 min + extension
-      unsigned long long minimumOneMinute = bleStartTime + 600000 + extensionTime; // 1 min from start + extension
+      unsigned long long minimumOneMinute = bleStartTime + 60000 + extensionTime; // 1 min from start + extension
       
       // Use whichever is longer
       firstCycleEndTime = (connectionPlusThirty > minimumOneMinute) 
