@@ -354,9 +354,38 @@ private:
   class ExtendConfigTimeCallbacks: public NimBLECharacteristicCallbacks {
       void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
         // Read seconds from message (always contains an integer) and extend configuration period by that amount
-        uint32_t seconds = String(pCharacteristic->getValue().c_str()).toInt();
-        configTimeExtension += (unsigned long long)seconds * 1000ULL; // Convert to milliseconds and add
-        // No indication or response - silent extension
+        std::string stdValue = pCharacteristic->getValue();
+        String value = String(stdValue.c_str());
+        
+        // Trim whitespace
+        value.trim();
+        
+        if (value.length() > 0) {
+          uint32_t seconds = value.toInt();
+          
+          if (seconds > 0) {
+            unsigned long long previousExtension = configTimeExtension;
+            configTimeExtension += (unsigned long long)seconds * 1000ULL; // Convert to milliseconds and add
+            
+            // Debug output to verify extension is being added
+            Serial.print("[EXTEND CONFIG TIME] Received: ");
+            Serial.print(seconds);
+            Serial.print(" seconds, Previous extension: ");
+            Serial.print(previousExtension);
+            Serial.print(" ms, New extension: ");
+            Serial.print(configTimeExtension);
+            Serial.print(" ms (");
+            Serial.print(configTimeExtension / 1000);
+            Serial.println(" seconds total)");
+          } else {
+            Serial.print("[EXTEND CONFIG TIME] ERROR: Invalid value (0 or parse failed). Raw value: '");
+            Serial.print(value);
+            Serial.print("', Length: ");
+            Serial.println(value.length());
+          }
+        } else {
+          Serial.println("[EXTEND CONFIG TIME] ERROR: Empty value received");
+        }
       }
   };
 
