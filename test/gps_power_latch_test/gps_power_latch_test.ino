@@ -8,6 +8,7 @@
 // - GPS Power → GPIO 19 (GPS_POWER_PIN)
 // - Power Latch → GPIO 4 (POWER_LATCH_PIN)
 // - Button → GPIO 10 (BUTTON_PIN, for power off)
+// - LED → GPIO 20 (LED_PIN, indicates GPS fix)
 
 #include <Arduino.h>
 #include "../power_latch.h"
@@ -27,6 +28,9 @@ const unsigned long GPS_FIX_TIMEOUT_MS = 120000; // 2 minutes timeout for fix
 unsigned long gpsStartTime = 0;
 bool fixAcquired = false;
 
+// LED pin for GPS fix indicator
+const int LED_PIN = 20;
+
 // Serial command buffer
 String serialCommand = "";
 
@@ -36,6 +40,10 @@ void setup() {
   
   // Initialize power latch (set HIGH on boot)
   initPowerLatch();
+  
+  // Initialize LED pin (starts OFF, will turn ON when GPS fix is acquired)
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
   
   Serial.println("\n========================================");
   Serial.println("GPS Sensor Test with Power Latch");
@@ -147,6 +155,8 @@ void loop() {
         Serial.print("*** GPS FIX ACQUIRED! (Time: ");
         Serial.print(fixTime / 1000);
         Serial.println(" seconds) ***");
+        // Turn LED on when fix is acquired
+        digitalWrite(LED_PIN, HIGH);
       }
       
       Serial.print("Status: VALID FIX (");
