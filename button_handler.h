@@ -30,7 +30,7 @@ private:
 public:
   // Initialize button handler
   static void begin() {
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(BUTTON_PIN, INPUT_PULLDOWN);
     pinMode(DEVICE_POWER_PIN, OUTPUT);
     digitalWrite(DEVICE_POWER_PIN, HIGH); // Keep power on initially
     
@@ -58,7 +58,7 @@ public:
       return;
     }
     
-    bool currentButtonState = (digitalRead(BUTTON_PIN) == LOW); // LOW when pressed (pull-up)
+    bool currentButtonState = (digitalRead(BUTTON_PIN) == HIGH); // HIGH when pressed (pull-down)
     
     if (currentButtonState) {
       // Button is pressed
