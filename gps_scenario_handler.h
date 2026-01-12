@@ -86,10 +86,17 @@ public:
     if (NVSConfig::hasInitialPosition()) {
       double uiLat, uiLon;
       if (NVSConfig::getInitialPosition(uiLat, uiLon)) {
-        currentScenario = SCENARIO_4_UI_POSITION;
-        setReferencePosition(uiLat, uiLon);
-        // Ensure GPS is off when UI position is used
-        GPSSensor::powerOff();
+        // Only set reference position and turn off GPS when transitioning to Scenario 4
+        // (not every time determineScenario is called)
+        if (currentScenario != SCENARIO_4_UI_POSITION) {
+          currentScenario = SCENARIO_4_UI_POSITION;
+          setReferencePosition(uiLat, uiLon);
+          // Ensure GPS is off when UI position is used
+          GPSSensor::powerOff();
+          
+          // Save scenario state to NVS (persisted through deep sleep)
+          NVSConfig::setScenarioState((uint8_t)currentScenario);
+        }
         return currentScenario;
       }
     }
