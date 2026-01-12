@@ -583,12 +583,22 @@ void loop() {
   // - Scenario 2: Start after 2-minute GPS fix acquisition period
   // - Scenario 4: Can start immediately (UI position provided)
   static bool imuTickerStarted = false;
+  Serial.println("===== IMU Ticker Status =====");
+  Serial.print("imuTickerStarted: ");
+  Serial.println(imuTickerStarted ? "true" : "false");
+  Serial.print("imuInitialized: ");
+  Serial.println(imuInitialized ? "true" : "false");
+  Serial.print("unifiedCSVStorage.isInitialized(): ");
+  Serial.println(unifiedCSVStorage.isInitialized() ? "true" : "false");
+  Serial.print("Combined condition (!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized()): ");
+  Serial.println((!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized()) ? "true - SHOULD START" : "false - BLOCKED");
+  Serial.println("============================");
   if (!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized()) {
     bool shouldStartIMU = false;
-    
+    Serial.println("on line 588");
     if (gpsScenarioHandler != nullptr && gpsInitialized) {
       GPSScenario currentScenario = gpsScenarioHandler->getCurrentScenario();
-      
+      Serial.println("on line 591");
       if (currentScenario == SCENARIO_1_HIGH_ACCURACY) {
         // Scenario 1: Start when GPS has valid fix (already determined as high accuracy)
         GPSData gpsData = gpsSensor.getGPSData();
@@ -618,6 +628,7 @@ void loop() {
       // Scenario 3 (NO_FIX) will not start IMU - device goes to deep sleep
     } else {
       // If GPS is not initialized, start IMU after first cycle (fallback behavior)
+      Serial.println("on line 621");
       if (firstCycleComplete) {
         shouldStartIMU = true;
         Serial.println("GPS not available - starting IMU sampling after first cycle (fallback)");
@@ -625,6 +636,7 @@ void loop() {
     }
     
     if (shouldStartIMU) {
+      Serial.println("on line 629");
       imuReadTicker.attach_ms(10, imuReadISR); // 10ms = 100Hz
       imuTickerStarted = true;
       Serial.println("IMU sampling started: 100Hz (stored as CSV to flash)");
