@@ -90,45 +90,6 @@ private:
     boschApiInitialized = true;
     return true;
   }
-  
-  // Direct register configuration (like test/imu.ino)
-  // Write 16-bit value to register (little-endian)
-  void writeRegister16(uint8_t reg, uint16_t value) {
-    Wire.beginTransmission(IMU_I2C_ADDRESS);
-    Wire.write(reg);
-    Wire.write(value & 0xFF);        // Low byte
-    Wire.write((value >> 8) & 0xFF); // High byte
-    Wire.endTransmission();
-  }
-  
-  // Configure sensors using direct register writes (like test/imu.ino)
-  void configureSensorsDirectly() {
-    Serial.println("Configuring sensors using direct register writes...");
-    
-    // Soft reset first (CMD register 0x7E)
-    writeRegister16(0x7E, 0xDEAF);
-    delay(50);
-    
-    // Configure Accelerometer (ACC_CONF register 0x20)
-    // mode:     0x7000 -> High performance
-    // average:  0x0000 -> No averaging
-    // filter:   0x0080 -> ODR/4
-    // range:    0x0000 -> ±2G
-    // ODR:      0x0008 -> 100Hz (changed from 0x000B=800Hz in test/imu.ino)
-    writeRegister16(0x20, 0x7088);
-    
-    // Configure Gyroscope (GYR_CONF register 0x21)
-    // mode:     0x7000 -> High performance
-    // average:  0x0000 -> No averaging
-    // filter:   0x0080 -> ODR/4
-    // range:    0x0000 -> ±125 dps
-    // ODR:      0x0008 -> 100Hz (changed from 0x000B=800Hz in test/imu.ino)
-    writeRegister16(0x21, 0x7088);
-    
-    delay(100); // Wait for sensors to stabilize
-    
-    Serial.println("Sensors configured: ACC ±2G @ 100Hz, GYR ±125dps @ 100Hz");
-  }
 
 public:
   bool begin() {
@@ -147,9 +108,6 @@ public:
       return false;
     }
     
-    // Configure sensors using direct register writes (like test/imu.ino)
-    configureSensorsDirectly();
-    
     // Verify chip ID (should be 0x43 for BMI323)
     Serial.print("BMI323 detected! Chip ID: 0x");
     Serial.print(bmi3Device.chip_id, HEX);
@@ -159,45 +117,44 @@ public:
       Serial.println(" (WARNING: unexpected chip ID!)");
     }
 
-    // // Configure accelerometer and gyroscope using Bosch API
-    // struct bmi3_sens_config config[2] = { { 0 } };
+    // Configure accelerometer and gyroscope using Bosch API
+    // CRITICAL: Must use Bosch API config for motion detection compatibility
+    struct bmi3_sens_config config[2] = { { 0 } };
     
-    // config[0].type = BMI323_ACCEL;
-    // config[1].type = BMI323_GYRO;
+    config[0].type = BMI323_ACCEL;
+    config[1].type = BMI323_GYRO;
     
-    // // Get default configurations
-    // int8_t rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
-    // if (rslt != BMI323_OK) {
-    //   Serial.print("ERROR: Failed to get sensor config: ");
-    //   Serial.println(rslt);
-    //   return false;
-    // }
+    // Get default configurations
+    int8_t rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to get sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
     
     // Configure accelerometer: Normal mode, 100Hz ODR, ±2g range
-    // config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;  // Enable accel by setting mode
-    // config[0].cfg.acc.odr = BMI3_ACC_ODR_100HZ;
-    // config[0].cfg.acc.range = BMI3_ACC_RANGE_2G;
-    // config[0].cfg.acc.bwp = BMI3_ACC_BW_ODR_QUARTER;
-    // config[0].cfg.acc.avg_num = BMI3_ACC_AVG4;
+    config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;  // Enable accel by setting mode
+    config[0].cfg.acc.odr = BMI3_ACC_ODR_100HZ;
+    config[0].cfg.acc.range = BMI3_ACC_RANGE_2G;
+    config[0].cfg.acc.bwp = BMI3_ACC_BW_ODR_QUARTER;
+    config[0].cfg.acc.avg_num = BMI3_ACC_AVG4;
     
-    // // Configure gyroscope: Normal mode, 100Hz ODR, ±125dps range
-    // config[1].cfg.gyr.gyr_mode = BMI3_GYR_MODE_NORMAL;  // Enable gyro by setting mode
-    // config[1].cfg.gyr.odr = BMI3_GYR_ODR_100HZ;
-    // config[1].cfg.gyr.range = BMI3_GYR_RANGE_125DPS;
-    // config[1].cfg.gyr.bwp = BMI3_GYR_BW_ODR_HALF;
-    // config[1].cfg.gyr.avg_num = BMI3_GYR_AVG1;
+    // Configure gyroscope: Normal mode, 100Hz ODR, ±125dps range
+    config[1].cfg.gyr.gyr_mode = BMI3_GYR_MODE_NORMAL;  // Enable gyro by setting mode
+    config[1].cfg.gyr.odr = BMI3_GYR_ODR_100HZ;
+    config[1].cfg.gyr.range = BMI3_GYR_RANGE_125DPS;
+    config[1].cfg.gyr.bwp = BMI3_GYR_BW_ODR_HALF;
+    config[1].cfg.gyr.avg_num = BMI3_GYR_AVG1;
     
-    // // Set configurations
-    // rslt = bmi323_set_sensor_config(config, 2, &bmi3Device);
-    // if (rslt != BMI323_OK) {
-    //   Serial.print("ERROR: Failed to set sensor config: ");
-    //   Serial.println(rslt);
-    //   return false;
-    // }
+    // Set configurations
+    rslt = bmi323_set_sensor_config(config, 2, &bmi3Device);
+    if (rslt != BMI323_OK) {
+      Serial.print("ERROR: Failed to set sensor config: ");
+      Serial.println(rslt);
+      return false;
+    }
     
-    // Sensors are enabled by setting their mode (acc_mode/gyr_mode) above
-    // No need to call bmi323_select_sensor for basic accel/gyro
-    
+    Serial.println("Accelerometer and gyroscope configured via Bosch API");
     delay(100); // Allow sensor to stabilize
     
     Serial.println("IMU sensor initialized successfully");
