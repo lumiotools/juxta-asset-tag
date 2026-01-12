@@ -184,11 +184,17 @@ private:
         Serial.print(" - Current NVS value: ");
         Serial.println(NVSConfig::getGPSActive());
         
-        // Handle GPS OFF -> Scenario 4 transition
+        // Handle GPS OFF
         if (receivedGPSActive == 0) {
-          // Check if initial position exists in NVS
+          Serial.println("GPS turned OFF via BLE");
+          
+          // Always turn off GPS when receiving 0, regardless of initial position
+          GPSSensor::powerOff();
+          Serial.println("GPS powered off");
+          
+          // If initial position exists, switch to Scenario 4 and clear data
           if (NVSConfig::hasInitialPosition()) {
-            Serial.println("GPS turned OFF - Switching to Scenario 4 and clearing data...");
+            Serial.println("Initial position exists - Switching to Scenario 4 and clearing data...");
             
             // Switch to Scenario 4
             if (gpsScenarioHandler != nullptr) {
@@ -212,17 +218,18 @@ private:
             Serial.print("Last known position cleared: ");
             Serial.println(lastKnownCleared ? "Success" : "Failed");
             
-            // Turn off GPS
-            GPSSensor::powerOff();
-            Serial.println("GPS powered off");
-            
             // Save scenario state to NVS
             if (gpsScenarioHandler != nullptr) {
               NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
             }
-          } else {
-            Serial.println("GPS turned OFF but no initial position in NVS - skipping Scenario 4 transition");
           }
+        }
+        
+        // Handle GPS ON
+        if (receivedGPSActive == 1) {
+          Serial.println("GPS turned ON via BLE");
+          GPSSensor::powerOn();
+          Serial.println("GPS powered on");
         }
         
         // Check if all credentials are received (SSID and password) for WiFi credentials saving

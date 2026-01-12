@@ -674,18 +674,9 @@ void loop() {
   if (BLEConfig::isEnabled()) {
     BLEConfig::update();
     
-    // Check if initial position was received via BLE
-    // This is handled in BLE callback, but we need to ensure GPS is off and scenario is updated
-    if (NVSConfig::hasInitialPosition() && gpsScenarioHandler != nullptr && gpsInitialized) {
-      // Turn off GPS immediately (already done in BLE callback, but ensure it's off)
-      GPSSensor::powerOff();
-      
-      // Update scenario to Scenario 4
-      GPSScenario scenario = gpsScenarioHandler->determineScenario();
-      if (scenario == SCENARIO_4_UI_POSITION) {
-        Serial.println("Initial position from UI active - Scenario 4");
-      }
-    }
+    // Initial position handling is done in BLE callback (InitialPositionCallbacks)
+    // GPS is turned off immediately when position is received
+    // Scenario 4 is handled in gpsScenarioHandler->determineScenario()
   }
   
   // ========== USB STATE MONITORING ==========
