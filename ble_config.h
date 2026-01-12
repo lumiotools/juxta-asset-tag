@@ -738,7 +738,7 @@ public:
     bleDisabled = true;
     deviceConnected = false;
     oldDeviceConnected = false;
-    
+    Serial.println("On line 727");
     // Clear credentials
     receivedSSID = "";
     receivedPassword = "";
@@ -753,6 +753,7 @@ public:
     initialPositionReceived = false;
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
+    Serial.println("On line 742");
   }
   
   // Check if BLE is enabled (not permanently disabled)
@@ -887,4 +888,3 @@ bool BLEConfig::bleDisabled = false;
 unsigned long long BLEConfig::bleStartTimeMs = 0;
 
 #endif
-
