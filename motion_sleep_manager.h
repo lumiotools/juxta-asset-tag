@@ -35,9 +35,9 @@
 // ============================================================================
 
 // GPIO pin definitions
-#define MOTION_INT_PIN 5      // BMI323 INT1 → ESP32-C6 GPIO 5 (RTC-capable)
-                              // ✓ GPIO 5 is RTC-capable for deep sleep wake-up
-                              // Other valid RTC GPIOs: 0, 1, 2, 3, 4, 6, 7
+#define MOTION_INT_PIN 5     // BMI323 INT1 → ESP32-C6 GPIO 25
+                              // ⚠️ WARNING: GPIO 25 is NOT RTC-capable!
+                              // Change to GPIO 2, 3, 6, or 7 for deep sleep wake-up
 // Note: MOTION_INT2_PIN removed - not required
 #define POWER_LATCH_PIN 4     // Power latch control pin (IO4)
 
@@ -512,4 +512,3 @@ extern unsigned long noMotionStartTime;
 extern bool noMotionTracking;
 
 #endif
-
