@@ -711,7 +711,7 @@ public:
     // Now safe to deinitialize
     // deinit(true) will automatically disconnect any remaining connections safely
     Serial.println("Deinitializing BLE...");
-    NimBLEDevice::deinit(true);
+    // NimBLEDevice::deinit(true);
     Serial.println("BLE deinitialized");
     // Wait for deinit to complete
     delay(500); // Increased delay

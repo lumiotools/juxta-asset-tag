@@ -664,12 +664,13 @@ void loop() {
   
   // ========== IMU READING (INTERRUPT-DRIVEN) ==========
   // IMU data reading triggered by ticker ISR at 100Hz (10ms intervals)
-  // Start IMU based on GPS scenario:
-  // - Scenario 1: Start when GPS fix is found
-  // - Scenario 2: Start after 2-minute GPS fix acquisition period
-  // - Scenario 4: Can start immediately (UI position provided)
+  // Start IMU ONLY AFTER first transmission completes (which sends GPS data only)
+  // This ensures:
+  // - First transmission contains GPS scenario info without IMU data
+  // - IMU data collection starts with a clean slate after first transmission
+  // - Subsequent transmissions contain IMU data collected after first transmission
   static bool imuTickerStarted = false;
-  if (!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized()) {
+  if (!imuTickerStarted && imuInitialized && unifiedCSVStorage.isInitialized() && firstTransmissionComplete) {
     bool shouldStartIMU = false;
     
     if (gpsScenarioHandler != nullptr && gpsInitialized) {
