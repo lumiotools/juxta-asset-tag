@@ -782,15 +782,12 @@ void loop() {
           // If 2-minute period not complete, complete it now
           gpsScenarioHandler->startGPSFixAcquisition();
           // Wait for remaining time or complete immediately
-          // Only call determineScenario() once at the end to avoid repeated logs
           while (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
             delay(100);
             gpsSensor.update();
-            // Don't call determineScenario() in loop - it causes repeated logs
-            // Will be called once after loop completes
+            gpsScenarioHandler->determineScenario();
           }
         }
-        // Determine scenario once after acquisition period is complete
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
         Serial.print("GPS Scenario after first cycle: ");
         Serial.println(scenario);

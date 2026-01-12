@@ -123,11 +123,6 @@ public:
   
   // Set reference position (stored in NVS/internal flash)
   void setReferencePosition(double lat, double lon) {
-    // Only log if position has actually changed (avoid repeated logs)
-    bool positionChanged = (fabs(referenceLatitude - lat) > 0.0000001) || 
-                          (fabs(referenceLongitude - lon) > 0.0000001) ||
-                          !referencePositionSet;
-    
     referenceLatitude = lat;
     referenceLongitude = lon;
     referencePositionSet = true;
@@ -135,14 +130,11 @@ public:
     // Save to NVS (internal flash)
     NVSConfig::saveLastKnownPosition(lat, lon);
     
-    // Only print log message if position actually changed
-    if (positionChanged) {
-      Serial.print("Reference position set: (");
-      Serial.print(lat, 7);
-      Serial.print(", ");
-      Serial.print(lon, 7);
-      Serial.println(")");
-    }
+    Serial.print("Reference position set: (");
+    Serial.print(lat, 7);
+    Serial.print(", ");
+    Serial.print(lon, 7);
+    Serial.println(")");
   }
   
   // Load reference position from NVS
