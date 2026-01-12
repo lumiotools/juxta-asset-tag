@@ -808,7 +808,6 @@ void loop() {
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
         Serial.print("GPS Scenario after first cycle: ");
         Serial.println(scenario);
-        
         // Handle Scenario 3 immediately - go to deep sleep (don't turn off BLE, just enter deep sleep)
         if (scenario == SCENARIO_3_NO_FIX) {
           Serial.println("Scenario 3 detected after first cycle - entering deep sleep immediately");
