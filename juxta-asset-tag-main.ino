@@ -217,21 +217,32 @@ void setup() {
   
   // Check if waking from deep sleep - handle wake-up FIRST
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
-  bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 || wakeReason == ESP_SLEEP_WAKEUP_EXT0);
+  bool wokeFromDeepSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 || wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_TIMER);
   if (wokeFromDeepSleep) {
-    // Waking from deep sleep due to motion interrupt
+    // Release GPIO hold on IO4 FIRST - CRITICAL before using pin normally
+    // This is needed for both motion wake-up and timer wake-up (Scenario 3)
+    Serial.println("Waking from deep sleep - releasing GPIO hold on IO4...");
+    gpio_hold_dis(GPIO_NUM_4);
+    Serial.println("GPIO hold released");
+    
     // Set power latch HIGH immediately to keep device powered on
     setPowerLatchPin(true);
     Serial.println("Waking from deep sleep - power latch set HIGH");
     
-    // Initialize IMU first (needed for wake-up handler to clear interrupt status)
-    Serial.println("Waking from deep sleep - initializing IMU for wake-up handling...");
-    imuInitialized = imuSensor.begin();
-    if (imuInitialized) {
-      MotionSleepManager::handleWakeup(&imuSensor);
-    } else {
-      Serial.println("WARNING: IMU initialization failed on wake-up - calling handleWakeup with nullptr");
-      MotionSleepManager::handleWakeup(nullptr); // Still release GPIO hold
+    if (wakeReason == ESP_SLEEP_WAKEUP_EXT1 || wakeReason == ESP_SLEEP_WAKEUP_EXT0) {
+      // Waking from deep sleep due to motion interrupt
+      // Initialize IMU first (needed for wake-up handler to clear interrupt status)
+      Serial.println("Waking from deep sleep - initializing IMU for wake-up handling...");
+      imuInitialized = imuSensor.begin();
+      if (imuInitialized) {
+        MotionSleepManager::handleWakeup(&imuSensor);
+      } else {
+        Serial.println("WARNING: IMU initialization failed on wake-up - calling handleWakeup with nullptr");
+        MotionSleepManager::handleWakeup(nullptr); // Still release GPIO hold
+      }
+    } else if (wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
+      // Waking from timer (Scenario 3 deep sleep)
+      Serial.println("Waking from timer-based deep sleep (Scenario 3)");
     }
   } else {
     // Normal boot - wait for button press and set power latch
@@ -239,10 +250,8 @@ void setup() {
     ButtonHandler::begin();
     
     delay(5000); //wait 5 seconds for button to be pressed
-    if (ButtonHandler::isPressed()) {
-      Serial.println("Button pressed - restarting ESP...");
-      setPowerLatchPin(true); // Set HIGH with pull-up to keep device power on
-    }
+    Serial.println("Button pressed - after delay of 5 seconds");
+    setPowerLatchPin(true);
   }
   // pinMode(POWER_LATCH_PIN,INPUT);
   
@@ -480,6 +489,13 @@ void loop() {
       // Handle Scenario 3: No fix found - deep sleep
       if (scenario == SCENARIO_3_NO_FIX) {
         gpsScenarioHandler->handleScenario3();
+        
+        // Configure power latch (IO4) HIGH with hold to keep power on during deep sleep
+        Serial.println("Configuring power latch (IO4) for deep sleep...");
+        setPowerLatchPin(true);  // Set HIGH with pull-up
+        gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+        gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep
+        Serial.println("Power latch held HIGH - power will remain on during deep sleep");
         
         Serial.println("Entering deep sleep for 30 seconds...");
         esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
