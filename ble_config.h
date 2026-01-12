@@ -683,26 +683,39 @@ public:
     deviceConnected = false;
     oldDeviceConnected = false;
     
+    // Check if BLE was ever initialized
+    if (pServer == nullptr) {
+      Serial.println("BLE already stopped or never initialized");
+      bleDisabled = true;
+      return;
+    }
+    
     // Stop advertising first (before any disconnection attempts)
-    if (pServer != nullptr) {
-      NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
-      if (pAdvertising != nullptr) {
-        pAdvertising->stop();
-        Serial.println("BLE advertising stopped");
-      }
+    NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
+    if (pAdvertising != nullptr) {
+      pAdvertising->stop();
+      Serial.println("BLE advertising stopped");
     }
     
     // Wait for advertising to fully stop
-    delay(200);
+    delay(500); // Increased delay
+    
+    // Check if we have active connections and wait for clean disconnection
+    if (pServer->getConnectedCount() > 0) {
+      Serial.print("Waiting for ");
+      Serial.print(pServer->getConnectedCount());
+      Serial.println(" connection(s) to disconnect...");
+      delay(500); // Give time for disconnection
+    }
     
     // Now safe to deinitialize
     // deinit(true) will automatically disconnect any remaining connections safely
     Serial.println("Deinitializing BLE...");
     NimBLEDevice::deinit(true);
-    
+    Serial.println("BLE deinitialized");
     // Wait for deinit to complete
-    delay(200);
-    
+    delay(500); // Increased delay
+    Serial.println("BLE deinitialized 2");
     // Clear all pointers to prevent any accidental access
     pServer = nullptr;
     pService = nullptr;
@@ -718,6 +731,8 @@ public:
     pGPSAccuracyThresholdCharacteristic = nullptr;
     pGPSOnAfterCharacteristic = nullptr;
     pExtendConfigTimeCharacteristic = nullptr;
+
+    Serial.println("BLE deinitialized 2");
     
     // Set disabled flag
     bleDisabled = true;
