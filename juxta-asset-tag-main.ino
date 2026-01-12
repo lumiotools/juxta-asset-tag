@@ -539,6 +539,7 @@ void loop() {
   static unsigned long lastBatteryUpdate = 0;
   static bool lastUSBState = isUSBConnected();
   static bool firstCycleComplete = false;
+  static bool firstTransmissionComplete = false; // Track if first transmission (GPS-only) has happened
   static bool bleConnectedDuringFirstCycle = false;
   static unsigned long long bleConnectionTime = 0;
   static bool gpsScenarioDetermined = false; // Flag to prevent repeated scenario determination
@@ -852,15 +853,13 @@ void loop() {
       Serial.println("Configuration complete - starting normal operation");
       Serial.println("========================================\n");
       
-      // Mark first cycle as complete - do NOT transmit yet
-      // First transmission will happen after the first normal cycle interval
+      // Mark first cycle as complete
+      // First transmission will happen immediately after GPS scenario is determined
+      // This allows GPS data to be sent before IMU collection starts
       firstCycleComplete = true;
       cycleStartTime = currentTime;  // Start counting for first real cycle
       
-      Serial.println("IMU data collection in progress...");
-      Serial.print("First transmission will occur in ");
-      Serial.print(NVSConfig::getCycleTime());
-      Serial.println(" seconds");
+      Serial.println("Determining GPS scenario and preparing for first transmission...");
       
       // Determine GPS scenario if not already determined
       if (gpsScenarioHandler != nullptr && gpsInitialized) {
@@ -877,6 +876,7 @@ void loop() {
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
         Serial.print("GPS Scenario after first cycle: ");
         Serial.println(scenario);
+        
         // Handle Scenario 3 immediately - go to deep sleep (don't turn off BLE, just enter deep sleep)
         if (scenario == SCENARIO_3_NO_FIX) {
           Serial.println("Scenario 3 detected after first cycle - entering deep sleep immediately");
@@ -893,9 +893,47 @@ void loop() {
           esp_deep_sleep_start();
           return; // Will not reach here
         }
+        
+        // FIRST TRANSMISSION: Send GPS scenario data immediately after GPS search completes
+        // This transmission contains GPS data only (no IMU data yet)
+        // Goes to regular server ONLY (not model server)
+        // IMU data collection will start after this transmission
+        Serial.println("\n========================================");
+        Serial.println("GPS scenario determined - executing FIRST transmission");
+        Serial.println("Sending GPS scenario data to server ONLY (no IMU, no model server)");
+        Serial.println("========================================\n");
+        
+        // Set flag BEFORE transmission so cycle handler knows this is first transmission
+        firstTransmissionComplete = false; // Mark as NOT complete yet
+        
+        CycleResult firstTransmissionResult = executeCycleTransmission();
+        
+        // Mark first transmission as complete
+        firstTransmissionComplete = true;
+        
+        // Handle first transmission result
+        switch(firstTransmissionResult) {
+          case CYCLE_SUCCESS_BLE:
+            Serial.println("First transmission completed via BLE");
+            break;
+          case CYCLE_SUCCESS_WIFI:
+            Serial.println("First transmission completed via WiFi");
+            break;
+          case CYCLE_SUCCESS_STORED:
+            Serial.println("First transmission data stored to flash");
+            break;
+          case CYCLE_FAILED:
+            Serial.println("First transmission failed");
+            break;
+        }
+        
+        Serial.println("\n========================================");
+        Serial.println("Starting IMU data collection...");
+        Serial.println("Subsequent transmissions will include IMU data and go to server + model server");
+        Serial.println("========================================\n");
       }
       
-      Serial.print("First cycle complete. Next cycle will start in ");
+      Serial.print("First cycle complete. IMU collection active. Next cycle will start in ");
       Serial.print(NVSConfig::getCycleTime());
       Serial.println(" seconds");
       
