@@ -243,6 +243,8 @@ void setup() {
     } else if (wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
       // Waking from timer (Scenario 3 deep sleep)
       Serial.println("Waking from timer-based deep sleep (Scenario 3)");
+      pinMode(20,OUTPUT);
+      digitalWrite(20,HIGH);
     }
   } else {
     // Normal boot - wait for button press and set power latch
@@ -480,14 +482,16 @@ void loop() {
   // Handle GPS scenarios and fix acquisition
   if (gpsScenarioHandler != nullptr && gpsInitialized) {
     // Check if 2-minute GPS fix acquisition period is complete
-    if (!firstCycleComplete && gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+    // This check runs regardless of first cycle status - Scenario 3 should trigger immediately
+    if (gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
       // Determine scenario based on GPS fix status
       GPSScenario scenario = gpsScenarioHandler->determineScenario();
-      Serial.print("GPS fix acquisition complete - Scenario determined: ");
-      Serial.println(scenario);
       
-      // Handle Scenario 3: No fix found - deep sleep
+      // Handle Scenario 3: No fix found - deep sleep (immediately, regardless of first cycle status)
       if (scenario == SCENARIO_3_NO_FIX) {
+        Serial.print("GPS fix acquisition complete - Scenario determined: ");
+        Serial.println(scenario);
+        Serial.println("No GPS fix found after 2-minute search period - entering deep sleep immediately");
         gpsScenarioHandler->handleScenario3();
         
         // Configure power latch (IO4) HIGH with hold to keep power on during deep sleep
@@ -503,18 +507,24 @@ void loop() {
         return; // Will not reach here
       }
       
-      // NEW: Handle Scenario 2 transition - turn off GPS and start continuous cycle
-      if (scenario == SCENARIO_2_LOW_ACCURACY) {
-        // GPS has been ON for 2 minutes (acquisition period)
-        // Turn it OFF now to start the continuous cycle
-        GPSSensor::powerOff();
-        gpsScenarioHandler->recordGPSOffTime();  // Record when GPS was turned off
-        Serial.println("GPS turned off after 2-minute acquisition period");
-        Serial.println("Starting continuous GPS cycle (wait 'GPS on after' seconds, then 1-minute fix attempts)");
+      // Only handle other scenarios during first cycle (to avoid duplicate processing)
+      if (!firstCycleComplete) {
+        Serial.print("GPS fix acquisition complete - Scenario determined: ");
+        Serial.println(scenario);
+        
+        // NEW: Handle Scenario 2 transition - turn off GPS and start continuous cycle
+        if (scenario == SCENARIO_2_LOW_ACCURACY) {
+          // GPS has been ON for 2 minutes (acquisition period)
+          // Turn it OFF now to start the continuous cycle
+          GPSSensor::powerOff();
+          gpsScenarioHandler->recordGPSOffTime();  // Record when GPS was turned off
+          Serial.println("GPS turned off after 2-minute acquisition period");
+          Serial.println("Starting continuous GPS cycle (wait 'GPS on after' seconds, then 1-minute fix attempts)");
+        }
+        
+        // Scenario 1: GPS stays ON (high accuracy fix found)
+        // Scenario 4: GPS already OFF (UI position provided)
       }
-      
-      // Scenario 1: GPS stays ON (high accuracy fix found)
-      // Scenario 4: GPS already OFF (UI position provided)
     }
     
     // Handle continuous GPS fix attempt cycle (Scenario 2)
@@ -807,6 +817,23 @@ void loop() {
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
         Serial.print("GPS Scenario after first cycle: ");
         Serial.println(scenario);
+        
+        // Handle Scenario 3 immediately - go to deep sleep (don't turn off BLE, just enter deep sleep)
+        if (scenario == SCENARIO_3_NO_FIX) {
+          Serial.println("Scenario 3 detected after first cycle - entering deep sleep immediately");
+          
+          // Configure power latch (IO4) HIGH with hold to keep power on during deep sleep
+          Serial.println("Configuring power latch (IO4) for deep sleep...");
+          setPowerLatchPin(true);  // Set HIGH with pull-up
+          gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+          gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep
+          Serial.println("Power latch held HIGH - power will remain on during deep sleep");
+          
+          Serial.println("Entering deep sleep for 30 seconds...");
+          esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
+          esp_deep_sleep_start();
+          return; // Will not reach here
+        }
       }
       
       Serial.print("First cycle complete. Next cycle will start in ");
@@ -814,6 +841,7 @@ void loop() {
       Serial.println(" seconds");
       
       // Turn off BLE after first cycle completes (was kept on during first cycle period)
+      // Only turn off BLE if not Scenario 3 (Scenario 3 already entered deep sleep above)
       if (BLEConfig::isEnabled()) {
         Serial.println("First cycle complete - turning off BLE");
         BLEConfig::stop();
