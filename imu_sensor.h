@@ -89,18 +89,6 @@ private:
     return true;
   }
 
-  // Check if IMU device is connected on I2C bus
-  bool checkDeviceConnection() {
-    Wire.beginTransmission(IMU_I2C_ADDRESS);
-    uint8_t error = Wire.endTransmission();
-    
-    if (error == 0) {
-      return true;
-    } else {
-      return false;
-    }
-  }
-
 public:
   bool begin() {
     Serial.print("Initializing IMU sensor (I2C address 0x");
@@ -111,20 +99,20 @@ public:
     Serial.print(I2C_SCL_PIN);
     Serial.println(")...");
 
-    // Check if device is connected
-    if (!checkDeviceConnection()) {
-      Serial.println("ERROR: IMU device not detected on I2C bus!");
-      Serial.print("Expected address: 0x");
-      Serial.println(IMU_I2C_ADDRESS, HEX);
-      Serial.println("Check: 1) I2C wiring (SDA/SCL) 2) Power supply 3) Device address");
+    // Initialize Bosch API (which includes I2C connection check and chip ID verification)
+    if (!initializeBoschAPI()) {
+      Serial.println("ERROR: BMI323 initialization failed!");
+      Serial.println("Check: 1) I2C wiring (SDA/SCL) 2) Power supply 3) Chip type (must be BMI323)");
       return false;
     }
-
-    Serial.println("IMU device detected, initializing Bosch API...");
     
-    // Initialize Bosch API
-    if (!initializeBoschAPI()) {
-      return false;
+    // Verify chip ID (should be 0x43 for BMI323)
+    Serial.print("BMI323 detected! Chip ID: 0x");
+    Serial.print(bmi3Device.chip_id, HEX);
+    if (bmi3Device.chip_id == 0x43) {
+      Serial.println(" (valid BMI323)");
+    } else {
+      Serial.println(" (WARNING: unexpected chip ID!)");
     }
 
     // Configure accelerometer and gyroscope using Bosch API
