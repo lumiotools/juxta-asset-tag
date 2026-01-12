@@ -521,14 +521,17 @@ void setup() {
 
 // Execute cycle transmission (call when you want to send data)
 // IMU data is read from flash in chunks by cycle handler
-CycleResult executeCycleTransmission() {
+// Parameters:
+//   forceServerOnly - if true, sends to regular server only (not model server), even in Scenario 2/4
+//                     Used for first transmission when no IMU data is available yet
+CycleResult executeCycleTransmission(bool forceServerOnly = false) {
   if (!cycleHandler) {
     Serial.println("ERROR: Cycle handler not initialized");
     return CYCLE_FAILED;
   }
   
   // Execute cycle - cycle handler will read CSV entries from unified storage
-  CycleResult result = cycleHandler->executeCycleFromUnifiedCSV(&unifiedCSVStorage);
+  CycleResult result = cycleHandler->executeCycleFromUnifiedCSV(&unifiedCSVStorage, forceServerOnly);
   
   // State is already saved by cycle handler
   return result;
@@ -906,7 +909,7 @@ void loop() {
         // Set flag BEFORE transmission so cycle handler knows this is first transmission
         firstTransmissionComplete = false; // Mark as NOT complete yet
         
-        CycleResult firstTransmissionResult = executeCycleTransmission();
+        CycleResult firstTransmissionResult = executeCycleTransmission(true); // true = force server only
         
         // Mark first transmission as complete
         firstTransmissionComplete = true;
@@ -989,7 +992,7 @@ void loop() {
       Serial.println("Executing transmission...");
       Serial.println("========================================\n");
       
-      CycleResult result = executeCycleTransmission();
+      CycleResult result = executeCycleTransmission(false);
       
       // Handle result
       switch(result) {
@@ -1033,7 +1036,7 @@ void loop() {
         Serial.println("Pending data detected - attempting transmission before deep sleep...");
         
         // Attempt to transmit pending data
-        CycleResult result = executeCycleTransmission();
+        CycleResult result = executeCycleTransmission(false);
         
         // Log transmission result
         switch(result) {

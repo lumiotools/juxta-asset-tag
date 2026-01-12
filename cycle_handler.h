@@ -1178,9 +1178,11 @@ public:
   }
   
   // Main cycle execution - reads CSV entries from unified storage and sends directly
-  // Parameters: Unified CSV storage handler
+  // Parameters: 
+  //   csvStorage - Unified CSV storage handler
+  //   forceServerOnly - if true, sends to regular server only (not model server), even in Scenario 2/4
   // Returns: CycleResult indicating transmission outcome
-  CycleResult executeCycleFromUnifiedCSV(UnifiedCSVStorage* csvStorage) {
+  CycleResult executeCycleFromUnifiedCSV(UnifiedCSVStorage* csvStorage, bool forceServerOnly = false) {
     if (csvStorage == nullptr || !csvStorage->isInitialized()) {
       Serial.println("ERROR: Unified CSV storage not available");
       return CYCLE_FAILED;
@@ -1247,8 +1249,9 @@ public:
           }
         }
       }
-    } else if (currentScenario == SCENARIO_2_LOW_ACCURACY || currentScenario == SCENARIO_4_UI_POSITION) {
+    } else if ((currentScenario == SCENARIO_2_LOW_ACCURACY || currentScenario == SCENARIO_4_UI_POSITION) && !forceServerOnly) {
       // Scenario 2 or 4: Send IMU data to model server with lat/long prefix
+      // Skip model server if forceServerOnly is true (used for first transmission with no IMU data)
       Serial.println("\n========== SCENARIO 2/4: MODEL SERVER TRANSMISSION ==========");
       
       if (gpsScenarioHandler == nullptr || !gpsScenarioHandler->hasReferencePosition()) {
@@ -1445,6 +1448,60 @@ public:
         csvStorage->saveState();
         return CYCLE_SUCCESS_STORED;
       }
+    } else if ((currentScenario == SCENARIO_2_LOW_ACCURACY || currentScenario == SCENARIO_4_UI_POSITION) && forceServerOnly) {
+      // Scenario 2/4 with forceServerOnly: Send to regular server (first transmission, no IMU data)
+      Serial.println("\n========== FIRST TRANSMISSION: SERVER ONLY (Scenario 2/4) ==========");
+      Serial.println("No IMU data yet - sending GPS scenario info to regular server");
+      
+      // Send position to backend server (BLE or WiFi)
+      bool positionSent = false;
+      
+      // Get reference position from scenario handler
+      if (gpsScenarioHandler != nullptr && gpsScenarioHandler->hasReferencePosition()) {
+        double lat, lon;
+        gpsScenarioHandler->getReferencePosition(lat, lon);
+        
+        // Try BLE first
+        bool bleWasAlreadyOn = BLEConfig::isEnabled();
+        if (!BLEConfig::isEnabled()) {
+          BLEConfig::begin();
+          delay(500);
+        }
+        
+        unsigned long bleStartTime = millis();
+        while (millis() - bleStartTime < 5000) {
+          BLEConfig::update();
+          if (BLEConfig::isConnected()) {
+            positionSent = sendPositionToBackend(lat, lon, currentScenario);
+            if (positionSent) {
+              Serial.println("GPS scenario data sent via BLE");
+              break;
+            }
+          }
+          delay(100);
+        }
+        
+        if (!positionSent) {
+          // Try WiFi
+          if (CustomWiFi::connectWiFi()) {
+            positionSent = sendPositionToBackend(lat, lon, currentScenario);
+            if (positionSent) {
+              Serial.println("GPS scenario data sent via WiFi");
+            }
+            CustomWiFi::disconnectWiFi();
+          }
+        }
+        
+        if (!bleWasAlreadyOn && BLEConfig::isEnabled()) {
+          BLEConfig::stop();
+        }
+      }
+      
+      setStatusLED(0, 0, 0);
+      // turnOffBatteryLED();
+      
+      Serial.println("========== CYCLE EXECUTION END (First Transmission - Server Only) ==========\n");
+      return positionSent ? CYCLE_SUCCESS_WIFI : CYCLE_FAILED;
     }
     
     // Default: Use existing FlashReader for other scenarios or fallback
