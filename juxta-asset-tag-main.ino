@@ -269,13 +269,46 @@ void setup() {
     Serial.print(spiFlash.getCapacity());
     Serial.println(" bytes");
   } else {
-    Serial.println("SPI Flash initialization failed");
+    // Flash CRITICAL - Cannot store IMU data without flash
+    Serial.println("\n========================================");
+    Serial.println("CRITICAL ERROR: SPI Flash initialization failed!");
+    Serial.println("Device cannot operate without external flash storage");
+    Serial.println("========================================");
+    Serial.println("Check:");
+    Serial.println("  1. SPI Flash wiring (MISO/MOSI/SCK/CS)");
+    Serial.println("  2. Power supply to flash chip");
+    Serial.println("  3. Flash chip connection");
+    Serial.println("========================================");
+    Serial.println("System halted. Fix hardware and restart.");
+    Serial.println("========================================\n");
+    
+    // Flash red LED to indicate error
+    while (true) {
+      setPixelAndShow(0, 255, 0, 0); // Red
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
+      delay(500);
+    }
   }
 
   // Initialize Unified CSV Storage (uses entire external flash)
   Serial.println("Initializing Unified CSV Storage...");
   if (!unifiedCSVStorage.begin(&spiFlash)) {
-    Serial.println("Warning: Unified CSV Storage initialization failed!");
+    // CSV Storage CRITICAL - Cannot store IMU data
+    Serial.println("\n========================================");
+    Serial.println("CRITICAL ERROR: Unified CSV Storage initialization failed!");
+    Serial.println("Cannot initialize data storage system");
+    Serial.println("========================================");
+    Serial.println("System halted. Restart device.");
+    Serial.println("========================================\n");
+    
+    // Flash red LED to indicate error
+    while (true) {
+      setPixelAndShow(0, 255, 0, 0); // Red
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
+      delay(500);
+    }
   }
 
   // bool x = spiFlash.eraseChip();
@@ -339,16 +372,65 @@ void setup() {
       Serial.println("WARNING: BMI323 interrupt configuration failed - deep sleep motion detection disabled");
     }
   } else {
-    Serial.println("IMU initialization failed - continuing without IMU");
+    // IMU CRITICAL - Cannot operate without IMU
+    Serial.println("\n========================================");
+    Serial.println("CRITICAL ERROR: IMU initialization failed!");
+    Serial.println("Device cannot operate without IMU sensor");
+    Serial.println("========================================");
+    Serial.println("Check:");
+    Serial.println("  1. I2C wiring (SDA=GPIO0, SCL=GPIO1)");
+    Serial.println("  2. Power supply to IMU");
+    Serial.println("  3. BMI323 chip connection");
+    Serial.println("========================================");
+    Serial.println("System halted. Fix hardware and restart.");
+    Serial.println("========================================\n");
+    
+    // Flash red LED to indicate error
+    while (true) {
+      setPixelAndShow(0, 255, 0, 0); // Red
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
+      delay(500);
+    }
   }
   
   // Initialize GPS sensor
   Serial.println("Initializing GPS sensor...");
   gpsInitialized = gpsSensor.begin();
+  
+  // Check if GPS should be active (user setting via BLE)
+  uint8_t gpsActive = NVSConfig::getGPSActive(); // 1 = ON, 0 = OFF
+  
   if (gpsInitialized) {
     Serial.println("GPS initialized successfully");
   } else {
-    Serial.println("GPS initialization failed - continuing without GPS");
+    // GPS failed to initialize - check if it was supposed to be off
+    if (gpsActive == 0) {
+      // GPS was intentionally turned off via BLE - not an error
+      Serial.println("GPS initialization failed, but GPS is set to OFF (user setting) - continuing");
+    } else {
+      // GPS is supposed to be ON but failed - CRITICAL ERROR
+      Serial.println("\n========================================");
+      Serial.println("CRITICAL ERROR: GPS initialization failed!");
+      Serial.println("GPS is set to ACTIVE but sensor not responding");
+      Serial.println("========================================");
+      Serial.println("Check:");
+      Serial.println("  1. GPS wiring and power");
+      Serial.println("  2. GPS module connection");
+      Serial.println("  3. GPS antenna connection");
+      Serial.println("========================================");
+      Serial.println("System halted. Fix hardware and restart,");
+      Serial.println("OR turn off GPS via BLE (set GPS Active = 0)");
+      Serial.println("========================================\n");
+      
+      // Flash red LED to indicate error
+      while (true) {
+        setPixelAndShow(0, 255, 0, 0); // Red
+        delay(500);
+        setPixelAndShow(0, 0, 0, 0); // Off
+        delay(500);
+      }
+    }
   }
   
   // Initialize GPS Scenario Handler
@@ -763,33 +845,22 @@ void loop() {
     // Check if it's time to execute cycle
     if (currentTime >= firstCycleEndTime) {
       Serial.println("\n========================================");
-      Serial.println("FIRST CYCLE: BLE wait period complete");
-      Serial.print("Total wait time: ");
+      Serial.println("FIRST CYCLE: BLE configuration period complete");
+      Serial.print("Total configuration time: ");
       Serial.print(timeElapsed / 1000);
       Serial.println(" seconds");
-      Serial.println("Executing transmission...");
+      Serial.println("Configuration complete - starting normal operation");
       Serial.println("========================================\n");
       
-      CycleResult result = executeCycleTransmission();
-      
-      // Handle result
-      switch(result) {
-        case CYCLE_SUCCESS_BLE:
-          Serial.println("First cycle completed via BLE");
-          break;
-        case CYCLE_SUCCESS_WIFI:
-          Serial.println("First cycle completed via WiFi");
-          break;
-        case CYCLE_SUCCESS_STORED:
-          Serial.println("First cycle data stored to flash");
-          break;
-        case CYCLE_FAILED:
-          Serial.println("First cycle failed");
-          break;
-      }
-      
+      // Mark first cycle as complete - do NOT transmit yet
+      // First transmission will happen after the first normal cycle interval
       firstCycleComplete = true;
-      cycleStartTime = currentTime;
+      cycleStartTime = currentTime;  // Start counting for first real cycle
+      
+      Serial.println("IMU data collection in progress...");
+      Serial.print("First transmission will occur in ");
+      Serial.print(NVSConfig::getCycleTime());
+      Serial.println(" seconds");
       
       // Determine GPS scenario if not already determined
       if (gpsScenarioHandler != nullptr && gpsInitialized) {

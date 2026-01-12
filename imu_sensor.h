@@ -115,19 +115,19 @@ public:
       Serial.println(" (WARNING: unexpected chip ID!)");
     }
 
-    // Configure accelerometer and gyroscope using Bosch API
-    struct bmi3_sens_config config[2] = { { 0 } };
+    // // Configure accelerometer and gyroscope using Bosch API
+    // struct bmi3_sens_config config[2] = { { 0 } };
     
-    config[0].type = BMI323_ACCEL;
-    config[1].type = BMI323_GYRO;
+    // config[0].type = BMI323_ACCEL;
+    // config[1].type = BMI323_GYRO;
     
-    // Get default configurations
-    int8_t rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
-    if (rslt != BMI323_OK) {
-      Serial.print("ERROR: Failed to get sensor config: ");
-      Serial.println(rslt);
-      return false;
-    }
+    // // Get default configurations
+    // int8_t rslt = bmi323_get_sensor_config(config, 2, &bmi3Device);
+    // if (rslt != BMI323_OK) {
+    //   Serial.print("ERROR: Failed to get sensor config: ");
+    //   Serial.println(rslt);
+    //   return false;
+    // }
     
     // Configure accelerometer: Normal mode, 100Hz ODR, ±2g range
     config[0].cfg.acc.acc_mode = BMI3_ACC_MODE_NORMAL;  // Enable accel by setting mode
@@ -199,47 +199,64 @@ public:
   }
 
 private:
-  // Read accel/gyro/temp using Bosch API
+  // Read accel/gyro/temp using direct register access (like test/imu.ino)
+  // Faster and more efficient than Bosch API for continuous reading
   void readAllSensors() {
     if (!boschApiInitialized) {
       return;
     }
 
-    struct bmi3_sensor_data sensor_data[2] = { { 0 } };
+    // Direct register read from BMI323
+    // Register 0x03 = ACC_X LSB (start of sensor data)
+    Wire.beginTransmission(IMU_I2C_ADDRESS);
+    Wire.write(0x03);  // ACC data start register
+    Wire.endTransmission(false);
     
-    sensor_data[0].type = BMI323_ACCEL;
-    sensor_data[1].type = BMI323_GYRO;
+    // Read 16 bytes: dummy(2) + acc(6) + gyro(6) + temp(2)
+    Wire.requestFrom(IMU_I2C_ADDRESS, (uint8_t)16);
+    uint8_t data[16];
+    int i = 0;
+    while (Wire.available() && i < 16) {
+      data[i++] = Wire.read();
+    }
     
-    int8_t rslt = bmi323_get_sensor_data(sensor_data, 2, &bmi3Device);
-    if (rslt != BMI323_OK) {
-      // Error reading sensor data
+    // Check if we got all 16 bytes
+    if (i < 16) {
+      // Reading failed - keep last known values
       return;
     }
     
-    // Convert accelerometer data (LSB to m/s^2)
-    // For ±2g range: 16384 LSB/g
-    const float accelSensitivity = 16384.0f; // LSB/g for ±2g
-    const float gToM2S = 9.80665f;
+    // Skip 2 dummy bytes at the start
+    int offset = 2;
     
-    accelX_m_s2 = ((float)sensor_data[0].sens_data.acc.x / accelSensitivity) * gToM2S;
-    accelY_m_s2 = ((float)sensor_data[0].sens_data.acc.y / accelSensitivity) * gToM2S;
-    accelZ_m_s2 = ((float)sensor_data[0].sens_data.acc.z / accelSensitivity) * gToM2S;
+    // Extract raw 16-bit values (little-endian)
+    int16_t acc_x = (int16_t)(data[offset + 0] | (data[offset + 1] << 8));
+    int16_t acc_y = (int16_t)(data[offset + 2] | (data[offset + 3] << 8));
+    int16_t acc_z = (int16_t)(data[offset + 4] | (data[offset + 5] << 8));
     
-    // Convert gyroscope data (LSB to dps)
-    // For ±125dps range: 262.144 LSB/dps
-    const float gyroSensitivity = 262.144f; // LSB/dps for ±125dps
+    int16_t gyro_x = (int16_t)(data[offset + 6]  | (data[offset + 7]  << 8));
+    int16_t gyro_y = (int16_t)(data[offset + 8]  | (data[offset + 9]  << 8));
+    int16_t gyro_z = (int16_t)(data[offset + 10] | (data[offset + 11] << 8));
     
-    gyroX_dps = (float)sensor_data[1].sens_data.gyr.x / gyroSensitivity;
-    gyroY_dps = (float)sensor_data[1].sens_data.gyr.y / gyroSensitivity;
-    gyroZ_dps = (float)sensor_data[1].sens_data.gyr.z / gyroSensitivity;
+    int16_t temp_raw = (int16_t)(data[offset + 12] | (data[offset + 13] << 8));
     
-    // Read temperature if needed (as part of sensor data)
-    struct bmi3_sensor_data temp_sensor = { 0 };
-    temp_sensor.type = BMI323_TEMP;
-    int8_t temp_rslt = bmi323_get_sensor_data(&temp_sensor, 1, &bmi3Device);
-    if (temp_rslt == BMI323_OK) {
-      temperature_c = (float)temp_sensor.sens_data.temp.temp_data / 512.0f + 23.0f;
-    }
+    // Convert accelerometer: ±2g range = 16384 LSB/g
+    const float ACC_SENS_2G = 16384.0f;
+    const float G_TO_M_S2 = 9.80665f;
+    
+    accelX_m_s2 = (acc_x / ACC_SENS_2G) * G_TO_M_S2;
+    accelY_m_s2 = (acc_y / ACC_SENS_2G) * G_TO_M_S2;
+    accelZ_m_s2 = (acc_z / ACC_SENS_2G) * G_TO_M_S2;
+    
+    // Convert gyroscope: ±125 dps range = 262.1 LSB/dps
+    const float GYRO_SENS_125DPS = 262.1f;
+    
+    gyroX_dps = gyro_x / GYRO_SENS_125DPS;
+    gyroY_dps = gyro_y / GYRO_SENS_125DPS;
+    gyroZ_dps = gyro_z / GYRO_SENS_125DPS;
+    
+    // Temperature conversion: (raw / 512.0) + 23.0
+    temperature_c = (float)temp_raw / 512.0f + 23.0f;
   }
 };
 
