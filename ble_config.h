@@ -636,24 +636,53 @@ public:
     // Stop LED blinking and restore to green
     stopStatusLEDBlink(TimeSync::getCurrentTimeMillis() + 4000);
     
-    // Disconnect any connected clients first (prevents heap corruption)
-    if (pServer != nullptr && deviceConnected) {
-      Serial.println("Disconnecting BLE clients...");
-      auto peers = pServer->getPeerDevices();
-      for (auto connHandle : peers) {
-        pServer->disconnect(connHandle);
-        delay(50);
-      }
-      delay(500); // Wait for graceful disconnect
-    }
+    // Set disabled flag early to prevent any new operations
+    bleDisabled = true;
     
-    // Stop advertising
+    // Disconnect any connected clients first (prevents heap corruption)
+    // Use safer method: check connected count first, then disconnect
+    // if (pServer != nullptr && deviceConnected) {
+    //   Serial.println("Disconnecting BLE clients...");
+      
+    //   // Check if there are connected devices using a safer method
+    //   // getConnectedCount() is safer than getPeerDevices() as it doesn't return iterators
+    //   uint32_t connectedCount = 0;
+    //   if (pServer != nullptr) {
+    //     connectedCount = pServer->getConnectedCount();
+    //   }
+      
+    //   // Only attempt disconnection if there are connected devices
+    //   // Note: getPeerDevices() can cause memory access faults if server is partially deinitialized
+    //   // So we use a more conservative approach: just set deviceConnected to false
+    //   // and let deinit(true) handle the actual disconnection
+    //   if (connectedCount > 0) {
+    //     // Instead of iterating through peer devices (which can cause memory faults),
+    //     // we'll let deinit(true) handle the disconnection automatically
+    //     // This is safer as deinit handles cleanup internally
+    //     Serial.print("Found ");
+    //     Serial.print(connectedCount);
+    //     Serial.println(" connected client(s) - deinit will handle disconnection");
+    //     delay(200); // Brief delay to allow any ongoing operations to complete
+    //   } else {
+    //     Serial.println("No connected clients to disconnect");
+    //   }
+      
+    //   // Mark as disconnected to prevent further operations
+    //   deviceConnected = false;
+    //   oldDeviceConnected = false;
+    // }
+    
+    // Stop advertising (safer to do before deinit)
     if (pServer != nullptr) {
-      pServer->getAdvertising()->stop();
-      delay(100); // Let advertising stop complete
+      NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
+      if (pAdvertising != nullptr) {
+        pAdvertising->stop();
+        delay(100); // Let advertising stop complete
+      }
     }
     
     // Now safe to deinitialize
+    // deinit(true) will automatically disconnect any remaining connections safely
     NimBLEDevice::deinit(true);
     
     // Small delay after deinit

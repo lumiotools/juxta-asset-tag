@@ -26,6 +26,7 @@ private:
   static PKAE_Timer doublePressTimer;
   static bool longPressTriggered;
   static bool initialized;
+  static bool powerOnPressActive;  // True if button was already pressed during power-on
 
 public:
   // Initialize button handler
@@ -34,14 +35,27 @@ public:
     pinMode(DEVICE_POWER_PIN, OUTPUT);
     digitalWrite(DEVICE_POWER_PIN, HIGH); // Keep power on initially
     
-    buttonPressed = false;
-    buttonReleased = true;
+    // Check if button is already pressed (from power-on)
+    bool buttonAlreadyPressed = (digitalRead(BUTTON_PIN) == HIGH);
+    
+    if (buttonAlreadyPressed) {
+      // Button was pressed to power on - mark it but don't start long press timer
+      buttonPressed = true;
+      buttonReleased = false;
+      powerOnPressActive = true;  // Flag that this is the power-on press
+      Serial.println("Button already pressed (power-on) - long press timer will not start until button is released");
+    } else {
+      buttonPressed = false;
+      buttonReleased = true;
+      powerOnPressActive = false;
+    }
+    
     lastPressTime = 0;
     pressCount = 0;
     longPressTriggered = false;
     initialized = true;
     
-    // Initialize timers
+    // Initialize timers (but don't start long press timer if button was already pressed)
     longPressTimer = PKAE_Timer(LONG_PRESS_TIME_MS);
     doublePressTimer = PKAE_Timer(DOUBLE_PRESS_WINDOW_MS);
     
@@ -66,6 +80,7 @@ public:
         // Button was just pressed (transition from released to pressed)
         buttonReleased = false;
         buttonPressed = true;
+        powerOnPressActive = false;  // No longer the power-on press
         
         // Check for double press
         unsigned long currentTime = millis();
@@ -85,8 +100,8 @@ public:
         }
       }
       
-      // Check for long press
-      if (!longPressTriggered && longPressTimer.IsTimeUp()) {
+      // Check for long press (only if not the power-on press)
+      if (!powerOnPressActive && !longPressTriggered && longPressTimer.IsTimeUp()) {
         // Long press detected (5 seconds)
         longPressTriggered = true;
         Serial.println("Long press detected (5s) - powering off device...");
@@ -99,6 +114,7 @@ public:
         // Button was just released (transition from pressed to released)
         buttonPressed = false;
         buttonReleased = true;
+        powerOnPressActive = false;  // Power-on press is now cleared
         
         // Reset long press timer
         longPressTimer.Reset();
@@ -135,6 +151,7 @@ PKAE_Timer ButtonHandler::longPressTimer(LONG_PRESS_TIME_MS);
 PKAE_Timer ButtonHandler::doublePressTimer(DOUBLE_PRESS_WINDOW_MS);
 bool ButtonHandler::longPressTriggered = false;
 bool ButtonHandler::initialized = false;
+bool ButtonHandler::powerOnPressActive = false;
 
 #endif
 

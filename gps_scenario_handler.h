@@ -110,8 +110,8 @@ public:
       currentScenario = SCENARIO_3_NO_FIX;
     }
     
-    Serial.print("Scenario determined: ");
-    Serial.println(currentScenario);
+    // Serial.print("Scenario determined: ");
+    // Serial.println(currentScenario);
 
     // Save scenario state to NVS (persisted through deep sleep)
     NVSConfig::setScenarioState((uint8_t)currentScenario);
