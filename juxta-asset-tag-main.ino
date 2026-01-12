@@ -459,6 +459,7 @@ void loop() {
   static bool firstCycleComplete = false;
   static bool bleConnectedDuringFirstCycle = false;
   static unsigned long long bleConnectionTime = 0;
+  static bool gpsScenarioDetermined = false; // Flag to prevent repeated scenario determination
   
   // Current time
   unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
@@ -483,14 +484,17 @@ void loop() {
   if (gpsScenarioHandler != nullptr && gpsInitialized) {
     // Check if 2-minute GPS fix acquisition period is complete
     // This check runs regardless of first cycle status - Scenario 3 should trigger immediately
-    if (gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
+    // Use flag to ensure this only runs once per boot
+    if (gpsScenarioHandler->isGPSFixAcquisitionComplete() && !gpsScenarioDetermined) {
       // Determine scenario based on GPS fix status
       GPSScenario scenario = gpsScenarioHandler->determineScenario();
+      gpsScenarioDetermined = true; // Set flag to prevent repeated execution
+      
+      Serial.print("GPS fix acquisition complete - Scenario determined: ");
+      Serial.println(scenario);
       
       // Handle Scenario 3: No fix found - deep sleep (immediately, regardless of first cycle status)
       if (scenario == SCENARIO_3_NO_FIX) {
-        Serial.print("GPS fix acquisition complete - Scenario determined: ");
-        Serial.println(scenario);
         Serial.println("No GPS fix found after 2-minute search period - entering deep sleep immediately");
         gpsScenarioHandler->handleScenario3();
         
@@ -507,24 +511,18 @@ void loop() {
         return; // Will not reach here
       }
       
-      // Only handle other scenarios during first cycle (to avoid duplicate processing)
-      if (!firstCycleComplete) {
-        Serial.print("GPS fix acquisition complete - Scenario determined: ");
-        Serial.println(scenario);
-        
-        // NEW: Handle Scenario 2 transition - turn off GPS and start continuous cycle
-        if (scenario == SCENARIO_2_LOW_ACCURACY) {
-          // GPS has been ON for 2 minutes (acquisition period)
-          // Turn it OFF now to start the continuous cycle
-          GPSSensor::powerOff();
-          gpsScenarioHandler->recordGPSOffTime();  // Record when GPS was turned off
-          Serial.println("GPS turned off after 2-minute acquisition period");
-          Serial.println("Starting continuous GPS cycle (wait 'GPS on after' seconds, then 1-minute fix attempts)");
-        }
-        
-        // Scenario 1: GPS stays ON (high accuracy fix found)
-        // Scenario 4: GPS already OFF (UI position provided)
+      // Handle Scenario 2 transition - turn off GPS and start continuous cycle
+      if (scenario == SCENARIO_2_LOW_ACCURACY) {
+        // GPS has been ON for 2 minutes (acquisition period)
+        // Turn it OFF now to start the continuous cycle
+        GPSSensor::powerOff();
+        gpsScenarioHandler->recordGPSOffTime();  // Record when GPS was turned off
+        Serial.println("GPS turned off after 2-minute acquisition period");
+        Serial.println("Starting continuous GPS cycle (wait 'GPS on after' seconds, then 1-minute fix attempts)");
       }
+      
+      // Scenario 1: GPS stays ON (high accuracy fix found)
+      // Scenario 4: GPS already OFF (UI position provided)
     }
     
     // Handle continuous GPS fix attempt cycle (Scenario 2)

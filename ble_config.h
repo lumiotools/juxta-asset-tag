@@ -679,21 +679,29 @@ public:
     //   oldDeviceConnected = false;
     // }
     
-    // Stop advertising (safer to do before deinit)
+    // Mark as disconnected immediately to prevent new operations
+    deviceConnected = false;
+    oldDeviceConnected = false;
+    
+    // Stop advertising first (before any disconnection attempts)
     if (pServer != nullptr) {
       NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
       if (pAdvertising != nullptr) {
         pAdvertising->stop();
-        delay(100); // Let advertising stop complete
+        Serial.println("BLE advertising stopped");
       }
     }
     
+    // Wait for advertising to fully stop
+    delay(200);
+    
     // Now safe to deinitialize
     // deinit(true) will automatically disconnect any remaining connections safely
+    Serial.println("Deinitializing BLE...");
     NimBLEDevice::deinit(true);
     
-    // Small delay after deinit
-    delay(100);
+    // Wait for deinit to complete
+    delay(200);
     
     // Clear all pointers to prevent any accidental access
     pServer = nullptr;
