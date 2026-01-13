@@ -766,17 +766,17 @@ void loop() {
   
   // ========== USB STATE MONITORING ==========
   // USB state monitoring
-  bool currentUSBState = isUSBConnected();
-  if (currentUSBState != lastUSBState) {
-    if (currentUSBState) {
-      batteryIndicatorLED.disable();
-      Serial.println("USB connected - Battery LED disabled");
-    } else {
-      batteryIndicatorLED.enable();
-      Serial.println("USB disconnected - Battery LED enabled");
-    }
-    lastUSBState = currentUSBState;
-  }
+  // bool currentUSBState = isUSBConnected();
+  // if (currentUSBState != lastUSBState) {
+  //   if (currentUSBState) {
+  //     batteryIndicatorLED.disable();
+  //     Serial.println("USB connected - Battery LED disabled");
+  //   } else {
+  //     batteryIndicatorLED.enable();
+  //     Serial.println("USB disconnected - Battery LED enabled");
+  //   }
+  //   lastUSBState = currentUSBState;
+  // }
   
   // Battery LED disabled between cycles (only on during cycle execution)
   // Battery LED is turned on at cycle start and off at cycle completion
@@ -874,7 +874,7 @@ void loop() {
           while (!gpsScenarioHandler->isGPSFixAcquisitionComplete()) {
             delay(100);
             gpsSensor.update();
-            gpsScenarioHandler->determineScenario();
+            // gpsScenarioHandler->determineScenario();
           }
         }
         GPSScenario scenario = gpsScenarioHandler->determineScenario();
@@ -1075,20 +1075,21 @@ void loop() {
   // Skip light sleep if motion detection is active (to allow motion tracking)
   // IMPORTANT: Disable light sleep when IMU ticker is active because hardware timers
   // may not fire correctly during light sleep, causing timing issues
-  if (firstCycleComplete && !imuDataReady && !imuTickerStarted && (!imuInitialized || !MotionSleepManager::isConfigured() || !noMotionTracking)) {
-    esp_sleep_enable_timer_wakeup(10000); // Wake every 10ms (10,000 microseconds)
-    esp_light_sleep_start();
-  } else if (!firstCycleComplete) {
-    // During first cycle, keep CPU responsive for BLE with minimal delay
-    delay(1);
-  } else if (noMotionTracking) {
-    // During no-motion tracking, use small delay instead of light sleep
-    // This ensures motion interrupt flag is checked frequently
-    delay(10);
-  } else {
-    // Default case: small delay to prevent tight loop and allow system to process interrupts
-    // This handles the case when firstCycleComplete=true, imuDataReady=true, noMotionTracking=false
-    // (e.g., when motion is detected and IMU ticker is active)
-    delay(1);
-  }
+  // if (firstCycleComplete && !imuDataReady && !imuTickerStarted && (!imuInitialized || !MotionSleepManager::isConfigured() || !noMotionTracking)) {
+  //   esp_sleep_enable_timer_wakeup(10000); // Wake every 10ms (10,000 microseconds)
+  //   esp_light_sleep_start();
+  // } else if (!firstCycleComplete) {
+  //   // During first cycle, keep CPU responsive for BLE with minimal delay
+  //   delay(1);
+  // } else if (noMotionTracking) {
+  //   // During no-motion tracking, use small delay instead of light sleep
+  //   // This ensures motion interrupt flag is checked frequently
+  //   delay(10);
+  // } else {
+  //   // Default case: small delay to prevent tight loop and allow system to process interrupts
+  //   // This handles the case when firstCycleComplete=true, imuDataReady=true, noMotionTracking=false
+  //   // (e.g., when motion is detected and IMU ticker is active)
+  //   delay(1);
+  // }
+  delay(10);
 }
