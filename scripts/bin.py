@@ -275,16 +275,8 @@ def main():
     if success:
         print("\n✅ Flash completed successfully!")
         print("📱 You can now reset the device or disconnect/reconnect power.")
-        
-        # Offer to open serial monitor
-        monitor = input("\n📡 Open serial monitor? (Y/n): ").lower()
-        if monitor == "" or monitor == "y":
-            # Ask for custom baud rate
-            custom_baud = input(f"Enter baud rate (default {SERIAL_MONITOR_BAUD}): ").strip()
-            baud = custom_baud if custom_baud else SERIAL_MONITOR_BAUD
-            
-            print("\n⏳ Resetting device and opening serial monitor...")
-            serial_monitor(port, baud)
+        print("\n⏳ Resetting device and opening serial monitor...")
+        serial_monitor(port, SERIAL_MONITOR_BAUD)
     else:
         print("\n❌ Flash operation failed!")
         sys.exit(1)
