@@ -1,7 +1,9 @@
 import subprocess
 import sys
 from pathlib import Path
+import serial
 import serial.tools.list_ports
+import time
 
 # ================= USER CONFIG =================
 
@@ -30,6 +32,9 @@ BAUD = "921600"
 FLASH_MODE = "dio"
 FLASH_FREQ = "80m"
 FLASH_SIZE = "4MB"
+
+# Serial Monitor Settings
+SERIAL_MONITOR_BAUD = "115200"  # Default baud rate for serial monitor
 
 # ===============================================
 
@@ -62,6 +67,89 @@ def select_port(ports):
 
 
 
+def print_troubleshooting():
+    """Print troubleshooting steps for common serial port errors"""
+    print("\n" + "="*60)
+    print("⚠️  TROUBLESHOOTING STEPS:")
+    print("="*60)
+    print("1. Close Arduino IDE Serial Monitor or any other serial terminals")
+    print("2. Unplug and replug the USB cable")
+    print("3. Put the ESP32-C6 into bootloader mode:")
+    print("   - Hold the BOOT button (GPIO9)")
+    print("   - Press and release the RESET button")
+    print("   - Release the BOOT button")
+    print("   - Try the flash command again within 5 seconds")
+    print("4. Check if the correct COM port is selected")
+    print("5. Try a different USB cable or USB port")
+    print("6. Install/update CH340 or CP210x USB drivers")
+    print("7. Try a lower baud rate (edit BAUD in script to 115200)")
+    print("="*60 + "\n")
+
+
+def serial_monitor(port, baud=None):
+    """Open serial monitor to view ESP32-C6 output"""
+    if baud is None:
+        baud = SERIAL_MONITOR_BAUD
+    
+    print("\n" + "="*60)
+    print(f"📡 Serial Monitor - {port} @ {baud} baud")
+    print("="*60)
+    print("Press Ctrl+C to exit")
+    print("="*60 + "\n")
+    
+    try:
+        # Wait a moment for the device to reset after flashing
+        time.sleep(2)
+        
+        # Open serial port
+        ser = serial.Serial(
+            port=port,
+            baudrate=int(baud),
+            timeout=1,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE
+        )
+        
+        print(f"✅ Connected to {port}")
+        print("Waiting for data...\n")
+        
+        # Buffer for incomplete lines
+        buffer = ""
+        
+        while True:
+            if ser.in_waiting > 0:
+                try:
+                    # Read available data
+                    data = ser.read(ser.in_waiting)
+                    # Decode with error handling
+                    text = data.decode('utf-8', errors='replace')
+                    buffer += text
+                    
+                    # Print complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        print(line)
+                        sys.stdout.flush()
+                    
+                except UnicodeDecodeError:
+                    # Print raw bytes if decode fails
+                    print(f"[RAW] {data.hex()}")
+            else:
+                # Small delay to prevent CPU spinning
+                time.sleep(0.01)
+                
+    except serial.SerialException as e:
+        print(f"\n❌ Serial port error: {e}")
+        print("The device may have been disconnected or the port is in use.")
+    except KeyboardInterrupt:
+        print("\n\n📴 Serial monitor closed")
+    finally:
+        if 'ser' in locals() and ser.is_open:
+            ser.close()
+            print(f"Disconnected from {port}")
+
+
 def run_esptool(args, retry_on_fail=True):
     """Run esptool with error handling and retry option"""
     cmd = [sys.executable, "-m", "esptool"] + args
@@ -90,7 +178,6 @@ def run_esptool(args, retry_on_fail=True):
                 retry = input("Put device in bootloader mode and retry? (y/N): ").lower()
                 if retry == "y":
                     print("\n⏳ Waiting 2 seconds for bootloader mode...")
-                    import time
                     time.sleep(2)
                     return run_esptool(args, retry_on_fail=False)  # Only retry once
         
@@ -188,6 +275,16 @@ def main():
     if success:
         print("\n✅ Flash completed successfully!")
         print("📱 You can now reset the device or disconnect/reconnect power.")
+        
+        # Offer to open serial monitor
+        monitor = input("\n📡 Open serial monitor? (Y/n): ").lower()
+        if monitor == "" or monitor == "y":
+            # Ask for custom baud rate
+            custom_baud = input(f"Enter baud rate (default {SERIAL_MONITOR_BAUD}): ").strip()
+            baud = custom_baud if custom_baud else SERIAL_MONITOR_BAUD
+            
+            print("\n⏳ Resetting device and opening serial monitor...")
+            serial_monitor(port, baud)
     else:
         print("\n❌ Flash operation failed!")
         sys.exit(1)
