@@ -97,6 +97,8 @@ private:
     const int detectionTimeout = 1000; // 1 second to detect data
     const int minValidChars = 10; // Minimum characters to consider valid data
     
+    bool foundValidData = false;
+
     for (int i = 0; i < 6; i++) {
       uint32_t testBaud = baudRates[i];
       Serial.print("Testing baud rate: ");
@@ -118,7 +120,6 @@ private:
       // Try to receive data for detection timeout
       unsigned long long startTime = TimeSync::getCurrentTimeMillis();
       String testSentence = "";
-      bool foundValidData = false;
       
       while (TimeSync::getCurrentTimeMillis() - startTime < detectionTimeout) {
         if (Serial1.available() > 0) {
@@ -141,6 +142,7 @@ private:
                 Serial.print("Valid NMEA data detected at ");
                 Serial.print(testBaud);
                 Serial.println(" baud");
+                foundValidData = true;
                 return testBaud;
               }
             }
@@ -159,7 +161,8 @@ private:
     }
     
     Serial.println("Warning: Could not detect valid baud rate, defaulting to 115200");
-    return 115200; // Default to 115200 if detection fails
+    foundValidData = false;
+    return 0; // Default to 0 if detection fails
   }
   
   // Convert DDMM.MMMM format to decimal degrees
@@ -327,6 +330,11 @@ public:
     // Detect which baud rate is working (9600 or 115200)
     Serial.println("\nDetecting GPS baud rate...");
     uint32_t detectedBaud = detectBaudRate();
+    if (detectedBaud == 0) {
+      Serial.println("Error: Could not detect valid baud rate, defaulting to 115200");
+      detectedBaud = 115200;
+      return false;
+    }
     
     // Switch to detected baud rate
     Serial1.end();
