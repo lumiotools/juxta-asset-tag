@@ -957,7 +957,7 @@ void loop() {
     unsigned long long timeElapsed = currentTime - cycleStartTime;
     unsigned long long timeRemaining = (timeElapsed < cycleTimeMs) ? (cycleTimeMs - timeElapsed) : 0;
     
-    // Debug output every 60 seconds (or when close to cycle time)
+    // Debug output every 10 seconds (changed from 60 seconds for better visibility)
     static unsigned long long lastDebugTime = 0;
     bool shouldDebug = false;
     
@@ -965,8 +965,8 @@ void loop() {
       // Less than 10 seconds remaining - debug every second
       shouldDebug = (currentTime - lastDebugTime >= 1000);
     } else if (timeRemaining > 0) {
-      // More than 10 seconds remaining - debug every 60 seconds
-      shouldDebug = (currentTime - lastDebugTime >= 60000);
+      // More than 10 seconds remaining - debug every 10 seconds (changed from 60)
+      shouldDebug = (currentTime - lastDebugTime >= 10000);
     }
     
     if (shouldDebug && timeElapsed > 0) {
@@ -1073,7 +1073,9 @@ void loop() {
   // Timer wakeup every 10ms ensures ticker interrupt is processed
   // Only after first cycle to keep BLE responsive during initial connection
   // Skip light sleep if motion detection is active (to allow motion tracking)
-  if (firstCycleComplete && !imuDataReady && (!imuInitialized || !MotionSleepManager::isConfigured() || !noMotionTracking)) {
+  // IMPORTANT: Disable light sleep when IMU ticker is active because hardware timers
+  // may not fire correctly during light sleep, causing timing issues
+  if (firstCycleComplete && !imuDataReady && !imuTickerStarted && (!imuInitialized || !MotionSleepManager::isConfigured() || !noMotionTracking)) {
     esp_sleep_enable_timer_wakeup(10000); // Wake every 10ms (10,000 microseconds)
     esp_light_sleep_start();
   } else if (!firstCycleComplete) {
@@ -1083,5 +1085,10 @@ void loop() {
     // During no-motion tracking, use small delay instead of light sleep
     // This ensures motion interrupt flag is checked frequently
     delay(10);
+  } else {
+    // Default case: small delay to prevent tight loop and allow system to process interrupts
+    // This handles the case when firstCycleComplete=true, imuDataReady=true, noMotionTracking=false
+    // (e.g., when motion is detected and IMU ticker is active)
+    delay(1);
   }
 }
