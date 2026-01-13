@@ -3,7 +3,7 @@
 // 
 // Hardware:
 // - Power Latch → GPIO 4 (POWER_LATCH_PIN)
-// - Status LEDs → GPIO 22 (2 NeoPixel LEDs)
+// - Status LEDs → GPIO 11 (2 NeoPixel LEDs)
 // - Button → GPIO 10 (for power off via long press)
 //
 // Test Procedure:
@@ -17,7 +17,7 @@
 #include "power_latch.h"
 
 // LED configuration
-#define STATUS_LED_PIN 22
+#define STATUS_LED_PIN 11
 #define STATUS_LED_COUNT 2  // 2 pixels: pixel 0 and pixel 1
 
 // Create NeoPixel instance
@@ -33,8 +33,8 @@ void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
 void setBothLedsRed50Percent() {
   // Red at 50% brightness: R=128, G=0, B=0
   // (50% of 255 = 127.5, rounded to 128)
-  statusLED.setPixelColor(0, statusLED.Color(128, 0, 0));
-  statusLED.setPixelColor(1, statusLED.Color(128, 0, 0));
+  statusLED.setPixelColor(0, statusLED.Color(255, 0, 0));
+  statusLED.setPixelColor(1, statusLED.Color(255, 0, 0));
   statusLED.show();
   
   Serial.println("Both LEDs set to red at 50% brightness");
