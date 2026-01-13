@@ -7,7 +7,7 @@ import serial.tools.list_ports
 
 # Use script's location to build absolute path to build directory
 SCRIPT_DIR = Path(__file__).parent
-BUILD_ROOT = (SCRIPT_DIR / "../test/power_latch_led_test/build").resolve()   # Resolves to absolute path
+BUILD_ROOT = (SCRIPT_DIR / "../test/power_latch_sensor_led_test/build").resolve()   # Resolves to absolute path
 
 # Auto-detect the esp32 build subdirectory (e.g., esp32.esp32.esp32c6)
 def find_build_dir():
