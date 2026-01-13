@@ -61,14 +61,48 @@ def select_port(ports):
     return ports[int(choice)].device
 
 
-def run_esptool(args):
-    """Run esptool command"""
+
+def run_esptool(args, retry_on_fail=True):
+    """Run esptool with error handling and retry option"""
     cmd = [sys.executable, "-m", "esptool"] + args
     print("\n🚀 Running:")
-    # Print command with proper formatting
-    cmd_str = " ".join(f'"{arg}"' if " " in str(arg) and not arg.startswith('"') else str(arg) for arg in cmd)
-    print(cmd_str)
-    subprocess.run(cmd, check=True)
+    print(" ".join(cmd))
+    
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print(result.stdout)
+        return True
+    except subprocess.CalledProcessError as e:
+        print("\n❌ Error occurred:")
+        if e.stderr:
+            print(e.stderr)
+        if e.stdout:
+            print(e.stdout)
+        
+        # Check for common errors
+        error_msg = str(e.stderr) + str(e.stdout)
+        
+        if "PermissionError" in error_msg or "ClearCommError" in error_msg:
+            print("\n⚠️  Serial port access error!")
+            print_troubleshooting()
+            
+            if retry_on_fail:
+                retry = input("Put device in bootloader mode and retry? (y/N): ").lower()
+                if retry == "y":
+                    print("\n⏳ Waiting 2 seconds for bootloader mode...")
+                    import time
+                    time.sleep(2)
+                    return run_esptool(args, retry_on_fail=False)  # Only retry once
+        
+        elif "No serial data received" in error_msg or "Failed to connect" in error_msg:
+            print("\n⚠️  Cannot connect to ESP32-C6!")
+            print_troubleshooting()
+        
+        return False
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        return False
+
 
 
 def flash_merged(port):
@@ -78,17 +112,17 @@ def flash_merged(port):
 
     print(f"\n✅ Found merged image: {merged.name}")
 
-    run_esptool([
+    success = run_esptool([
         "--chip", CHIP,
         "--port", port,
         "--baud", BAUD,
-        "write_flash",
-        "--flash_mode", FLASH_MODE,
-        "--flash_freq", FLASH_FREQ,
-        "--flash_size", FLASH_SIZE,
-        "0x0000", f'"{merged}"',
+        "write-flash",
+        "--flash-mode", FLASH_MODE,
+        "--flash-freq", FLASH_FREQ,
+        "--flash-size", FLASH_SIZE,
+        "0x0000", str(merged),
     ])
-    return True
+    return success
 
 
 def flash_split(port):
@@ -105,19 +139,20 @@ def flash_split(port):
         matches = list(BUILD_DIR.glob(pattern))
         if not matches:
             print(f"❌ Missing file: {pattern}")
-            sys.exit(1)
-        flash_args.extend([addr, f'"{matches[0]}"'])
+            return False
+        flash_args.extend([addr, str(matches[0])])
 
-    run_esptool([
+    success = run_esptool([
         "--chip", CHIP,
         "--port", port,
         "--baud", BAUD,
-        "write-flash",
-        "--flash-mode", FLASH_MODE,
-        "--flash-freq", FLASH_FREQ,
-        "--flash-size", FLASH_SIZE,
+        "write_flash",
+        "--flash_mode", FLASH_MODE,
+        "--flash_freq", FLASH_FREQ,
+        "--flash_size", FLASH_SIZE,
         *flash_args,
     ])
+    return success
 
 
 def main():
@@ -143,16 +178,19 @@ def main():
     else:
         port = select_port(ports)
 
-    confirm = input(f"\nFlash ESP32-C6 on {port}? (y/N): ").lower()
-    if confirm != "y":
-        print("❌ Aborted")
-        sys.exit(0)
-
-    if not flash_merged(port):
+    # Try merged binary first, then split binaries
+    success = flash_merged(port)
+    
+    if success is False:  # File not found
         print("\n⚠️  merged.bin not found, flashing split binaries")
-        flash_split(port)
-
-    print("\n✅ Flash completed successfully!")
+        success = flash_split(port)
+    
+    if success:
+        print("\n✅ Flash completed successfully!")
+        print("📱 You can now reset the device or disconnect/reconnect power.")
+    else:
+        print("\n❌ Flash operation failed!")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
