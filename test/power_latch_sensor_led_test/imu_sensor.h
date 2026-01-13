@@ -6,7 +6,7 @@
 
 #include <Wire.h>
 // Include Bosch BMI323 library from local libs folder
-#include "libs/BMI3XY_SensorAPI-main/bmi323.h"
+#include "../../libs/BMI3XY_SensorAPI-main/bmi323.h"
 
 // IMU pin definitions
 #define I2C_SDA_PIN 0     // IMU_SDA
