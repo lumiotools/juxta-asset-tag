@@ -199,6 +199,10 @@ void setup() {
     Serial.println("Invalid saved scenario - reset to SCENARIO_NONE");
   }
 
+  if(current_scenario == SCENARIO_4_UI_POSITION && NVSConfig::hasInitialPosition()) {
+    gpsSensor.powerOff();
+  }
+
   if(is_first_cycle) {
     Serial.println("First cycle: Connecting WiFi for time sync...");
     CustomWiFi::connectWiFi();
