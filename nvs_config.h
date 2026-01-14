@@ -150,8 +150,8 @@ private:
   }
 
 public:
-  static String getWiFiSSID() { return readStringNVS(WIFI_SSID_KEY); }
-  static String getWiFiPassword() { return readStringNVS(WIFI_PASSWORD_KEY); }
+  static String getWiFiSSID() { return readStringNVS(WIFI_SSID_KEY, ""); }
+  static String getWiFiPassword() { return readStringNVS(WIFI_PASSWORD_KEY, ""); }
   static bool setWiFiSSID(const char* ssid) { return writeStringNVS(WIFI_SSID_KEY, ssid); }
   static bool setWiFiPassword(const char* password) { return writeStringNVS(WIFI_PASSWORD_KEY, password); }
 
