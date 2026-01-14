@@ -214,7 +214,7 @@ private:
             Serial.println(cleared ? "Success" : "Failed");
             
             // Clear last known position (save zero values)
-            bool lastKnownCleared = NVSConfig::saveLastKnownPosition(0.0, 0.0, 0.0);
+            bool lastKnownCleared = NVSConfig::saveLastKnownPosition(0.0, 0.0, -1.0);
             Serial.print("Last known position cleared: ");
             Serial.println(lastKnownCleared ? "Success" : "Failed");
             
