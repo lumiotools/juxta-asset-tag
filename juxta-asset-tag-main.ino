@@ -58,7 +58,7 @@ int prev_button_state = -1;
 long long prev_button_click_time = -1;
 
 long long ble_start_time = -1;
-long long ble_off_after_time = -1;
+long long ble_off_after_time = 1000 * 60 * 1; // 1 minute
 
 bool gps_search = true;
 long long gps_search_start_time = -1;
