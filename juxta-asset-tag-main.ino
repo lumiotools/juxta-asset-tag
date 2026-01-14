@@ -320,10 +320,12 @@ void loop() {
       Serial.print("GPS Position - Lat: ");
       Serial.print(gpsData.latitude, 6);
       Serial.print(", Lon: ");
-      Serial.println(gpsData.longitude, 6);
+      Serial.print(gpsData.longitude, 6);
+      Serial.print(", HDOP: ");
+      Serial.println(gpsData.hdop, 2);
       current_scenario = SCENARIO_1_HIGH_ACCURACY;
       NVSConfig::setScenarioState((uint8_t)SCENARIO_1_HIGH_ACCURACY);
-      NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+      NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
       gps_search = false;
       Serial.println("GPS search completed - SCENARIO_1 active");
     } else if((current_time - gps_search_start_time) > (1000 * 60 * 2)) {
@@ -333,10 +335,12 @@ void loop() {
         Serial.print("GPS Position - Lat: ");
         Serial.print(gpsData.latitude, 6);
         Serial.print(", Lon: ");
-        Serial.println(gpsData.longitude, 6);
+        Serial.print(gpsData.longitude, 6);
+        Serial.print(", HDOP: ");
+        Serial.println(gpsData.hdop, 2);
         current_scenario = SCENARIO_2_LOW_ACCURACY;
         NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
-        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
         gpsSensor.powerOff();
         Serial.println("GPS powered off (SCENARIO_2)");
       } else if(!gpsData.hasValidFix) {
@@ -372,14 +376,17 @@ void loop() {
       Serial.println("Starting transmission cycle...");
       double lat = 0.0;
       double lon = 0.0;
-      if(!NVSConfig::getLastKnownPosition(lat, lon)) {
+      double hdop = -1.0;
+      if(!NVSConfig::getLastKnownPosition(lat, lon, hdop)) {
         Serial.println("No last known position - getting from GPS");
         GPSData gpsData = gpsSensor.getGPSData();
-        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
         Serial.print("Saved position - Lat: ");
         Serial.print(gpsData.latitude, 6);
         Serial.print(", Lon: ");
-        Serial.println(gpsData.longitude, 6);
+        Serial.print(gpsData.longitude, 6);
+        Serial.print(", HDOP: ");
+        Serial.println(gpsData.hdop, 2);
       } else {
         Serial.print("Using last known position - Lat: ");
         Serial.print(lat, 6);
@@ -429,7 +436,7 @@ void loop() {
           // TODO: Data Transmission to Model Server & PMC Server
           Serial.println("Stopping IMU ticker");
           imuReadTicker.detach();
-          NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+          NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
           transmission_cycle_start_time = -1;
           gps_cycle_start_time = -1;
           Serial.println("Transmission and GPS cycles reset");

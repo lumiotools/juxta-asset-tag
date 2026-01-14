@@ -40,6 +40,7 @@ private:
   static const char* SCENARIO_STATE_KEY;
   static const char* LAST_KNOWN_POSITION_LAT_KEY;
   static const char* LAST_KNOWN_POSITION_LON_KEY;
+  static const char* LAST_KNOWN_POSITION_HDOP_KEY;
 
 public:
   // Initialize NVS flash memory
@@ -346,8 +347,17 @@ public:
   static bool setScenarioState(uint8_t scenario);
   
   // Last Known Position (used for lat/long prefix in model server transmission)
-  static bool saveLastKnownPosition(double latitude, double longitude);
-  static bool getLastKnownPosition(double& latitude, double& longitude);
+  static bool saveLastKnownPosition(double latitude, double longitude, double hdop);
+  static bool getLastKnownPosition(double& latitude, double& longitude, double& hdop);
+  
+  // Generic string storage for custom data (e.g., pending transmissions)
+  static String readString(const char* key) {
+    return readStringNVS(key);
+  }
+  
+  static bool writeString(const char* key, const char* value) {
+    return writeStringNVS(key, value);
+  }
 
 };
 
@@ -385,6 +395,7 @@ const char* NVSConfig::INITIAL_POSITION_LON_KEY = "init_pos_lon";
 const char* NVSConfig::SCENARIO_STATE_KEY = "scenario_state";
 const char* NVSConfig::LAST_KNOWN_POSITION_LAT_KEY = "last_known_lat";
 const char* NVSConfig::LAST_KNOWN_POSITION_LON_KEY = "last_known_lon";
+const char* NVSConfig::LAST_KNOWN_POSITION_HDOP_KEY = "last_known_hdop";
 
 // GPS Accuracy Threshold implementation
 float NVSConfig::getGPSAccuracyThreshold() {
@@ -465,18 +476,21 @@ bool NVSConfig::setScenarioState(uint8_t scenario) {
 }
 
 // Last Known Position implementation (for lat/long prefix)
-bool NVSConfig::saveLastKnownPosition(double latitude, double longitude) {
-  char latStr[20], lonStr[20];
+bool NVSConfig::saveLastKnownPosition(double latitude, double longitude, double hdop) {
+  char latStr[20], lonStr[20], hdopStr[20];
   snprintf(latStr, sizeof(latStr), "%.7f", latitude);
   snprintf(lonStr, sizeof(lonStr), "%.7f", longitude);
+  snprintf(hdopStr, sizeof(hdopStr), "%.2f", hdop);
   bool success = writeStringNVS(LAST_KNOWN_POSITION_LAT_KEY, latStr);
   success &= writeStringNVS(LAST_KNOWN_POSITION_LON_KEY, lonStr);
+  success &= writeStringNVS(LAST_KNOWN_POSITION_HDOP_KEY, hdopStr);
   return success;
 }
 
-bool NVSConfig::getLastKnownPosition(double& latitude, double& longitude) {
+bool NVSConfig::getLastKnownPosition(double& latitude, double& longitude, double& hdop) {
   String latStr = readStringNVS(LAST_KNOWN_POSITION_LAT_KEY);
   String lonStr = readStringNVS(LAST_KNOWN_POSITION_LON_KEY);
+  String hdopStr = readStringNVS(LAST_KNOWN_POSITION_HDOP_KEY);
   
   if (latStr.length() == 0 || lonStr.length() == 0) {
     return false;
@@ -484,6 +498,7 @@ bool NVSConfig::getLastKnownPosition(double& latitude, double& longitude) {
   
   latitude = latStr.toFloat();
   longitude = lonStr.toFloat();
+  hdop = (hdopStr.length() > 0) ? hdopStr.toFloat() : -1.0; // Default to -1.0 if not stored
   return true;
 }
 

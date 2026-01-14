@@ -138,7 +138,7 @@ public:
     referencePositionSet = true;
     
     // Save to NVS (internal flash)
-    NVSConfig::saveLastKnownPosition(lat, lon);
+    NVSConfig::saveLastKnownPosition(lat, lon, -1.0); // -1.0 HDOP = not from real GPS
     
     Serial.print("Reference position set: (");
     Serial.print(lat, 7);
@@ -149,13 +149,15 @@ public:
   
   // Load reference position from NVS
   void loadReferencePosition() {
-    if (NVSConfig::getLastKnownPosition(referenceLatitude, referenceLongitude)) {
+    double hdop;
+    if (NVSConfig::getLastKnownPosition(referenceLatitude, referenceLongitude, hdop)) {
       referencePositionSet = true;
       Serial.print("Reference position loaded from NVS: (");
       Serial.print(referenceLatitude, 7);
       Serial.print(", ");
       Serial.print(referenceLongitude, 7);
-      Serial.println(")");
+      Serial.print("), HDOP: ");
+      Serial.println(hdop, 2);
     } else {
       referencePositionSet = false;
     }
