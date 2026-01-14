@@ -1,0 +1,177 @@
+Set ble_start_time as 0
+
+Setup
+Check reason to wakeup
+	1. Power On
+		Set power button press true
+		delay for 5 seconds 
+		latch control pin(4) - set the control pin high		
+		set first cycle as true
+		Check if wifi creds present
+			Connect to wifi
+			Time Sync from NTP
+			Disconnect Wifi
+		
+
+	2. Deepsleep - wake timer
+		latch control pin(4) - set the control pin high
+		Set first cycle as false
+		set gps search true
+	
+	3. Deepsleep - motion interrupt
+
+
+Initialize IMU Sensor
+Initialize GPS Sensor
+Initialize SPI Flash
+Initialize Unified CSV Storage
+Initialize NVS Storage
+
+Turn On BLE - with First cycle param true/false
+
+Set ble start time as current time
+set ble off after time as 1 min
+Set Scenario as 0
+
+Loop
+
+batteryIndicatorLED.update();
+
+If any sensor failed to initialize
+	Set status led 1 to red 50%
+
+Set click handler 
+	Read current button pin(10) state high/low
+	If power button press true 
+		If current button state is low
+			set power button press false
+			set prev button state as low
+			set prev button click time as -1
+	Else
+		If current button state is high
+			set current click time as current time
+			if prev button state high and (curr click time - prev click time) > 5sec
+				Release power latch - set pin(4) to low // Device turns off
+			Else if prev button state low and (curr click time - prev click time) < 800ms
+				Restart Device
+			Else	
+				set prev click time as current time
+			set prev button state as high
+		Else If current button state is low
+			set prev button state as low
+			
+If prev button state is high
+	return // Cancel below execution and close loop	
+
+If read imu is true
+	Read data from IMU Sensor
+	Store the IMU Reading in csv storage
+	set read imu as false
+	
+
+If in first cycle 
+	check if (current time) - (ble start time) > ble off after time
+		Turn off ble
+		set first cycle false
+		Check if gps is set off
+			Check if Manual cords present
+				Set Scenario 4
+				Turn off gps
+				Send initial transmission to pmc server based on the below transmission logic
+		Else:
+			Set gps search as true
+			Set gps search start time as current time
+		
+Else If gps search is true and gps is set on
+	check if (current time) - (gps search start time) > 2 mins
+		If Last set gps values has fix found and low accuracy
+			Set Scenario 2
+			Turn off gps
+		Else If no fix found
+			Set Scenario 3
+			
+		set gps search false
+		set first cycle false
+	Else:
+		Read & Set GPS Values
+		If Fix Found & High Accuracy
+			Set Scenario 1
+			Set gps search false
+			set first cycle false
+	If gps search is false
+		Send initial transmission to pmc server based on the below transmission logic
+	
+	
+
+Else: (If not First Cycle & not Gps Search)
+
+	If scenario is 3
+		put device in deep sleep for 30 sec
+		latch control pin(4) - set the control pin high 
+        	gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+        	gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep 
+	
+	If transmission cycle start time is -1
+		if not last GPS Position set
+			Set GPS Position
+		Start IMU Reading ticker
+		set transmission cycle start time as current time
+	
+	If gps cycle start time is -1
+		set gps cycle start time as current time
+
+	If Scenario 1 
+		If current time - gps cycle start time >= gps cycle time
+			Read GPS Data
+			If no Fix Found or Low Accuracy
+				Set scenario as 2
+				Turn off gps
+				Send Transmission of data to Model Server & PMC Server (send curr scenario as param)
+				Stop IMU Reading ticker
+				set gps cycle start time as -1
+				return
+			set gps cycle start time as -1
+			
+	
+	If current time - transmission cycle start time >= transmission cycle time
+		Send Transmission of data to Model Server & PMC Server (send curr scenario as param)
+		Stop IMU Reading ticker
+		set transmission cycle start time as -1
+	
+	If scenario 2 and current time - gps cycle start time >= gps on after time
+		Turn on GPS
+		Set gps search true
+		set gps cycle start time as -1
+		return
+
+
+
+	
+
+
+BLE CONNECTION CALLBACK ONLY FOR FIRST CYCLE
+Increment the ble off after time by ((current time) - (ble start time)) (+ user can increment by +30 sec multiple times as required)
+Set Configuration mode for BLE
+
+
+DATA TRANSMISSION LOGIC
+
+Input: Curr Scenario
+
+If scenario 1
+	Send Current gps reference data to PMC Server
+Else
+	Send Calculated gps data to PMC Server
+
+
+
+
+
+
+
+
+
+
+
+
+
