@@ -25,7 +25,7 @@ static void initializeDeviceId() {
 
 const char* DEVICE_ID = deviceIdBuffer;
 
-const int STATUS_LED_PIN = 22;
+const int STATUS_LED_PIN = 11;
 const int STATUS_LED_COUNT = 2; 
 
 Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
