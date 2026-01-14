@@ -262,7 +262,7 @@ void loop() {
   batteryIndicatorLED.update();
 
   if(!flash_initialized || !csv_storage_initialized || !imu_initialized || !gps_initialized) {
-    Serial.println("ERROR: Sensors not initialized - showing error LED");
+    // Serial.println("ERROR: Sensors not initialized - showing error LED");
     setPixelAndShow(0, 255, 0, 0);
     return;
   }
