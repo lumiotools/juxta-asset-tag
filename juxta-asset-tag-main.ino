@@ -377,7 +377,7 @@ void loop() {
       double lat = 0.0;
       double lon = 0.0;
       double hdop = -1.0;
-      if(!NVSConfig::getLastKnownPosition(lat, lon, hdop)) {
+      if(current_scenario != SCENARIO_4_UI_POSITION && !NVSConfig::getLastKnownPosition(lat, lon, hdop)) {
         Serial.println("No last known position - getting from GPS");
         GPSData gpsData = gpsSensor.getGPSData();
         NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
