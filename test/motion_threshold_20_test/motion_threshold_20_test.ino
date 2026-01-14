@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include "imu_sensor.h"
 #include "motion_sleep_manager.h"
+#include "power_latch.h"
 
 // Global motion tracking variables (required by motion_sleep_manager.h)
 volatile bool motionInterruptFlag = false;
@@ -23,7 +24,8 @@ IMUSensor imu;
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);  // Give time for serial monitor to connect
+  delay(200);  // Give time for serial monitor to connect
+  initPowerLatch();
   
   Serial.println("\n========================================");
   Serial.println("Motion Detection Test - Threshold 20");
@@ -72,6 +74,8 @@ void setup() {
 
 void loop() {
   // Check if motion interrupt was detected
+  Serial.print("motion flag: ");
+  Serial.println(motionInterruptFlag);
   if (motionInterruptFlag) {
     motionInterruptFlag = false; // Clear flag
     
