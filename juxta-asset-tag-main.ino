@@ -30,6 +30,14 @@ const int STATUS_LED_COUNT = 2;
 
 Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 
+enum GPSScenario {
+  SCENARIO_NONE,           // Initial state, no scenario determined yet
+  SCENARIO_1_HIGH_ACCURACY, // High accuracy GPS fix found
+  SCENARIO_2_LOW_ACCURACY,  // Low accuracy GPS fix found
+  SCENARIO_3_NO_FIX,        // No GPS fix found
+  SCENARIO_4_UI_POSITION    // Initial position provided from UI
+};
+
 BatteryIndicatorLED batteryIndicatorLED;
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
@@ -42,10 +50,23 @@ bool gps_initialized = false;
 bool flash_initialized = false;
 bool csv_storage_initialized = false;
 
+uint8_t current_scenario = SCENARIO_NONE;
+
 bool is_first_cycle = false;
 bool power_button_pressed = false;
 int prev_button_state = -1;
 long long prev_button_click_time = -1;
+
+long long ble_start_time = -1;
+long long ble_off_after_time = -1;
+
+bool gps_search = true;
+long long gps_search_start_time = -1;
+
+long long transmission_cycle_start_time = -1;
+long long gps_cycle_start_time = -1;
+
+bool should_read_imu = false;
 
 void setPowerLatchPin(bool high) {
   if (high) {
@@ -83,6 +104,10 @@ void attemptTimeSyncIfNeeded() {
   }
 }
 
+void triggerIMURead() {
+  should_read_imu = true;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -101,6 +126,8 @@ void setup() {
 
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
     setPowerLatchPin(true);
+    is_first_cycle = false;
+    gps_search = true;
 
   } else {
     pinMode(BUTTON_PIN, INPUT_PULLDOWN);
@@ -134,6 +161,13 @@ void setup() {
     return;
   }
 
+  uint8_t savedScenario = NVSConfig::getScenarioState();
+  if (savedScenario <= SCENARIO_4_UI_POSITION) {
+    current_scenario = (GPSScenario)savedScenario;
+  } else {
+    current_scenario = SCENARIO_NONE;
+  }
+
   if(is_first_cycle) {
     CustomWiFi::connectWiFi();
     attemptTimeSyncIfNeeded();
@@ -143,8 +177,8 @@ void setup() {
 
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
-  long long bleStartTime = TimeSync::getCurrentTimeMillis();
-  BLEConfig::setBLEStartTime(bleStartTime); // Set BLE start time for countdown timer
+  ble_start_time = TimeSync::getCurrentTimeMillis();
+  BLEConfig::setBLEStartTime(ble_start_time); // Set BLE start time for countdown timer
   BLEConfig::begin();
 }
 
@@ -184,6 +218,145 @@ void loop() {
 
   if(!flash_initialized || !csv_storage_initialized || !imu_initialized || !gps_initialized) {
     setPixelAndShow(0, 255, 0, 0);
+    return;
   }
 
+  if(should_read_imu) {
+    imuSensor.update();
+    IMUData imuData = imuSensor.getIMUData();
+
+    TimestampedIMUReading readingBuffer[1];
+
+    // Add reading to buffer with timestamp
+    readingBuffer[0].accX = imuData.accelerometer.x;
+    readingBuffer[0].accY = imuData.accelerometer.y;
+    readingBuffer[0].accZ = imuData.accelerometer.z;
+    readingBuffer[0].gyrX = imuData.gyroscope.x;
+    readingBuffer[0].gyrY = imuData.gyroscope.y;
+    readingBuffer[0].gyrZ = imuData.gyroscope.z;
+    readingBuffer[0].timestamp = TimeSync::getCurrentTimeMillis();
+
+    bool write_success = unifiedCSVStorage.writeIMUReadings(readingBuffer, 1);
+  }
+
+  long long current_time = TimeSync::getCurrentTimeMillis();
+
+  if(is_first_cycle) {
+    if((current_time - ble_start_time) > ble_off_after_time) {
+      // Turn OFF BLE
+
+      is_first_cycle = false;
+      if(!NVSConfig::getGPSActive()) {
+        if(NVSConfig::hasInitialPosition()) {
+          current_scenario = SCENARIO_4_UI_POSITION;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
+          gpsSensor.powerOff();
+
+          //TODO: Send transmission to pmc server
+        }
+      } else {
+        gps_search = true;
+        gps_search_start_time = TimeSync::getCurrentTimeMillis();
+      }
+    }
+  } else if(gps_search && NVSConfig::getGPSActive()) {
+    GPSData gpsData = gpsSensor.getGPSData();
+
+    if(gpsData.hasValidFix && gpsSensor.isHighAccuracy()) {
+      current_scenario = SCENARIO_1_HIGH_ACCURACY;
+      NVSConfig::setScenarioState((uint8_t)SCENARIO_1_HIGH_ACCURACY);
+      NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+      gps_search = false;
+    } else if((current_time - gps_search_start_time) > (2000 * 60)) {
+      if(gpsData.hasValidFix && !gpsSensor.isHighAccuracy()) {
+        current_scenario = SCENARIO_2_LOW_ACCURACY;
+        NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+        gpsSensor.powerOff();
+      } else if(!gpsData.hasValidFix) {
+        current_scenario = SCENARIO_3_NO_FIX;
+        NVSConfig::setScenarioState((uint8_t)SCENARIO_3_NO_FIX);
+      }
+      gps_search = false;
+    }
+
+    if(gps_search == false) {
+
+      //TODO: Send transmission to pmc server
+
+    }
+  } else {
+    if(current_scenario == SCENARIO_3_NO_FIX) {
+      Serial.println("Scenario 3 detected - entering deep sleep immediately");
+      // Configure power latch (IO4) HIGH with hold to keep power on during deep sleep
+      Serial.println("Configuring power latch (IO4) for deep sleep...");
+      setPowerLatchPin(true);  // Set HIGH with pull-up
+      gpio_set_level(GPIO_NUM_4, 1);  // Ensure HIGH state
+      gpio_hold_en(GPIO_NUM_4);  // Hold IO4 HIGH during deep sleep
+      Serial.println("Power latch held HIGH - power will remain on during deep sleep");
+      
+      Serial.println("Entering deep sleep for 30 seconds...");
+      esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
+      esp_deep_sleep_start();
+      return; // Will not reach here
+    }
+
+    if(transmission_cycle_start_time == -1) {
+      double lat = 0.0;
+      double lon = 0.0;
+      if(!NVSConfig::getLastKnownPosition(lat, lon)) {
+        GPSData gpsData = gpsSensor.getGPSData();
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+      }
+
+      // TODO: Start IMU Ticker
+
+      transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
+    }
+
+    if(gps_cycle_start_time == -1) {
+      gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
+    }
+
+    
+    long long current_time = TimeSync::getCurrentTimeMillis();
+
+    if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
+      uint32_t gpsReadCycleTime = NVSConfig::getGPSReadCycleTime();
+      unsigned long long gpsReadCycleMs = (unsigned long long)gpsReadCycleTime * 1000ULL;
+      if((current_time - gps_cycle_start_time) >= gpsReadCycleMs) {
+        GPSData gpsData = gpsSensor.getGPSData();
+        if(!gpsData.hasValidFix || !gpsSensor.isHighAccuracy()) {
+          current_scenario = SCENARIO_2_LOW_ACCURACY;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
+          gpsSensor.powerOff();
+          // TODO: Data Transmission to Model Server & PMC Server
+          // TODO: Stop IMU Reading Ticker
+          NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+          gps_cycle_start_time = -1;
+          return;
+        }
+        gps_cycle_start_time = -1;
+      }
+    }
+
+    uint32_t transmissionCycleTime = NVSConfig::getCycleTime();
+    unsigned long long transmissionCycleTimeMs = (unsigned long long)transmissionCycleTime * 1000ULL;
+
+    if((current_time - transmission_cycle_start_time) >= transmissionCycleTimeMs) {
+      // TODO: Data Transmission to Model Server & PMC Server
+      // TODO: Stop IMU Reading Ticker
+      transmission_cycle_start_time = -1;
+    }
+
+    uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
+    unsigned long long gpsOnAfterTimeMs = (unsigned long long)gpsOnAfterTime * 1000ULL;
+
+    if(current_scenario == SCENARIO_2_LOW_ACCURACY && (current_time - gps_cycle_start_time) >= gpsOnAfterTimeMs) {
+      gpsSensor.powerOn();
+      gps_search = true;
+      gps_cycle_start_time = -1;
+      return;
+    }
+  }
 }
