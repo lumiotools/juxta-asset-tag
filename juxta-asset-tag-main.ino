@@ -288,13 +288,6 @@ void loop() {
   long long current_time = TimeSync::getCurrentTimeMillis();
 
   if(is_first_cycle) {
-    long long ble_elapsed = current_time - ble_start_time;
-    Serial.print("First cycle - BLE elapsed time: ");
-    Serial.print(ble_elapsed);
-    Serial.print("ms, BLE off after: ");
-    Serial.print(ble_off_after_time);
-    Serial.println("ms");
-    
     if((current_time - ble_start_time) > ble_off_after_time) {
       Serial.println("BLE timeout reached - ending first cycle");
       is_first_cycle = false;
@@ -320,16 +313,7 @@ void loop() {
       }
     }
   } else if(gps_search && NVSConfig::getGPSActive()) {
-    Serial.println("GPS search active - checking GPS status...");
     GPSData gpsData = gpsSensor.getGPSData();
-    long long search_elapsed = current_time - gps_search_start_time;
-    Serial.print("GPS search elapsed time: ");
-    Serial.print(search_elapsed);
-    Serial.println("ms");
-    Serial.print("GPS fix status: ");
-    Serial.print(gpsData.hasValidFix ? "VALID" : "NO FIX");
-    Serial.print(", High accuracy: ");
-    Serial.println(gpsSensor.isHighAccuracy() ? "YES" : "NO");
 
     if(gpsData.hasValidFix && gpsSensor.isHighAccuracy()) {
       Serial.println("SCENARIO_1_HIGH_ACCURACY detected!");
@@ -423,12 +407,6 @@ void loop() {
     if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
       uint32_t gpsReadCycleTime = NVSConfig::getGPSReadCycleTime();
       unsigned long long gpsReadCycleMs = (unsigned long long)gpsReadCycleTime * 1000ULL;
-      long long gps_elapsed = current_time - gps_cycle_start_time;
-      Serial.print("SCENARIO_1: GPS cycle elapsed: ");
-      Serial.print(gps_elapsed);
-      Serial.print("ms / ");
-      Serial.print(gpsReadCycleMs);
-      Serial.println("ms");
       
       if((current_time - gps_cycle_start_time) >= gpsReadCycleMs) {
         Serial.println("GPS read cycle time reached - checking GPS status");
@@ -464,12 +442,6 @@ void loop() {
 
     uint32_t transmissionCycleTime = NVSConfig::getCycleTime();
     unsigned long long transmissionCycleTimeMs = (unsigned long long)transmissionCycleTime * 1000ULL;
-    long long transmission_elapsed = current_time - transmission_cycle_start_time;
-    Serial.print("Transmission cycle elapsed: ");
-    Serial.print(transmission_elapsed);
-    Serial.print("ms / ");
-    Serial.print(transmissionCycleTimeMs);
-    Serial.println("ms");
 
     if((current_time - transmission_cycle_start_time) >= transmissionCycleTimeMs) {
       Serial.println("Transmission cycle time reached - preparing data transmission");
@@ -482,15 +454,6 @@ void loop() {
 
     uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
     unsigned long long gpsOnAfterTimeMs = (unsigned long long)gpsOnAfterTime * 1000ULL;
-    
-    if(current_scenario == SCENARIO_2_LOW_ACCURACY) {
-      long long gps_wait_elapsed = current_time - gps_cycle_start_time;
-      Serial.print("SCENARIO_2: GPS wait elapsed: ");
-      Serial.print(gps_wait_elapsed);
-      Serial.print("ms / ");
-      Serial.print(gpsOnAfterTimeMs);
-      Serial.println("ms");
-    }
 
     if(current_scenario == SCENARIO_2_LOW_ACCURACY && (current_time - gps_cycle_start_time) >= gpsOnAfterTimeMs) {
       Serial.println("SCENARIO_2: GPS on-after time reached - powering on GPS for search");
