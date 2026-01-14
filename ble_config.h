@@ -10,17 +10,17 @@
 #include "esp_bt.h"
 #include "gps_sensor.h"
 #include "unified_csv_storage.h"
-#include "gps_scenario_handler.h"
+// #include "gps_scenario_handler.h"
 
 // Forward declarations for status LED control
-extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
-extern void stopStatusLEDBlink(long long startTime);
+// extern long long startStatusLEDBlink(uint8_t r, uint8_t g, uint8_t b);
+// extern void stopStatusLEDBlink(long long startTime);
 
 // Forward declarations for external objects
 class UnifiedCSVStorage;
-class GPSScenarioHandler;
+// class GPSScenarioHandler;
 extern UnifiedCSVStorage unifiedCSVStorage;
-extern GPSScenarioHandler* gpsScenarioHandler;
+// extern GPSScenarioHandler* gpsScenarioHandler;
 
 // BLE Service and Characteristic UUIDs
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -197,10 +197,10 @@ private:
             Serial.println("Initial position exists - Switching to Scenario 4 and clearing data...");
             
             // Switch to Scenario 4
-            if (gpsScenarioHandler != nullptr) {
-              gpsScenarioHandler->setCurrentScenario(SCENARIO_4_UI_POSITION);
-              Serial.println("Scenario switched to Scenario 4");
-            }
+            // if (gpsScenarioHandler != nullptr) {
+            //   gpsScenarioHandler->setCurrentScenario(SCENARIO_4_UI_POSITION);
+            //   Serial.println("Scenario switched to Scenario 4");
+            // }
             
             // Clear external flash
             if (unifiedCSVStorage.isInitialized()) {
@@ -219,9 +219,9 @@ private:
             Serial.println(lastKnownCleared ? "Success" : "Failed");
             
             // Save scenario state to NVS
-            if (gpsScenarioHandler != nullptr) {
-              NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
-            }
+            // if (gpsScenarioHandler != nullptr) {
+            //   NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
+            // }
           }
         }
         
@@ -247,7 +247,7 @@ private:
   class CycleTimeCallbacks: public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
       // Start blue LED blinking on receive
-      long long startTime = startStatusLEDBlink(0, 0, 255);
+      // long long startTime = startStatusLEDBlink(0, 0, 255);
       
       // Read cycle time as string (sent as string from web interface, value in seconds)
       std::string stdValue = pCharacteristic->getValue();
@@ -267,7 +267,7 @@ private:
       }
       
       // Stop LED blinking and restore to green
-      stopStatusLEDBlink(startTime);
+      // stopStatusLEDBlink(startTime);
     }
   };
   
@@ -337,7 +337,7 @@ private:
   // GPS On After Characteristic Callbacks
   class GPSOnAfterCallbacks: public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-      long long startTime = startStatusLEDBlink(0, 0, 255);
+      // long long startTime = startStatusLEDBlink(0, 0, 255);
       
       std::string stdValue = pCharacteristic->getValue();
       String value = String(stdValue.c_str());
@@ -353,7 +353,7 @@ private:
         Serial.println(NVSConfig::getGPSOnAfter());
       }
       
-      stopStatusLEDBlink(startTime);
+      // stopStatusLEDBlink(startTime);
     }
   };
   
@@ -641,7 +641,7 @@ public:
   // Stop and deinitialize BLE permanently (consumes no power)
   static void stop() {
     // Stop LED blinking and restore to green
-    stopStatusLEDBlink(TimeSync::getCurrentTimeMillis() + 4000);
+    // stopStatusLEDBlink(TimeSync::getCurrentTimeMillis() + 4000);
     
     // Set disabled flag early to prevent any new operations
     bleDisabled = true;
@@ -796,7 +796,7 @@ public:
     }
     
     // Start blue LED blinking on transmit
-    long long startTime = startStatusLEDBlink(0, 0, 255);
+    // long long startTime = startStatusLEDBlink(0, 0, 255);
     
     // Calculate safe chunk size (MTU - 3 bytes for ATT header)
     uint16_t maxChunkSize = (mtuSize > 23) ? (mtuSize - 3) : 20;
@@ -841,7 +841,7 @@ public:
     }
     
     // Stop LED blinking and restore to green
-    stopStatusLEDBlink(startTime);
+    // stopStatusLEDBlink(startTime);
     
     return true;
   }
