@@ -340,6 +340,15 @@ public:
     Serial.println("\nDetecting GPS baud rate...");
     uint32_t detectedBaud = detectBaudRate();
     
+    // Check if GPS device is responding
+    if (detectedBaud == 0) {
+      Serial.println("ERROR: GPS device not responding at any baud rate!");
+      Serial.println("GPS initialization failed - device may not be working properly");
+      // powerOff(); // Turn off GPS to save power
+      configured = false;
+      return false;
+    }
+    
     // Switch to detected baud rate
     Serial1.end();
     delay(100);
