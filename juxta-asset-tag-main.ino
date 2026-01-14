@@ -66,6 +66,7 @@ long long gps_search_start_time = -1;
 long long transmission_cycle_start_time = -1;
 long long gps_cycle_start_time = -1;
 
+Ticker imuReadTicker;
 bool should_read_imu = false;
 
 void setPowerLatchPin(bool high) {
@@ -123,11 +124,11 @@ void setup() {
 
   if(wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
     setPowerLatchPin(true);
+    is_first_cycle = false;
+    gps_search = true;
 
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
     setPowerLatchPin(true);
-    is_first_cycle = false;
-    gps_search = true;
 
   } else {
     pinMode(BUTTON_PIN, INPUT_PULLDOWN);
@@ -190,7 +191,6 @@ void loop() {
       power_button_pressed = false;
       prev_button_state = LOW;
       prev_button_click_time = -1;
-
     }
   } else {
     if(current_button_state == HIGH) {
@@ -267,7 +267,7 @@ void loop() {
       NVSConfig::setScenarioState((uint8_t)SCENARIO_1_HIGH_ACCURACY);
       NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
       gps_search = false;
-    } else if((current_time - gps_search_start_time) > (2000 * 60)) {
+    } else if((current_time - gps_search_start_time) > (1000 * 60 * 2)) {
       if(gpsData.hasValidFix && !gpsSensor.isHighAccuracy()) {
         current_scenario = SCENARIO_2_LOW_ACCURACY;
         NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
@@ -296,7 +296,7 @@ void loop() {
       Serial.println("Power latch held HIGH - power will remain on during deep sleep");
       
       Serial.println("Entering deep sleep for 30 seconds...");
-      esp_sleep_enable_timer_wakeup(30000000); // 30 seconds in microseconds
+      esp_sleep_enable_timer_wakeup(1000 * 1000 * 30); // 30 seconds in microseconds
       esp_deep_sleep_start();
       return; // Will not reach here
     }
@@ -310,6 +310,7 @@ void loop() {
       }
 
       // TODO: Start IMU Ticker
+      imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
 
       transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
     }
@@ -331,8 +332,9 @@ void loop() {
           NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
           gpsSensor.powerOff();
           // TODO: Data Transmission to Model Server & PMC Server
-          // TODO: Stop IMU Reading Ticker
+          imuReadTicker.detach();
           NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude);
+          transmission_cycle_start_time = -1;
           gps_cycle_start_time = -1;
           return;
         }
@@ -345,7 +347,7 @@ void loop() {
 
     if((current_time - transmission_cycle_start_time) >= transmissionCycleTimeMs) {
       // TODO: Data Transmission to Model Server & PMC Server
-      // TODO: Stop IMU Reading Ticker
+      imuReadTicker.detach();
       transmission_cycle_start_time = -1;
     }
 

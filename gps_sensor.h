@@ -274,9 +274,14 @@ public:
       Serial.print("GPS power turned ON (pin ");
       Serial.print(GPS_POWER_PIN);
       Serial.println(" set to LOW)");
+
+      if(!NVSConfig::getGPSActive()) {
+        NVSConfig::setGPSActive(1);
+      }
     } else {
       Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
     }
+    
   }
   
   static void powerOff() {
@@ -286,6 +291,10 @@ public:
       Serial.print("GPS power turned OFF (pin ");
       Serial.print(GPS_POWER_PIN);
       Serial.println(" set to HIGH)");
+
+      if(NVSConfig::getGPSActive()) {
+        NVSConfig::setGPSActive(0);
+      }
     } else {
       Serial.println("GPS_POWER_PIN not configured (0 or not defined) - GPS power control disabled");
     }

@@ -231,11 +231,15 @@ private:
           GPSSensor::powerOn();
           Serial.println("GPS powered on");
         }
-        
-        // Check if all credentials are received (SSID and password) for WiFi credentials saving
-        if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
-          credentialsReceived = true;
-        }
+
+        if (NVSConfig::hasInitialPosition()) {
+            Serial.println("Initial position exists - Switching from Scenario 4 and clearing data...");
+           
+            // Clear initial position
+            bool cleared = NVSConfig::clearInitialPosition();
+            Serial.print("Initial position cleared: ");
+            Serial.println(cleared ? "Success" : "Failed");
+          }
       }
       
       // Stop LED blinking and restore to green
