@@ -51,7 +51,7 @@ def select_port(ports):
     if len(ports) == 1:
         choice = input(f"\n✅ Auto-selected: {ports[0].device} - Use this port? (Y/n/manual): ").lower()
         if choice == "" or choice == "y":
-            return ports[0].device
+        return ports[0].device
         elif choice == "manual" or choice == "m":
             manual_port = input("Enter COM port (e.g., COM3): ").strip()
             return manual_port
@@ -261,9 +261,9 @@ def main():
             port = input("Enter COM port (e.g., COM3): ").strip()
         else:
             print("❌ Aborted - no ports available")
-            sys.exit(1)
+        sys.exit(1)
     else:
-        port = select_port(ports)
+    port = select_port(ports)
 
     # Try merged binary first, then split binaries
     success = flash_merged(port)
@@ -271,7 +271,7 @@ def main():
     if success is False:  # File not found
         print("\n⚠️  merged.bin not found, flashing split binaries")
         success = flash_split(port)
-    
+
     if success:
         print("\n✅ Flash completed successfully!")
         print("📱 You can now reset the device or disconnect/reconnect power.")
