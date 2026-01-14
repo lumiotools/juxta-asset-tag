@@ -97,7 +97,7 @@ private:
     const int detectionTimeout = 1000; // 1 second to detect data
     const int minValidChars = 10; // Minimum characters to consider valid data
     
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 6; i++) {
       uint32_t testBaud = baudRates[i];
       Serial.print("Testing baud rate: ");
       Serial.println(testBaud);
