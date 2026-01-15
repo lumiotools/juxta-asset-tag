@@ -247,8 +247,9 @@ void loop() {
       } else {
         if(prev_button_state == LOW) {
           Serial.println("Button press detected");
+          prev_button_click_time = current_button_click_time;
         }
-        prev_button_click_time = current_button_click_time;
+        prev_button_state = HIGH;
       }
     } else {
       prev_button_state = LOW;
