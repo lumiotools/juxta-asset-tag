@@ -288,13 +288,11 @@ private:
           double lat = value.substring(0, commaPos).toFloat();
           double lon = value.substring(commaPos + 1).toFloat();
           bool savedInitialPosition = NVSConfig::setInitialPosition(lat, lon);
-          bool savedLastKnownPosition = NVSConfig::setLastKnownPosition(lat, lon, -1.0);
+          bool savedLastKnownPosition = NVSConfig::saveLastKnownPosition(lat, lon, -1.0);
           Serial.print("Last Known Position saved: ");
           Serial.print(savedLastKnownPosition ? "Success" : "Failed");
           Serial.print(" - Initial Position saved: ");
           Serial.print(savedInitialPosition ? "Success" : "Failed");
-          Serial.print(" - Current NVS value: ");
-          Serial.println(NVSConfig::getLastKnownPosition());
           initialPositionReceived = true;
           Serial.print("Initial Position received: (");
           Serial.print(lat, 7);
