@@ -219,7 +219,7 @@ void setup() {
   ble_start_time = TimeSync::getCurrentTimeMillis();
   Serial.print("BLE start time: ");
   Serial.println(ble_start_time);
-  BLEConfig::setBLEStartTime(ble_start_time); // Set BLE start time for countdown timer
+  BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
   BLEConfig::begin();
   Serial.println("BLE initialized");
   Serial.println("=== Setup Complete ===");
@@ -295,6 +295,7 @@ void loop() {
   if(is_first_cycle) {
     if((current_time - ble_start_time) > ble_off_after_time) {
       Serial.println("BLE timeout reached - ending first cycle");
+      BLEConfig::stop();
       is_first_cycle = false;
       if(!NVSConfig::getGPSActive()) {
         Serial.println("GPS is not active");
