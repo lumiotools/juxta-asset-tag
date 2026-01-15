@@ -6,6 +6,7 @@
 #include "unified_csv_storage.h"
 #include "customwifi.h"
 #include "nvs_config.h"
+#include "time_sync.h"
 
 // Server URL and configuration
 const char* MODEL_SERVER_URL = "http://192.168.1.1:5000/api/model"; // Model server endpoint
@@ -226,6 +227,7 @@ public:
   // Main transmission handler for model server
   // Reads batches from flash, sends to model server, processes response
   // Initial GPS coordinates can be provided, or uses last known position
+  // WiFi Auto Control: Turns on WiFi if needed, sends data, then turns off if it wasn't on before
   // Returns: Number of batches successfully transmitted
   uint32_t handleModelServerTransmission(double initialLat = 0.0, double initialLon = 0.0, double initialHdop = -1.0) {
     if (!initialized) {
@@ -233,11 +235,33 @@ public:
       return 0;
     }
     
-    // Check WiFi connection
-    if (!CustomWiFi::isConnected()) {
-      Serial.println("ModelServerTransmissionHandler: WiFi not connected - skipping transmission");
+    // ========== WIFI AUTO CONNECT LOGIC ==========
+    bool wifiWasConnected = CustomWiFi::isConnected();
+    bool wifiConnectionAchieved = false;
+    
+    // Turn on WiFi if not already connected
+    if (!wifiWasConnected) {
+      Serial.println("ModelServerTransmissionHandler: WiFi disconnected - connecting...");
+      CustomWiFi::connectWiFi();
+      
+      // Wait for WiFi connection (with timeout)
+      unsigned long long wifiStartTime = TimeSync::getCurrentTimeMillis();
+      const unsigned long long WIFI_CONNECTION_TIMEOUT = 10000; // 10 seconds
+      
+      while (!CustomWiFi::isConnected() && 
+             (TimeSync::getCurrentTimeMillis() - wifiStartTime) < WIFI_CONNECTION_TIMEOUT) {
+        delay(100);
+      }
+    }
+    
+    wifiConnectionAchieved = CustomWiFi::isConnected();
+    
+    if (!wifiConnectionAchieved) {
+      Serial.println("ModelServerTransmissionHandler: WiFi connection failed - cannot transmit");
       return 0;
     }
+    
+    Serial.println("ModelServerTransmissionHandler: WiFi connected - proceeding with transmission");
     
     // Use provided GPS coordinates if valid, otherwise use stored position
     if (initialLat != 0.0 && initialLon != 0.0 && initialHdop > 0.0) {
@@ -344,6 +368,15 @@ public:
     Serial.print(currentLon, 7);
     Serial.println(")");
     Serial.println("==========================================");
+    
+    // ========== WIFI AUTO DISCONNECT LOGIC ==========
+    // Turn off WiFi if it wasn't connected before transmission
+    if (!wifiWasConnected) {
+      Serial.println("ModelServerTransmissionHandler: Turning WiFi off (was not connected before)");
+      CustomWiFi::disconnectWiFi();
+    } else {
+      Serial.println("ModelServerTransmissionHandler: WiFi remains on (was connected before)");
+    }
     
     return batchesSent;
   }
