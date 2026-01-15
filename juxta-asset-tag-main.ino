@@ -456,10 +456,17 @@ void loop() {
     unsigned long long transmissionCycleTimeMs = (unsigned long long)transmissionCycleTime * 1000ULL;
 
     if((current_time - transmission_cycle_start_time) >= transmissionCycleTimeMs) {
+      GPSData gpsData;
+      if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
+        gpsData = gpsSensor.getGPSData();
+      }
       Serial.println("Transmission cycle time reached - preparing data transmission");
       // TODO: Data Transmission to Model Server & PMC Server
       Serial.println("Stopping IMU ticker");
       imuReadTicker.detach();
+      if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
+      }
       transmission_cycle_start_time = -1;
       Serial.println("Transmission cycle reset");
     }
