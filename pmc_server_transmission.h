@@ -103,7 +103,7 @@ private:
         // Turn off BLE if it was disabled before
         if (!bleWasEnabled) {
           Serial.println("PMCServerTransmissionHandler: Turning BLE off");
-          BLEConfig::end();
+          BLEConfig::stop();
         }
         
         return result;
@@ -117,7 +117,7 @@ private:
     // Turn off BLE after attempt (success or failure)
     if (!bleWasEnabled) {
       Serial.println("PMCServerTransmissionHandler: Turning BLE off");
-      BLEConfig::end();
+      BLEConfig::stop();
     }
     
     // ========== WIFI TRANSMISSION ATTEMPT ==========
