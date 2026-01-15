@@ -150,6 +150,47 @@ private:
     return (err == ESP_OK);
   }
 
+  // Blob storage functions for FIFO queue
+  static bool writeBlobNVS(const char* key, const void* data, size_t length) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    esp_err_t err = nvs_set_blob(nvsHandle, key, data, length);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK);
+  }
+
+  static size_t readBlobNVS(const char* key, void* buffer, size_t maxLength) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return 0;
+    
+    size_t length = maxLength;
+    esp_err_t err = nvs_get_blob(nvsHandle, key, buffer, &length);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK) ? length : 0;
+  }
+
+  static size_t getBlobSizeNVS(const char* key) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return 0;
+    
+    size_t length = 0;
+    esp_err_t err = nvs_get_blob(nvsHandle, key, nullptr, &length);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK) ? length : 0;
+  }
+
+  static bool eraseBlobNVS(const char* key) {
+    nvs_handle_t nvsHandle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvsHandle) != ESP_OK) return false;
+    
+    esp_err_t err = nvs_erase_key(nvsHandle, key);
+    if (err == ESP_OK) err = nvs_commit(nvsHandle);
+    nvs_close(nvsHandle);
+    return (err == ESP_OK);
+  }
+
 public:
   static String getWiFiSSID() { return readStringNVS(WIFI_SSID_KEY); }
   static String getWiFiPassword() { return readStringNVS(WIFI_PASSWORD_KEY); }
@@ -357,6 +398,23 @@ public:
   
   static bool writeString(const char* key, const char* value) {
     return writeStringNVS(key, value);
+  }
+  
+  // Generic blob storage for binary data (FIFO queues, etc.)
+  static bool writeBlob(const char* key, const void* data, size_t length) {
+    return writeBlobNVS(key, data, length);
+  }
+  
+  static size_t readBlob(const char* key, void* buffer, size_t maxLength) {
+    return readBlobNVS(key, buffer, maxLength);
+  }
+  
+  static size_t getBlobSize(const char* key) {
+    return getBlobSizeNVS(key);
+  }
+  
+  static bool eraseBlob(const char* key) {
+    return eraseBlobNVS(key);
   }
 
 };
