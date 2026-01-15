@@ -24,6 +24,7 @@ struct GPSData {
   float hdop;
   unsigned long long lastFixTimeMillis = 0;  // Timestamp (ms since epoch or millis) when last valid fix was recorded
   bool hasValidFix = false;
+  bool isHighAccuracy = false;
 };
 
 class GPSSensor {
@@ -178,6 +179,17 @@ private:
     return degrees.toFloat() + minutes.toFloat() / 60.0;
   }
   
+  // GPS accuracy detection function - checks if HDOP meets threshold
+  bool isHighAccuracy(float hdop) {
+    float accuracyThreshold = NVSConfig::getGPSAccuracyThreshold();
+
+    if(hdop <= accuracyThreshold) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+  
   // Parse RMC sentence: $GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A
   void parseRMC(String sentence) {
     int commaPos[12];
@@ -232,11 +244,13 @@ private:
         data.altitude = lastKnownData.altitude;
         data.satellites = lastKnownData.satellites;
         data.hdop = lastKnownData.hdop;
+        data.isHighAccuracy = isHighAccuracy(data.hdop);
       } else {
         // Defaults for first fix
         data.altitude = 0.0;
         data.satellites = 0;
         data.hdop = 0.0;
+        data.isHighAccuracy = false;  // No HDOP data means we can't determine accuracy
       }
       
       // Store as last known values
@@ -260,6 +274,7 @@ private:
         data.satellites = lastKnownData.satellites;
         data.hdop = lastKnownData.hdop;
         data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
+        data.isHighAccuracy = isHighAccuracy(data.hdop);
       }
     }
   }
@@ -370,6 +385,7 @@ public:
     data.satellites = 0;
     data.hdop = 0.0;
     data.lastFixTimeMillis = 0;
+    data.isHighAccuracy = false;
     
     // Load last known GPS data from NVS and send hot start command
     if (NVSConfig::loadLastGPSData(lastKnownData)) {
@@ -413,11 +429,13 @@ public:
       data.satellites = lastKnownData.satellites;
       data.hdop = lastKnownData.hdop;
       data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
+      data.isHighAccuracy = isHighAccuracy(lastKnownData.hdop);
       // hasValidFix remains false to indicate this is stale data
     }
   }
   
   GPSData getGPSData() {
+    update();
     return data;
   }
   
@@ -427,14 +445,6 @@ public:
     if (lastKnownData.hasValidFix && !data.hasValidFix) {
       sendHotStartCommand(lastKnownData.latitude, lastKnownData.longitude, lastKnownData.altitude);
     }
-  }
-  
-  // GPS accuracy detection function (placeholder - returns manual true/false)
-  // TODO: Implement actual accuracy threshold checking based on HDOP
-  bool isHighAccuracy() {
-    // Empty function - manual true/false return for now
-    // Will be implemented with HDOP threshold checking later
-    return true; // Placeholder: return true for high accuracy
   }
 
 };

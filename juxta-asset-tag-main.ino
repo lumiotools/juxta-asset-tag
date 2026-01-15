@@ -320,7 +320,7 @@ void loop() {
   } else if(gps_search && NVSConfig::getGPSActive()) {
     GPSData gpsData = gpsSensor.getGPSData();
 
-    if(gpsData.hasValidFix && gpsSensor.isHighAccuracy()) {
+    if(gpsData.hasValidFix && gpsData.isHighAccuracy) {
       Serial.println("SCENARIO_1_HIGH_ACCURACY detected!");
       Serial.print("GPS Position - Lat: ");
       Serial.print(gpsData.latitude, 6);
@@ -335,7 +335,7 @@ void loop() {
       Serial.println("GPS search completed - SCENARIO_1 active");
     } else if((current_time - gps_search_start_time) > (1000 * 60 * 2)) {
       Serial.println("GPS search timeout (2 minutes) reached");
-      if(gpsData.hasValidFix && !gpsSensor.isHighAccuracy()) {
+      if(gpsData.hasValidFix && !gpsData.isHighAccuracy) {
         Serial.println("SCENARIO_2_LOW_ACCURACY detected!");
         Serial.print("GPS Position - Lat: ");
         Serial.print(gpsData.latitude, 6);
@@ -426,9 +426,9 @@ void loop() {
         Serial.print("GPS fix: ");
         Serial.print(gpsData.hasValidFix ? "VALID" : "NO FIX");
         Serial.print(", High accuracy: ");
-        Serial.println(gpsSensor.isHighAccuracy() ? "YES" : "NO");
+        Serial.println(gpsData.isHighAccuracy ? "YES" : "NO");
         
-        if(!gpsData.hasValidFix || !gpsSensor.isHighAccuracy()) {
+        if(!gpsData.hasValidFix || !gpsData.isHighAccuracy) {
           Serial.println("GPS accuracy degraded - transitioning to SCENARIO_2_LOW_ACCURACY");
           Serial.print("Last position - Lat: ");
           Serial.print(gpsData.latitude, 6);
