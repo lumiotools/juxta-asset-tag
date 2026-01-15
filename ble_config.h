@@ -289,17 +289,16 @@ private:
           double lon = value.substring(commaPos + 1).toFloat();
           bool savedInitialPosition = NVSConfig::setInitialPosition(lat, lon);
           bool savedLastKnownPosition = NVSConfig::saveLastKnownPosition(lat, lon, -1.0);
-          Serial.print("Last Known Position saved: ");
-          Serial.print(savedLastKnownPosition ? "Success" : "Failed");
-          Serial.print(" - Initial Position saved: ");
-          Serial.print(savedInitialPosition ? "Success" : "Failed");
           initialPositionReceived = true;
           Serial.print("Initial Position received: (");
           Serial.print(lat, 7);
           Serial.print(", ");
           Serial.print(lon, 7);
           Serial.print(") - ");
-          Serial.println(saved ? "Saved to NVS" : "Failed to save");
+          Serial.print("Last Known Position saved: ");
+          Serial.print(savedLastKnownPosition ? "Success" : "Failed");
+          Serial.print(" - Initial Position saved: ");
+          Serial.print(savedInitialPosition ? "Success" : "Failed");
           
           // Turn off GPS immediately when position is received (even if 2-minute cycle incomplete)
           GPSSensor::powerOff();
