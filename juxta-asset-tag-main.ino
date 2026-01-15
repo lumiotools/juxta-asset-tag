@@ -62,7 +62,7 @@ int prev_button_state = -1;
 long long prev_button_click_time = -1;
 
 long long ble_start_time = -1;
-long long ble_off_after_time = 1000 * 60 * 1; // 1 minute
+long long ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds
 
 bool gps_search = true;
 long long gps_search_start_time = -1;
@@ -227,9 +227,10 @@ void setup() {
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
   ble_start_time = TimeSync::getCurrentTimeMillis();
+  ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds (5 seconds buffer for accounting delay)
   Serial.print("BLE start time: ");
   Serial.println(ble_start_time);
-  BLEConfig::setBLEStartTime(ble_start_time); // Set BLE start time for countdown timer
+  BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
   BLEConfig::begin();
   Serial.println("BLE initialized");
   Serial.println("=== Setup Complete ===");
@@ -305,6 +306,7 @@ void loop() {
   if(is_first_cycle) {
     if((current_time - ble_start_time) > ble_off_after_time) {
       Serial.println("BLE timeout reached - ending first cycle");
+      BLEConfig::stop();
       is_first_cycle = false;
       if(!NVSConfig::getGPSActive()) {
         Serial.println("GPS is not active");

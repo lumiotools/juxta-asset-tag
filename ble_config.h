@@ -72,12 +72,12 @@ private:
   static bool gpsReadCycleReceived;
   static bool gpsAccuracyThresholdReceived;
   static bool gpsOnAfterReceived;
-  static unsigned long long configTimeExtension;  // Extension time in milliseconds (added to config period)
   static uint16_t mtuSize;
   static const char* deviceId;
   static const char* deviceVersion;
   static bool bleDisabled;  // Flag to track if BLE is permanently disabled
-  static unsigned long long bleStartTimeMs;  // Time when BLE was started (for countdown timer)
+  static long long* bleOffAfterTimePtr;  // Pointer to ble_off_after_time variable in main
+  static long long bleStartTime;  // BLE start time for calculating time elapsed
 
   // BLE Server Callbacks
   class MyServerCallbacks: public NimBLEServerCallbacks {
@@ -85,6 +85,17 @@ private:
       deviceConnected = true;
       // Fetch MTU from connection info if available
       mtuSize = (uint16_t)pServer->getPeerMTU(connInfo.getConnHandle());
+      
+      // Calculate elapsed time and add to ble_off_after_time
+      if (bleOffAfterTimePtr != nullptr) {
+        long long currentTime = TimeSync::getCurrentTimeMillis();
+        long long elapsedTime = currentTime - bleStartTime;
+        *bleOffAfterTimePtr += elapsedTime;
+        Serial.print("BLE Connected - Elapsed time: ");
+        Serial.print(elapsedTime);
+        Serial.print(" ms added to ble_off_after_time. New value: ");
+        Serial.println(*bleOffAfterTimePtr);
+      }
       
       // Load current SSID, device_id, timestamp, and battery
       String currentSSID = NVSConfig::getWiFiSSID();
@@ -99,16 +110,13 @@ private:
       const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
       
-      // Calculate countdown timer (milliseconds remaining for configuration mode)
-      // Configuration mode duration: connection time + 1 minute (60000 ms) + extension time
-      unsigned long long currentTime = TimeSync::getCurrentTimeMillis();
-      unsigned long long connectionTime = currentTime; // Time when connection was established
-      unsigned long long configEndTime = connectionTime + 60000 + configTimeExtension; // +1 minute from connection + extension
-      unsigned long long timeRemaining = (configEndTime > currentTime) ? (configEndTime - currentTime) : 0;
+      // Get current ble_off_after_time value from the reference
+      long long bleOffAfterTime = (bleOffAfterTimePtr != nullptr) ? *bleOffAfterTimePtr : 60000;
+      long long timeRemaining = bleOffAfterTime - (TimeSync::getCurrentTimeMillis() - bleStartTime);
       
       char csvBuffer[650];
       snprintf(csvBuffer, sizeof(csvBuffer), 
-               "%s,%s,%llu,%d,%.3f,%s,%d,%d,%.2f,%d,%d,%llu",
+               "%s,%s,%lld,%d,%.3f,%s,%d,%d,%.2f,%d,%d,%lld",
                devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getGPSReadCycleTime(), NVSConfig::getCycleTime(), NVSConfig::getGPSAccuracyThreshold(), NVSConfig::getGPSOnAfter(), NVSConfig::getGPSActive(), timeRemaining);
       
       // Send CSV data via Current SSID Characteristic (only once on connection)
@@ -364,40 +372,25 @@ private:
   // Extend Config Time Characteristic Callbacks
   class ExtendConfigTimeCallbacks: public NimBLECharacteristicCallbacks {
       void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-        // Read seconds from message (always contains an integer) and extend configuration period by that amount
+        // Add seconds to ble_off_after_time
         std::string stdValue = pCharacteristic->getValue();
         String value = String(stdValue.c_str());
-        
-        // Trim whitespace
         value.trim();
         
-        if (value.length() > 0) {
+        if (value.length() > 0 && bleOffAfterTimePtr != nullptr) {
           uint32_t seconds = value.toInt();
           
           if (seconds > 0) {
-            unsigned long long previousExtension = configTimeExtension;
-            configTimeExtension += (unsigned long long)seconds * 1000ULL; // Convert to milliseconds and add
+            *bleOffAfterTimePtr += (long long)seconds * 1000LL; // Convert to milliseconds and add
             
-            // Debug output to verify extension is being added
-            Serial.print("[EXTEND CONFIG TIME] SUCCESS - Received: ");
+            Serial.print("Extended ble_off_after_time by ");
             Serial.print(seconds);
-            Serial.print(" seconds, Previous extension: ");
-            Serial.print(previousExtension);
-            Serial.print(" ms, New extension: ");
-            Serial.print(configTimeExtension);
+            Serial.print(" seconds. New value: ");
+            Serial.print(*bleOffAfterTimePtr);
             Serial.print(" ms (");
-            Serial.print(configTimeExtension / 1000);
+            Serial.print(*bleOffAfterTimePtr / 1000);
             Serial.println(" seconds total)");
-          } else {
-            Serial.print("[EXTEND CONFIG TIME] ERROR: Invalid value (0 or parse failed). Raw value: '");
-            Serial.print(value);
-            Serial.print("', Length: ");
-            Serial.print(value.length());
-            Serial.print(", Parsed int: ");
-            Serial.println(seconds);
           }
-        } else {
-          Serial.println("[EXTEND CONFIG TIME] ERROR: Empty value received after trim");
         }
       }
   };
@@ -412,9 +405,10 @@ public:
     deviceVersion = version;
   }
   
-  // Set BLE start time (for countdown timer calculation)
-  static void setBLEStartTime(unsigned long long startTime) {
-    bleStartTimeMs = startTime;
+  // Set BLE off after time reference (stores pointer to main's ble_off_after_time variable)
+  static void setBleOffAfterTime(long long* bleOffAfterTimeRef, long long startTime) {
+    bleOffAfterTimePtr = bleOffAfterTimeRef;
+    bleStartTime = startTime;
   }
   
   // Initialize BLE and start advertising
@@ -564,7 +558,6 @@ public:
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
     gpsOnAfterReceived = false;
-    configTimeExtension = 0; // Reset extension time
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
     
@@ -612,9 +605,9 @@ public:
     return deviceConnected;
   }
   
-  // Get configuration time extension (in milliseconds)
-  static unsigned long long getConfigTimeExtension() {
-    return configTimeExtension;
+  // Get BLE off after time value (in milliseconds)
+  static long long getBleOffAfterTime() {
+    return (bleOffAfterTimePtr != nullptr) ? *bleOffAfterTimePtr : 60000;
   }
   
   // Restart advertising
@@ -819,11 +812,11 @@ bool BLEConfig::initialPositionReceived = false;
 bool BLEConfig::gpsReadCycleReceived = false;
 bool BLEConfig::gpsAccuracyThresholdReceived = false;
 bool BLEConfig::gpsOnAfterReceived = false;
-unsigned long long BLEConfig::configTimeExtension = 0;
 uint16_t BLEConfig::mtuSize = 23;
 const char* BLEConfig::deviceId = nullptr;
 const char* BLEConfig::deviceVersion = "v2.0.0";
 bool BLEConfig::bleDisabled = false;
-unsigned long long BLEConfig::bleStartTimeMs = 0;
+long long* BLEConfig::bleOffAfterTimePtr = nullptr;
+long long BLEConfig::bleStartTime = 0;
 
 #endif
