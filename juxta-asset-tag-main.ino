@@ -45,6 +45,8 @@ IMUSensor imuSensor;
 GPSSensor gpsSensor;
 SPIFlashHandler spiFlash;
 UnifiedCSVStorage unifiedCSVStorage;
+ModelServerTransmissionHandler modelServerTransmissionHandler;
+PMCServerTransmissionHandler pmcServerTransmissionHandler;
 
 // Sensor status flags
 bool imu_initialized = false;
@@ -163,12 +165,6 @@ void setup() {
   Serial.println("Initializing NVS...");
   NVSConfig::initializeNVS();
 
-  Serial.println("Initializing Model Server Transmission...");
-  ModelServerTransmissionHandler::begin();
-
-  Serial.println("Initializing PMC Server Transmission...");
-  PMCServerTransmissionHandler::begin();
-
   Serial.println("Initializing SPI Flash...");
   flash_initialized = spiFlash.begin();
   Serial.print("SPI Flash initialized: ");
@@ -194,6 +190,12 @@ void setup() {
     return;
   }
   Serial.println("All sensors initialized successfully");
+
+  Serial.println("Initializing Model Server Transmission...");
+  modelServerTransmissionHandler.begin(&unifiedCSVStorage);
+
+  Serial.println("Initializing PMC Server Transmission...");
+  pmcServerTransmissionHandler.begin();
 
   uint8_t savedScenario = NVSConfig::getScenarioState();
   Serial.print("Restored scenario from NVS: ");
@@ -324,7 +326,7 @@ void loop() {
           Serial.print(lastKnownLon, 6);
           Serial.print(", HDOP: ");
           Serial.println(lastKnownHdop, 2);
-          bool pmcSuccess = PMCServerTransmissionHandler::sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+          bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
           Serial.print("PMC transmission result: ");
           Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
         } else {
@@ -392,7 +394,7 @@ void loop() {
       Serial.print(lastKnownLon, 6);
       Serial.print(", HDOP: ");
       Serial.println(lastKnownHdop, 2);
-      bool pmcSuccess = PMCServerTransmissionHandler::sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+      bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
       Serial.print("PMC transmission result: ");
       Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
     }
@@ -489,7 +491,7 @@ void loop() {
           Serial.println(lastKnownHdop, 2);
           
           Serial.println("Sending to Model Server...");
-          bool modelSuccess = ModelServerTransmissionHandler::sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
+          bool modelSuccess = modelServerTransmissionHandler.sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
           Serial.print("Model Server transmission result: ");
           Serial.println(modelSuccess ? "SUCCESS" : "FAILED");
 
@@ -499,7 +501,7 @@ void loop() {
             Serial.print("Sending to PMC Server - Scenario: ");
             Serial.println(current_scenario);
             NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-            bool pmcSuccess = PMCServerTransmissionHandler::sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+            bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
             Serial.print("PMC Server transmission result: ");
             Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
           }
@@ -541,7 +543,7 @@ void loop() {
       Serial.println(lastKnownHdop, 2);
       
       Serial.println("Sending to Model Server...");
-      bool modelSuccess = ModelServerTransmissionHandler::sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
+      bool modelSuccess = modelServerTransmissionHandler.sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
       Serial.print("Model Server transmission result: ");
       Serial.println(modelSuccess ? "SUCCESS" : "FAILED");
 
@@ -556,7 +558,7 @@ void loop() {
         Serial.print("Sending to PMC Server - Scenario: ");
         Serial.println(current_scenario);
         NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-        bool pmcSuccess = PMCServerTransmissionHandler::sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
         Serial.print("PMC Server transmission result: ");
         Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
       }

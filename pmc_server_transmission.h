@@ -177,32 +177,32 @@ private:
   
   // Get queue head (write position)
   uint32_t getQueueHead() {
-    return NVSConfig::readU32NVS(PMC_QUEUE_HEAD_KEY, 0);
+    return NVSConfig::readU32(PMC_QUEUE_HEAD_KEY, 0);
   }
   
   // Set queue head
   bool setQueueHead(uint32_t head) {
-    return NVSConfig::writeU32NVS(PMC_QUEUE_HEAD_KEY, head);
+    return NVSConfig::writeU32(PMC_QUEUE_HEAD_KEY, head);
   }
   
   // Get queue tail (read position)
   uint32_t getQueueTail() {
-    return NVSConfig::readU32NVS(PMC_QUEUE_TAIL_KEY, 0);
+    return NVSConfig::readU32(PMC_QUEUE_TAIL_KEY, 0);
   }
   
   // Set queue tail
   bool setQueueTail(uint32_t tail) {
-    return NVSConfig::writeU32NVS(PMC_QUEUE_TAIL_KEY, tail);
+    return NVSConfig::writeU32(PMC_QUEUE_TAIL_KEY, tail);
   }
   
   // Get queue count
   uint32_t getQueueCount() {
-    return NVSConfig::readU32NVS(PMC_QUEUE_COUNT_KEY, 0);
+    return NVSConfig::readU32(PMC_QUEUE_COUNT_KEY, 0);
   }
   
   // Set queue count
   bool setQueueCount(uint32_t count) {
-    return NVSConfig::writeU32NVS(PMC_QUEUE_COUNT_KEY, count);
+    return NVSConfig::writeU32(PMC_QUEUE_COUNT_KEY, count);
   }
 
 public:
@@ -222,7 +222,7 @@ public:
     maxQueueSize = maxCapacityBytes / PMC_MAX_ENTRY_SIZE;
     
     // Store max queue size
-    NVSConfig::writeU32NVS(PMC_QUEUE_MAX_KEY, maxQueueSize);
+    NVSConfig::writeU32(PMC_QUEUE_MAX_KEY, maxQueueSize);
     
     Serial.println("========== PMC Server Transmission Handler ==========");
     Serial.println("Protocol: BLE (primary) -> WiFi (fallback) -> Internal Flash (fallback)");
@@ -491,7 +491,9 @@ public:
     }
     
     // Automatically gather current device values
-    const char* deviceId = DeviceID::getDeviceID();
+    char deviceIdBuffer[32];
+    DeviceID::getDeviceId(deviceIdBuffer, sizeof(deviceIdBuffer));
+    const char* deviceId = deviceIdBuffer;
     int batteryPercent = BatteryMonitor::getBatteryPercentage();
     float batteryVoltage = BatteryMonitor::readBatteryVoltage();
     unsigned long long timestamp = TimeSync::getCurrentTimeMillis();

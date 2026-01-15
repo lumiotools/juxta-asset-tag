@@ -110,6 +110,18 @@ private:
     return (err == ESP_OK);
   }
 
+public:
+  // Public wrapper methods for U32 NVS operations (used by PMCServerTransmissionHandler)
+  static uint32_t readU32(const char* key, uint32_t defaultVal = 0) {
+    return readU32NVS(key, defaultVal);
+  }
+  
+  static bool writeU32(const char* key, uint32_t value) {
+    return writeU32NVS(key, value);
+  }
+
+private:
+
   static uint64_t readU64NVS(const char* key, uint64_t defaultVal = 0) {
     nvs_handle_t nvsHandle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvsHandle) != ESP_OK) return defaultVal;
