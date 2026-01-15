@@ -347,6 +347,20 @@ public:
     
     return batchesSent;
   }
+  
+  // Simplified method: Send IMU data to model server
+  // This is the main method for sending IMU data with GPS coordinates
+  // Parameters: latitude, longitude, hdop from current GPS reading
+  // Returns: true if at least one batch was sent successfully
+  bool sendData(double latitude, double longitude, double hdop) {
+    if (!initialized) {
+      Serial.println("ModelServerTransmissionHandler: Not initialized");
+      return false;
+    }
+    
+    uint32_t batchesSent = handleModelServerTransmission(latitude, longitude, hdop);
+    return (batchesSent > 0);
+  }
 };
 
 #endif // MODEL_SERVER_TRANSMISSION_H

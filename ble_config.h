@@ -644,83 +644,41 @@ public:
   
   // Stop and deinitialize BLE permanently (consumes no power)
   static void stop() {
-    // Stop LED blinking and restore to green
-    // stopStatusLEDBlink(TimeSync::getCurrentTimeMillis() + 4000);
+    Serial.println("BLE: Starting complete shutdown...");
     
-    // Set disabled flag early to prevent any new operations
+    // 1. Set disabled flag FIRST to prevent any new operations
     bleDisabled = true;
-    
-    // Disconnect any connected clients first (prevents heap corruption)
-    // Use safer method: check connected count first, then disconnect
-    // if (pServer != nullptr && deviceConnected) {
-    //   Serial.println("Disconnecting BLE clients...");
-      
-    //   // Check if there are connected devices using a safer method
-    //   // getConnectedCount() is safer than getPeerDevices() as it doesn't return iterators
-    //   uint32_t connectedCount = 0;
-    //   if (pServer != nullptr) {
-    //     connectedCount = pServer->getConnectedCount();
-    //   }
-      
-    //   // Only attempt disconnection if there are connected devices
-    //   // Note: getPeerDevices() can cause memory access faults if server is partially deinitialized
-    //   // So we use a more conservative approach: just set deviceConnected to false
-    //   // and let deinit(true) handle the actual disconnection
-    //   if (connectedCount > 0) {
-    //     // Instead of iterating through peer devices (which can cause memory faults),
-    //     // we'll let deinit(true) handle the disconnection automatically
-    //     // This is safer as deinit handles cleanup internally
-    //     Serial.print("Found ");
-    //     Serial.print(connectedCount);
-    //     Serial.println(" connected client(s) - deinit will handle disconnection");
-    //     delay(200); // Brief delay to allow any ongoing operations to complete
-    //   } else {
-    //     Serial.println("No connected clients to disconnect");
-    //   }
-      
-    //   // Mark as disconnected to prevent further operations
-    //   deviceConnected = false;
-    //   oldDeviceConnected = false;
-    // }
-    
-    // Mark as disconnected immediately to prevent new operations
     deviceConnected = false;
     oldDeviceConnected = false;
     
-    // Check if BLE was ever initialized
+    // 2. Check if BLE was ever initialized
     if (pServer == nullptr) {
       Serial.println("BLE already stopped or never initialized");
-      bleDisabled = true;
       return;
     }
     
-    // Stop advertising first (before any disconnection attempts)
-    NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
+    // 3. Stop advertising SAFELY (with NimBLEDevice directly)
+    Serial.println("BLE: Stopping advertising...");
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     if (pAdvertising != nullptr) {
       pAdvertising->stop();
-      Serial.println("BLE advertising stopped");
+      delay(300); // Wait for advertising to stop
     }
     
-    // Wait for advertising to fully stop
-    delay(500); // Increased delay
-    
-    // Check if we have active connections and wait for clean disconnection
-    if (pServer->getConnectedCount() > 0) {
-      Serial.print("Waiting for ");
-      Serial.print(pServer->getConnectedCount());
-      Serial.println(" connection(s) to disconnect...");
-      delay(500); // Give time for disconnection
+    // 4. Disconnect all clients SAFELY using vector iteration
+    Serial.println("BLE: Disconnecting clients...");
+    std::vector<uint16_t> peerDevices = pServer->getPeerDevices();
+    for (uint16_t conn_id : peerDevices) {
+      pServer->disconnect(conn_id);
     }
+    delay(500); // Wait for disconnections
     
-    // Now safe to deinitialize
-    // deinit(true) will automatically disconnect any remaining connections safely
-    Serial.println("Deinitializing BLE...");
-    // NimBLEDevice::deinit(true);
-    Serial.println("BLE deinitialized");
-    // Wait for deinit to complete
-    delay(500); // Increased delay
-    Serial.println("BLE deinitialized 2");
-    // Clear all pointers to prevent any accidental access
+    // 5. Deinitialize BLE completely
+    Serial.println("BLE: Deinitializing...");
+    NimBLEDevice::deinit(true);  // true = release all resources
+    delay(500); // Wait for deinit to complete
+    
+    // 6. Clear all pointers
     pServer = nullptr;
     pService = nullptr;
     pSSIDCharacteristic = nullptr;
@@ -735,15 +693,8 @@ public:
     pGPSAccuracyThresholdCharacteristic = nullptr;
     pGPSOnAfterCharacteristic = nullptr;
     pExtendConfigTimeCharacteristic = nullptr;
-
-    Serial.println("BLE deinitialized 2");
     
-    // Set disabled flag
-    bleDisabled = true;
-    deviceConnected = false;
-    oldDeviceConnected = false;
-    Serial.println("On line 727");
-    // Clear credentials
+    // 7. Clear all state variables
     receivedSSID = "";
     receivedPassword = "";
     receivedGPSActive = 0;
@@ -757,7 +708,9 @@ public:
     initialPositionReceived = false;
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
-    Serial.println("On line 742");
+    gpsOnAfterReceived = false;
+    
+    Serial.println("BLE: Complete shutdown finished");
   }
   
   // Check if BLE is enabled (not permanently disabled)

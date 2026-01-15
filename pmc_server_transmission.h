@@ -21,6 +21,7 @@ const char* PMC_QUEUE_COUNT_KEY = "pmc_q_count";    // Number of entries in queu
 const char* PMC_QUEUE_MAX_KEY = "pmc_q_max";        // Max queue size
 const int PMC_MAX_ENTRY_SIZE = 200;                 // Max size per entry (bytes)
 const int PMC_BATCH_READ_SIZE = 10;                 // Default batch size for reading
+const int PMC_CHUNK_SIZE = 5;                       // Max entries per transmission (RAM safety)
 
 // ============================================================================
 // PMC SERVER TRANSMISSION HANDLER
@@ -514,34 +515,119 @@ public:
     Serial.print("), HDOP: ");
     Serial.println(hdop, 2);
     
-    // Format data for PMC server
-    String payload = formatPMCData(deviceId, batteryPercent, batteryVoltage, timestamp, scenario, latitude, longitude, hdop);
+    // Format current data for PMC server
+    String currentData = formatPMCData(deviceId, batteryPercent, batteryVoltage, timestamp, scenario, latitude, longitude, hdop);
     
-    Serial.print("Payload size: ");
-    Serial.print(payload.length());
-    Serial.println(" bytes");
-    
-    // Use common transmission logic (BLE -> WiFi with auto on/off control)
-    TransmissionResult result = sendPayloadWithAutoControl(payload);
-    
-    // If transmission succeeded, return immediately
-    if (result.success) {
-      Serial.println("=============================================");
-      return result;
+    // Save current data to queue FIRST (ensures FIFO order: earliest first)
+    Serial.println("PMCServerTransmissionHandler: Adding current data to queue");
+    bool savedCurrent = saveToInternalFlash(currentData);
+    if (!savedCurrent) {
+      Serial.println("PMCServerTransmissionHandler: CRITICAL - Failed to save current data to queue");
+      TransmissionResult failResult = {false, "None", 0};
+      return failResult;
     }
     
-    // Both methods failed - save to internal flash
-    Serial.println("PMCServerTransmissionHandler: All transmission methods failed");
-    Serial.println("PMCServerTransmissionHandler: Saving to internal flash for later retry");
+    // CHUNKED TRANSMISSION LOOP: Send ALL blobs from earliest first (FIFO)
+    uint32_t totalInQueue = getQueueCount();
+    uint32_t totalSent = 0;
+    uint32_t chunksProcessed = 0;
+    TransmissionResult result = {false, "None", 0};
     
-    bool savedToFlash = saveToInternalFlash(payload);
-    if (savedToFlash) {
-      result.success = true; // Mark as success since data is safely stored
+    Serial.print("PMCServerTransmissionHandler: Starting FIFO chunked transmission (");
+    Serial.print(totalInQueue);
+    Serial.println(" entries in queue)");
+    
+    // Loop: Send chunks from earliest (tail) until queue is empty or transmission fails
+    while (getQueueCount() > 0) {
+      uint32_t pendingCount = getQueueCount();
+      uint32_t chunkSize = min((uint32_t)PMC_CHUNK_SIZE, pendingCount);
+      
+      Serial.print("PMCServerTransmissionHandler: Chunk ");
+      Serial.print(chunksProcessed + 1);
+      Serial.print(" - Reading ");
+      Serial.print(chunkSize);
+      Serial.print(" entries from queue (earliest first)");
+      Serial.println();
+      
+      // Read chunk from queue (starting from tail = oldest/earliest)
+      String* batch = new String[chunkSize];
+      uint32_t actualCount = 0;
+      
+      if (!readBatchFromQueue(batch, chunkSize, actualCount)) {
+        delete[] batch;
+        Serial.println("PMCServerTransmissionHandler: Failed to read from queue");
+        break;
+      }
+      
+      // Build payload from batch
+      String payload = "";
+      for (uint32_t i = 0; i < actualCount; i++) {
+        if (payload.length() > 0) {
+          payload += "\n";
+        }
+        payload += batch[i];
+      }
+      
+      delete[] batch;
+      
+      Serial.print("Payload size: ");
+      Serial.print(payload.length());
+      Serial.print(" bytes (");
+      Serial.print(actualCount);
+      Serial.println(" entries)");
+      
+      // Send chunk
+      result = sendPayloadWithAutoControl(payload);
+      
+      if (result.success) {
+        // Remove sent entries from queue
+        removeBatchFromQueue(actualCount);
+        totalSent += actualCount;
+        chunksProcessed++;
+        
+        Serial.print("PMCServerTransmissionHandler: Chunk ");
+        Serial.print(chunksProcessed);
+        Serial.print(" sent successfully (");
+        Serial.print(actualCount);
+        Serial.print(" entries). Total sent: ");
+        Serial.print(totalSent);
+        Serial.print(", Remaining: ");
+        Serial.println(getQueueCount());
+        
+        // Continue to next chunk if queue not empty
+        if (getQueueCount() == 0) {
+          Serial.println("PMCServerTransmissionHandler: All data sent successfully!");
+          break;
+        }
+        
+        yield(); // Prevent watchdog
+      } else {
+        // Transmission failed - data remains in queue for next attempt
+        Serial.print("PMCServerTransmissionHandler: Chunk ");
+        Serial.print(chunksProcessed + 1);
+        Serial.println(" transmission failed - stopping loop");
+        Serial.print("PMCServerTransmissionHandler: ");
+        Serial.print(getQueueCount());
+        Serial.println(" entries remain in queue for next attempt");
+        break;
+      }
+    }
+    
+    // Summary
+    Serial.println("========== Transmission Summary ==========");
+    Serial.print("Chunks processed: ");
+    Serial.println(chunksProcessed);
+    Serial.print("Total entries sent: ");
+    Serial.println(totalSent);
+    Serial.print("Remaining in queue: ");
+    Serial.println(getQueueCount());
+    Serial.println("==========================================");
+    
+    // Mark as success if data is safely stored (even if not transmitted)
+    if (!result.success && getQueueCount() > 0) {
+      result.success = true;
       result.method = "Flash";
-      result.responseCode = 0; // Special code for flash storage
-      Serial.println("PMCServerTransmissionHandler: Data saved to internal flash");
-    } else {
-      Serial.println("PMCServerTransmissionHandler: CRITICAL - Failed to save to flash, data may be lost");
+      result.responseCode = 0;
     }
     
     Serial.println("=============================================");
