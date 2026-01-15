@@ -65,7 +65,7 @@ private:
   static uint32_t receivedGPSReadCycle;
   static float receivedGPSAccuracyThreshold;
   static uint32_t receivedGPSOnAfter;
-  static bool credentialsReceived;
+  // static bool credentialsReceived;
   static bool gpsActiveReceived;
   static bool cycleTimeReceived;
   static bool initialPositionReceived;
@@ -133,9 +133,9 @@ private:
       std::string stdValue = pCharacteristic->getValue();
       String value = String(stdValue.c_str());
       if (value.length() > 0) {
-        receivedSSID = value;
+        NVSConfig::setWiFiSSID(value.c_str());
+        Serial.println("WiFi SSID saved to NVS");
       }
-      
       // Stop LED blinking and restore to green
       // stopStatusLEDBlink();
     }
@@ -150,13 +150,9 @@ private:
       std::string stdValue = pCharacteristic->getValue();
       String value = String(stdValue.c_str());
       if (value.length() > 0) {
-        receivedPassword = value;
-        // Check if all credentials are received (SSID and password)
-        if (receivedSSID.length() > 0 && receivedPassword.length() > 0) {
-          credentialsReceived = true;
-        }
+        NVSConfig::setWiFiPassword(value.c_str());
+        Serial.println("WiFi password saved to NVS");
       }
-      
       // Stop LED blinking and restore to green
       // stopStatusLEDBlink();
     }
@@ -556,14 +552,12 @@ public:
     
     deviceConnected = false;
     oldDeviceConnected = false;
-    receivedSSID = "";
-    receivedPassword = "";
     receivedGPSActive = 0; // Default to 0 (GPS OFF)
     receivedCycleTime = 900; // Default to 900 seconds (15 minutes)
     receivedInitialPosition = "";
     receivedGPSReadCycle = 0;
     receivedGPSAccuracyThreshold = 0.0;
-    credentialsReceived = false;
+    // credentialsReceived = false;
     gpsActiveReceived = false;
     cycleTimeReceived = false;
     initialPositionReceived = false;
@@ -595,35 +589,19 @@ public:
     if (deviceConnected && !oldDeviceConnected) {
       oldDeviceConnected = deviceConnected;
     }
-    
-    // Process received WiFi credentials (debug mode is saved immediately when received)
-    if (credentialsReceived) {
-      // Save to NVS
-      bool ssidSaved = NVSConfig::setWiFiSSID(receivedSSID.c_str());
-      bool passwordSaved = NVSConfig::setWiFiPassword(receivedPassword.c_str());
-      
-      // Update current SSID characteristic with the new value
-      if (pCurrentSSIDCharacteristic != nullptr && ssidSaved) {
-        pCurrentSSIDCharacteristic->setValue(receivedSSID.c_str());
-      }
-      
-      // Reset flags
-      credentialsReceived = false;
-      receivedSSID = "";
-      receivedPassword = "";
-    }
+  
     
     // Reset GPS active flag if it was processed
-    if (gpsActiveReceived) {
-      gpsActiveReceived = false;
-      receivedGPSActive = 0;
-    }
+    // if (gpsActiveReceived) {
+    //   gpsActiveReceived = false;
+    //   receivedGPSActive = 0;
+    // }
     
-    // Reset cycle time flag if it was processed
-    if (cycleTimeReceived) {
-      cycleTimeReceived = false;
-      receivedCycleTime = 900;
-    }
+    // // Reset cycle time flag if it was processed
+    // if (cycleTimeReceived) {
+    //   cycleTimeReceived = false;
+    //   receivedCycleTime = 900;
+    // }
   }
   
   // Check if BLE is connected
@@ -706,7 +684,7 @@ public:
     receivedInitialPosition = "";
     receivedGPSReadCycle = 0;
     receivedGPSAccuracyThreshold = 0.0;
-    credentialsReceived = false;
+    // credentialsReceived = false;
     gpsActiveReceived = false;
     cycleTimeReceived = false;
     initialPositionReceived = false;
@@ -834,7 +812,7 @@ String BLEConfig::receivedInitialPosition = "";
 uint32_t BLEConfig::receivedGPSReadCycle = 0;
 float BLEConfig::receivedGPSAccuracyThreshold = 0.0;
 uint32_t BLEConfig::receivedGPSOnAfter = 60;
-bool BLEConfig::credentialsReceived = false;
+// bool BLEConfig::credentialsReceived = false;
 bool BLEConfig::gpsActiveReceived = false;
 bool BLEConfig::cycleTimeReceived = false;
 bool BLEConfig::initialPositionReceived = false;
