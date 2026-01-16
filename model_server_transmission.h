@@ -262,12 +262,9 @@ public:
     if (!wifiConnectionAchieved) {
       Serial.println("ModelServerTransmissionHandler: WiFi connection failed - cannot transmit");
       return 0;
-    } else {
-      Serial.println("ModelServerTransmissionHandler: WiFi connected - waiting for TCPIP stack...");
-      delay(500); // Give TCPIP stack time to initialize
     }
     
-    Serial.println("ModelServerTransmissionHandler: WiFi ready - proceeding with transmission");
+    Serial.println("ModelServerTransmissionHandler: WiFi connected - proceeding with transmission");
     
     // Use provided GPS coordinates if valid, otherwise use stored position
     if (initialLat != 0.0 && initialLon != 0.0 && initialHdop > 0.0) {

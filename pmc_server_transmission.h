@@ -145,9 +145,8 @@ private:
     wifiConnectionAchieved = CustomWiFi::isConnected();
     
     if (wifiConnectionAchieved) {
-      Serial.println("PMCServerTransmissionHandler: WiFi connected - waiting for TCPIP stack...");
-      delay(500); // Give TCPIP stack time to initialize
-      Serial.println("PMCServerTransmissionHandler: Sending data...");
+      Serial.println("PMCServerTransmissionHandler: WiFi connected - sending data...");
+      result = sendViaWiFi(payload);
       
       if (result.success) {
         Serial.println("PMCServerTransmissionHandler: WiFi transmission successful");
