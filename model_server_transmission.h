@@ -172,22 +172,15 @@ public:
     
     // Send via HTTP POST
     HTTPClient http;
+    
+    // Use direct begin() like working example - simpler approach
+    http.begin(MODEL_SERVER_URL);
+    
+    // Set timeout AFTER begin() (recommended approach)
     http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
     
-    bool httpBegin = http.begin(MODEL_SERVER_URL);
-    if (!httpBegin) {
-      WiFiClient client;
-      httpBegin = http.begin(client, MODEL_SERVER_URL);
-    }
-    
-    if (!httpBegin) {
-      Serial.println("ModelServerTransmissionHandler: Failed to initialize HTTP client");
-      return result;
-    }
-    
+    // Only set Content-Type header (like working example)
     http.addHeader("Content-Type", "text/csv");
-    http.addHeader("Content-Length", String(payload.length()));
-    http.addHeader("Connection", "close");
     
     Serial.println("ModelServerTransmissionHandler: Sending POST request...");
     int httpResponseCode = http.POST(payload);
