@@ -117,8 +117,8 @@ private:
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
       
       // Get current ble_off_after_time value from the reference
-      long long bleOffAfterTime = (bleOffAfterTimePtr != nullptr) ? *bleOffAfterTimePtr : 60000;
-      long long timeRemaining = bleOffAfterTime - (TimeSync::getCurrentTimeMillis() - bleStartTime);
+      long long bleOffAfterTime = (bleOffAfterTimePtr != nullptr) ? *bleOffAfterTimePtr : 0;
+      long long timeRemaining = bleOffAfterTime > 0 ? bleOffAfterTime - (TimeSync::getCurrentTimeMillis() - bleStartTime) : 0;
       
       char csvBuffer[650];
       snprintf(csvBuffer, sizeof(csvBuffer), 
@@ -623,6 +623,8 @@ public:
     gpsOnAfterReceived = false;
     mtuSize = 23; // Default BLE MTU size
     bleDisabled = false; // Reset disabled flag when starting BLE
+    bleOffAfterTimePtr = nullptr;
+    bleStartTime = 0;
     
     return true;
   }
@@ -748,6 +750,8 @@ public:
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
     gpsOnAfterReceived = false;
+    bleOffAfterTimePtr = nullptr;
+    bleStartTime = 0;
     
     Serial.println("BLE: Complete shutdown finished");
   }
