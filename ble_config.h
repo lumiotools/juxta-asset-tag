@@ -36,6 +36,11 @@ extern UnifiedCSVStorage unifiedCSVStorage;
 #define GPS_ACCURACY_THRESHOLD_CHAR_UUID "12345678-1234-1234-1234-123456789ac6"
 #define GPS_ON_AFTER_CHAR_UUID "12345678-1234-1234-1234-123456789ac7"
 #define EXTEND_CONFIG_TIME_CHAR_UUID "12345678-1234-1234-1234-123456789ac8"
+#define ERASE_FLASH_CHAR_UUID "12345678-1234-1234-1234-123456789ac9"
+
+// Forward declaration for flash handler
+class SPIFlashHandler;
+extern SPIFlashHandler spiFlash;
 
 // BLE Device Name
 class BLEConfig {
@@ -55,6 +60,7 @@ private:
   static NimBLECharacteristic* pGPSAccuracyThresholdCharacteristic;
   static NimBLECharacteristic* pGPSOnAfterCharacteristic;
   static NimBLECharacteristic* pExtendConfigTimeCharacteristic;
+  static NimBLECharacteristic* pEraseFlashCharacteristic;
   static bool deviceConnected;
   static bool oldDeviceConnected;
   static String receivedSSID;
@@ -394,6 +400,55 @@ private:
         }
       }
   };
+  
+  // Erase Flash Characteristic Callbacks
+  class EraseFlashCallbacks: public NimBLECharacteristicCallbacks {
+      void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+        String stdValue = pCharacteristic->getValue();
+        String value = String(stdValue.c_str());
+        value.trim();
+        
+        // Expecting "1" or "ERASE" to trigger the erase operation
+        if (value == "1") {
+          Serial.println("BLE: Flash erase command received");
+          
+          // Execute flash erase operation
+          bool eraseSuccess = spiFlash.eraseChip();
+          String statusMsg = eraseSuccess ? "true" : "false";
+          
+          Serial.print("Flash erased: ");
+          Serial.println(statusMsg);
+          
+          // Reset read/write pointers after erasing flash chip
+          if (eraseSuccess && unifiedCSVStorage.isInitialized()) {
+            unifiedCSVStorage.clear();
+            Serial.println("CSV storage pointers reset after chip erase");
+            statusMsg = "success";
+          } else if (!eraseSuccess) {
+            statusMsg = "failed";
+          }
+          
+          // Send status back via the characteristic
+          pCharacteristic->setValue(statusMsg.c_str());
+          pCharacteristic->notify();
+          
+          Serial.print("Flash erase status sent: ");
+          Serial.println(statusMsg);
+        } else {
+          // Invalid command
+          pCharacteristic->setValue("invalid_command");
+          pCharacteristic->notify();
+          Serial.println("BLE: Invalid flash erase command received");
+        }
+      }
+      
+      void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+        // Return current flash status
+        bool flashInitialized = unifiedCSVStorage.isInitialized();
+        String status = flashInitialized ? "ready" : "not_initialized";
+        pCharacteristic->setValue(status.c_str());
+      }
+  };
 
 public:
   // Set Device ID
@@ -518,6 +573,14 @@ public:
       NIMBLE_PROPERTY::WRITE
     );
     pExtendConfigTimeCharacteristic->setCallbacks(new ExtendConfigTimeCallbacks());
+    
+    // Create Erase Flash Characteristic
+    pEraseFlashCharacteristic = pService->createCharacteristic(
+      ERASE_FLASH_CHAR_UUID,
+      (uint16_t)(NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY)
+    );
+    pEraseFlashCharacteristic->setCallbacks(new EraseFlashCallbacks());
+    pEraseFlashCharacteristic->setValue("ready");
     
     // Start the service
     pService->start();
@@ -668,6 +731,7 @@ public:
     pGPSAccuracyThresholdCharacteristic = nullptr;
     pGPSOnAfterCharacteristic = nullptr;
     pExtendConfigTimeCharacteristic = nullptr;
+    pEraseFlashCharacteristic = nullptr;
     
     // 7. Clear all state variables
     receivedSSID = "";
@@ -795,6 +859,7 @@ NimBLECharacteristic* BLEConfig::pGPSReadCycleCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pGPSAccuracyThresholdCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pGPSOnAfterCharacteristic = nullptr;
 NimBLECharacteristic* BLEConfig::pExtendConfigTimeCharacteristic = nullptr;
+NimBLECharacteristic* BLEConfig::pEraseFlashCharacteristic = nullptr;
 bool BLEConfig::deviceConnected = false;
 bool BLEConfig::oldDeviceConnected = false;
 String BLEConfig::receivedSSID = "";
