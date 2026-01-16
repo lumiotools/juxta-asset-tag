@@ -650,7 +650,7 @@ public:
     
     // 5. Deinitialize BLE completely
     Serial.println("BLE: Deinitializing...");
-    NimBLEDevice::deinit(true);  // true = release all resources
+    // NimBLEDevice::deinit(true);  // true = release all resources
     delay(500); // Wait for deinit to complete
     
     // 6. Clear all pointers
