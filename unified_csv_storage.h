@@ -226,38 +226,29 @@ public:
     
     uint32_t currentPtr = readPtr;
     uint32_t startPtr = readPtr;
+    bool wrapped = false;
     size_t entryLength = 0;
-    size_t bytesScanned = 0; // Track total bytes scanned from start
 
     // First pass: scan ahead for newline to compute entry length and lastEntryEndPtr
     while (true) {
-      // Check if we've wrapped around and caught up to writePtr
-      if (currentPtr == writePtr) {
+      if (currentPtr == writePtr && !wrapped) {
         if (entryLength == 0) return String("");
-        break; // Partial entry case - no newline found
+        break;
       }
 
-      // Wrap currentPtr if needed
       if (currentPtr >= flashEndAddr) {
-        currentPtr = wrapAddress(currentPtr);
+        if (wrapped) break;
+        wrapped = true;
+        currentPtr = CSV_FLASH_START_ADDR;
         if (currentPtr == writePtr) break;
       }
 
-      // Calculate how many bytes to read in this chunk
       uint8_t peekBuf[64];
       size_t toRead = 64;
-      
-      // Don't read past writePtr
-      if (writePtr > currentPtr && writePtr < flashEndAddr) {
+      if (!wrapped && (writePtr > currentPtr)) {
         size_t remaining = (size_t)(writePtr - currentPtr);
         if (remaining < toRead) toRead = remaining;
-      } else if (currentPtr >= writePtr && currentPtr < flashEndAddr) {
-        // We've wrapped, read until end of flash or 64 bytes
-        size_t remaining = (size_t)(flashEndAddr - currentPtr);
-        if (remaining < toRead) toRead = remaining;
       }
-
-      if (toRead == 0) break;
 
       if (!flashHandler->readBytes(currentPtr, peekBuf, toRead)) {
         Serial.print("ERROR: Failed to peek bytes at 0x");
@@ -265,17 +256,15 @@ public:
         return String("");
       }
 
-      // Scan this chunk for newline
       for (size_t i = 0; i < toRead; i++) {
         char c = (char)peekBuf[i];
         if (c == '\n') {
-          // Found newline - calculate absolute end position
-          // endPtr = currentPtr + i + 1 (to include the newline)
-          uint32_t endPtr = currentPtr + (uint32_t)i + 1;
+          // Found newline - record entry length and end pointer
+          entryLength += i;
+          uint32_t endPtr = currentPtr + (uint32_t)i + 1; // include newline
           lastEntryEndPtr = wrapAddress(endPtr);
 
-          if (entryLength == 0) return String(""); // Empty entry
-
+          if (entryLength == 0) return String("");
           // Read the full entry into a temporary buffer (bulk read)
           char* buf = (char*)malloc(entryLength + 1);
           if (!buf) {
@@ -283,23 +272,11 @@ public:
             return String("");
           }
 
-          // Bulk read with proper wrapping
           size_t copied = 0;
           uint32_t readBlockPtr = startPtr;
           size_t remainingToFill = entryLength;
           while (remainingToFill > 0) {
             size_t chunk = (remainingToFill > 256) ? 256 : remainingToFill;
-            
-            // Check if we need to wrap during read
-            if (readBlockPtr >= flashEndAddr) {
-              readBlockPtr = wrapAddress(readBlockPtr);
-            }
-            
-            // Don't read past flash end in a single chunk
-            if (readBlockPtr + chunk > flashEndAddr) {
-              chunk = flashEndAddr - readBlockPtr;
-            }
-            
             if (!flashHandler->readBytes(readBlockPtr, (uint8_t*)(buf + copied), chunk)) {
               Serial.print("ERROR: Failed to read CSV entry data at 0x");
               Serial.println(readBlockPtr, HEX);
@@ -309,6 +286,7 @@ public:
             copied += chunk;
             remainingToFill -= chunk;
             readBlockPtr += chunk;
+            if (readBlockPtr >= flashEndAddr) readBlockPtr = CSV_FLASH_START_ADDR;
           }
 
           buf[entryLength] = '\0';
@@ -316,17 +294,19 @@ public:
           free(buf);
           return result;
         }
-        entryLength++; // Count this byte
       }
 
-      // Move to next chunk
-      bytesScanned += toRead;
+      entryLength += toRead;
       currentPtr += (uint32_t)toRead;
+      if (currentPtr >= flashEndAddr) {
+        wrapped = true;
+        currentPtr = CSV_FLASH_START_ADDR + (currentPtr - flashEndAddr);
+      }
 
       // Safety: prevent very large entries
       if (entryLength > 10000) {
         Serial.println("ERROR: Entry too large, possible corruption");
-        lastEntryEndPtr = wrapAddress(currentPtr);
+        lastEntryEndPtr = currentPtr;
         return String("");
       }
     }
@@ -335,7 +315,8 @@ public:
     // read what we have and return it (no newline but valid data).
     if (entryLength > 0) {
       // lastEntryEndPtr should be currentPtr (where we stopped)
-      lastEntryEndPtr = wrapAddress(currentPtr);
+      uint32_t endPtr = currentPtr;
+      lastEntryEndPtr = wrapAddress(endPtr);
 
       char* buf = (char*)malloc(entryLength + 1);
       if (!buf) {
@@ -343,23 +324,11 @@ public:
         return String("");
       }
 
-      // Bulk read with proper wrapping
       size_t copied = 0;
       uint32_t readBlockPtr = startPtr;
       size_t remainingToFill = entryLength;
       while (remainingToFill > 0) {
         size_t chunk = (remainingToFill > 256) ? 256 : remainingToFill;
-        
-        // Check if we need to wrap during read
-        if (readBlockPtr >= flashEndAddr) {
-          readBlockPtr = wrapAddress(readBlockPtr);
-        }
-        
-        // Don't read past flash end in a single chunk
-        if (readBlockPtr + chunk > flashEndAddr) {
-          chunk = flashEndAddr - readBlockPtr;
-        }
-        
         if (!flashHandler->readBytes(readBlockPtr, (uint8_t*)(buf + copied), chunk)) {
           Serial.print("ERROR: Failed to read CSV entry data at 0x");
           Serial.println(readBlockPtr, HEX);
@@ -369,8 +338,8 @@ public:
         copied += chunk;
         remainingToFill -= chunk;
         readBlockPtr += chunk;
+        if (readBlockPtr >= flashEndAddr) readBlockPtr = CSV_FLASH_START_ADDR;
       }
-      
       buf[entryLength] = '\0';
       String result = String(buf);
       free(buf);
