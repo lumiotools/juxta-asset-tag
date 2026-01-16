@@ -428,16 +428,10 @@ private:
             statusMsg = "failed";
           }
           
-          // Send status back via the characteristic
-          pCharacteristic->setValue(statusMsg.c_str());
-          pCharacteristic->notify();
-          
           Serial.print("Flash erase status sent: ");
           Serial.println(statusMsg);
         } else {
           // Invalid command
-          pCharacteristic->setValue("invalid_command");
-          pCharacteristic->notify();
           Serial.println("BLE: Invalid flash erase command received");
         }
       }
