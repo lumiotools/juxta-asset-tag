@@ -241,8 +241,8 @@ void setup() {
   ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds (5 seconds buffer for accounting delay)
   Serial.print("BLE start time: ");
   Serial.println(ble_start_time);
-  BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
   BLEConfig::begin();
+  BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
   Serial.println("BLE initialized");
   Serial.println("=== Setup Complete ===");
 }
