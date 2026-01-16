@@ -96,7 +96,7 @@ private:
     
     if (bleConnectionAchieved) {
       Serial.println("PMCServerTransmissionHandler: BLE connection achieved - sending data...");
-      delay(2000);
+      delay(6000);
       result = sendViaBLE(payload);
       
       if (result.success) {
@@ -105,7 +105,7 @@ private:
         // Turn off BLE if it was disabled before
         if (!bleWasEnabled) {
           Serial.println("PMCServerTransmissionHandler: Turning BLE off");
-          delay(2000);
+          delay(1000);
           BLEConfig::stop();
         }
         
