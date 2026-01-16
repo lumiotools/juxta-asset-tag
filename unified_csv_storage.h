@@ -290,6 +290,7 @@ public:
           }
 
           buf[entryLength] = '\0';
+          readPtr = lastEntryEndPtr;
           String result = String(buf);
           free(buf);
           return result;
@@ -341,6 +342,7 @@ public:
         if (readBlockPtr >= flashEndAddr) readBlockPtr = CSV_FLASH_START_ADDR;
       }
       buf[entryLength] = '\0';
+      readPtr = lastEntryEndPtr; // Advance readPtr to end of partial entry
       String result = String(buf);
       free(buf);
       return result;
@@ -379,7 +381,7 @@ public:
   // Mark entry as successfully sent (advance readPtr past the entry we just read)
   void markAsSent() {
     // Use the stored end position from last readNextCSVEntry() call
-    readPtr = lastEntryEndPtr;
+    // readPtr = lastEntryEndPtr;
     NVSConfig::setCSVReadPtr(readPtr);
   }
   
@@ -390,6 +392,7 @@ public:
   void markAsFailed() {
     // readPtr stays at current position (entry not consumed)
     // No action needed - entry will be retried on next cycle
+    readPtr = NVSConfig::getCSVReadPtr();
   }
   
   // Save state to NVS
