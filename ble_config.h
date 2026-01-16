@@ -128,7 +128,10 @@ private:
       // Send CSV data via Current SSID Characteristic (only once on connection)
       // Format: device_id,device_version,timestamp,battery,voltage,currentSSID,gps_cycle_time,transmission_time,gps_threshold,gps_on_after,gps_active,remaining_time
       if (pCurrentSSIDCharacteristic != nullptr) {
+        Serial.println("BLE Device Connected - Sending current config");
+        Serial.println(String(csvBuffer));
         pCurrentSSIDCharacteristic->setValue(std::string(csvBuffer));
+        pCurrentSSIDCharacteristic->notify();
       }
     }
 
@@ -524,7 +527,7 @@ public:
     // Create Current SSID Characteristic (read-only to show saved WiFi)
     pCurrentSSIDCharacteristic = pService->createCharacteristic(
       CURRENT_SSID_CHAR_UUID,
-      NIMBLE_PROPERTY::READ
+      (uint16_t)(NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY)
     );
     String currentSSID = NVSConfig::getWiFiSSID();
     if (currentSSID.length() > 0) {
