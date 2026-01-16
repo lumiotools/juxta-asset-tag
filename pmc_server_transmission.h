@@ -443,22 +443,15 @@ public:
     
     // Send via HTTP POST
     HTTPClient http;
+    
+    // Use direct begin() like working example - simpler approach
+    http.begin(PMC_SERVER_URL);
+    
+    // Set timeout AFTER begin() (recommended approach)
     http.setTimeout(PMC_TRANSMISSION_TIMEOUT);
     
-    bool httpBegin = http.begin(PMC_SERVER_URL);
-    if (!httpBegin) {
-      WiFiClient client;
-      httpBegin = http.begin(client, PMC_SERVER_URL);
-    }
-    
-    if (!httpBegin) {
-      Serial.println("PMCServerTransmissionHandler: Failed to initialize HTTP client");
-      return result;
-    }
-    
+    // Only set Content-Type header (like working example)
     http.addHeader("Content-Type", "text/csv");
-    http.addHeader("Content-Length", String(data.length()));
-    http.addHeader("Connection", "close");
     
     int httpResponseCode = http.POST(data);
     
