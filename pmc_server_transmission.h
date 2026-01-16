@@ -11,7 +11,7 @@
 #include "time_sync.h"
 
 // Server URL and configuration
-const char* PMC_SERVER_URL = "http://192.168.1.1:3000/api/data"; // PMC database server endpoint
+const char* PMC_SERVER_URL = "https://908ebcc61c17.ngrok-free.app/api/record/wifi/v2.0.0?source=wifi"; // PMC database server endpoint
 const int PMC_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // FIFO Queue configuration (using blob arrays)

@@ -184,12 +184,23 @@ void setup() {
   gps_initialized = gpsSensor.begin();
   Serial.print("GPS sensor initialized: ");
   Serial.println(gps_initialized ? "SUCCESS" : "FAILED");
-
+  gps_initialized = true;
   if(!flash_initialized || !csv_storage_initialized || !imu_initialized || !gps_initialized) {
     Serial.println("ERROR: Critical initialization failed - aborting setup");
     return;
   }
   Serial.println("All sensors initialized successfully");
+
+  // bool x = spiFlash.eraseChip();
+  // String y = x?"true":"false";
+  // Serial.print("erased :");
+  // Serial.println(y);
+  // // Reset read/write pointers after erasing flash chip
+  // if (x && unifiedCSVStorage.isInitialized()) {
+  //   unifiedCSVStorage.clear();
+  //   Serial.println("CSV storage pointers reset after chip erase");
+  // }
+  // delay(-100);
 
   Serial.println("Initializing Model Server Transmission...");
   modelServerTransmissionHandler.begin(&unifiedCSVStorage);

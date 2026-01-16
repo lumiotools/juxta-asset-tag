@@ -9,7 +9,7 @@
 #include "time_sync.h"
 
 // Server URL and configuration
-const char* MODEL_SERVER_URL = "http://192.168.1.1:5000/api/model"; // Model server endpoint
+const char* MODEL_SERVER_URL = "https://908ebcc61c17.ngrok-free.app/api/model"; // Model server endpoint
 const int MODEL_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // ============================================================================
@@ -33,8 +33,8 @@ private:
   bool positionInitialized;
   
   // Batch reading configuration
-  static const uint32_t MAX_BATCH_SIZE = 50;        // Maximum number of CSV entries per batch
-  static const uint32_t MAX_BATCH_BYTES = 8192;     // Maximum 8KB per batch (to fit in memory)
+  static const uint32_t MAX_BATCH_SIZE = 1200;        // Maximum number of CSV entries per batch
+  static const uint32_t MAX_BATCH_BYTES = 51200;     // Maximum 8KB per batch (to fit in memory)
   
   // Response structure for delta position from model server
   struct DeltaPosition {
@@ -108,10 +108,20 @@ public:
       }
       
       // Read next entry
+      Serial.print("ModelServerTransmissionHandler: Read pointer: 0x");
+      Serial.print(csvStorage->getReadPtr(), HEX);
+      Serial.print(", Write pointer: 0x");
+      Serial.println(csvStorage->getWritePtr(), HEX);
+      
       String entry = csvStorage->readNextCSVEntry();
       if (entry.length() == 0) {
         break; // No more entries or read error
       }
+      
+      Serial.print("ModelServerTransmissionHandler: After read - Read pointer: 0x");
+      Serial.print(csvStorage->getReadPtr(), HEX);
+      Serial.print(", Write pointer: 0x");
+      Serial.println(csvStorage->getWritePtr(), HEX);
       
       // Add to batch (with newline separator)
       if (batchData.length() > 0) {
