@@ -348,16 +348,16 @@ void loop() {
       Serial.println("WARNING: Failed to write IMU reading to storage");
     }
     should_read_imu = false;
-  }
 
-  // // Call this function - it handles everything internally
-  // bool shouldSleep = MotionSleepManager::trackNoMotionDuration(&imuSensor);
-  
-  // // Check the return value
-  // if (shouldSleep) {
-  //   // Timeout reached - enter deep sleep
-  //   MotionSleepManager::enterDeepSleep(&imuSensor);
-  // }
+    // // Call this function - it handles everything internally
+    // bool shouldSleep = MotionSleepManager::trackNoMotionDuration(&imuSensor);
+    
+    // // Check the return value
+    // if (shouldSleep) {
+    //   // Timeout reached - enter deep sleep
+    //   MotionSleepManager::enterDeepSleep(&imuSensor);
+    // }
+  }
 
   long long current_time = TimeSync::getCurrentTimeMillis();
 
@@ -498,6 +498,9 @@ void loop() {
 
       Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
       imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
+      // lastMotionTime = TimeSync::getCurrentTimeMillis();
+      // noMotionStartTime = 0;
+      // noMotionTracking = false;
 
       transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
       Serial.print("Transmission cycle start time: ");
@@ -537,6 +540,9 @@ void loop() {
           Serial.println("GPS powered off");
           Serial.println("Stopping IMU ticker");
           imuReadTicker.detach();
+          // lastMotionTime = 0;
+          // noMotionStartTime = 0;
+          // noMotionTracking = false;
 
           Serial.println("Sending transmissions to Model Server and PMC Server (GPS accuracy degraded)");
           double lastKnownLat = 0.0;
@@ -589,6 +595,9 @@ void loop() {
       Serial.println("Transmission cycle time reached - preparing data transmission");
       Serial.println("Stopping IMU ticker");
       imuReadTicker.detach();
+      // lastMotionTime = 0;
+      // noMotionStartTime = 0;
+      // noMotionTracking = false;
 
       Serial.println("Sending transmissions to Model Server and PMC Server");
       double lastKnownLat = 0.0;
