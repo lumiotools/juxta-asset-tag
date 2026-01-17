@@ -102,7 +102,17 @@ private:
         Serial.print(" ms added to ble_off_after_time. New value: ");
         Serial.println(*bleOffAfterTimePtr);
       }
-      
+    }
+
+    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+      deviceConnected = false;
+      // No extra action required on disconnect
+    }
+  };
+
+  // Current SSID Characteristic Callbacks
+  class CurrentSSIDCallbacks: public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
       // Load current SSID, device_id, timestamp, and battery
       String currentSSID = NVSConfig::getWiFiSSID();
       if (currentSSID.length() == 0) {
@@ -118,27 +128,19 @@ private:
       
       // Get current ble_off_after_time value from the reference
       long long bleOffAfterTime = (bleOffAfterTimePtr != nullptr) ? *bleOffAfterTimePtr : 0;
-      long long timeRemaining = bleOffAfterTime > 0 ? bleOffAfterTime - (TimeSync::getCurrentTimeMillis() - bleStartTime) : 0;
+      long long elapsedTime = TimeSync::getCurrentTimeMillis() - bleStartTime;
+      long long timeRemaining = (bleOffAfterTime > 0 && bleOffAfterTime > elapsedTime) ? (bleOffAfterTime - elapsedTime) : 0;
       
       char csvBuffer[650];
       snprintf(csvBuffer, sizeof(csvBuffer), 
-               "%s,%s,%lld,%d,%.3f,%s,%d,%d,%.2f,%d,%d,%lld",
+               "%s,%s,%llu,%d,%.3f,%s,%d,%d,%.2f,%d,%d,%lld",
                devId, devVer, TimeSync::getCurrentTimeMillis(), batteryLevel, batteryVoltage, currentSSID.c_str(), NVSConfig::getGPSReadCycleTime(), NVSConfig::getCycleTime(), NVSConfig::getGPSAccuracyThreshold(), NVSConfig::getGPSOnAfter(), NVSConfig::getGPSActive(), timeRemaining);
       
-      // Send CSV data via Current SSID Characteristic (only once on connection)
+      // Send CSV data via Current SSID Characteristic (called on every read)
       // Format: device_id,device_version,timestamp,battery,voltage,currentSSID,gps_cycle_time,transmission_time,gps_threshold,gps_on_after,gps_active,remaining_time
-      if (pCurrentSSIDCharacteristic != nullptr) {
-        delay(3000);
-        Serial.println("BLE Device Connected - Sending current config");
-        Serial.println(String(csvBuffer));
-        pCurrentSSIDCharacteristic->setValue(std::string(csvBuffer));
-        pCurrentSSIDCharacteristic->notify();
-      }
-    }
-
-    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-      deviceConnected = false;
-      // No extra action required on disconnect
+      Serial.println("BLE: Browser reading current config");
+      Serial.println(String(csvBuffer));
+      pCurrentSSIDCharacteristic->setValue(std::string(csvBuffer));
     }
   };
 
@@ -528,14 +530,9 @@ public:
     // Create Current SSID Characteristic (read-only to show saved WiFi)
     pCurrentSSIDCharacteristic = pService->createCharacteristic(
       CURRENT_SSID_CHAR_UUID,
-      (uint16_t)(NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY)
+      NIMBLE_PROPERTY::READ
     );
-    String currentSSID = NVSConfig::getWiFiSSID();
-    if (currentSSID.length() > 0) {
-      pCurrentSSIDCharacteristic->setValue(currentSSID.c_str());
-    } else {
-      pCurrentSSIDCharacteristic->setValue("Not configured");
-    }
+    pCurrentSSIDCharacteristic->setCallbacks(new CurrentSSIDCallbacks());
     
     // Create Initial Position Characteristic
     pInitialPositionCharacteristic = pService->createCharacteristic(
