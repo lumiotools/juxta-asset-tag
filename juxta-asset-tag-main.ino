@@ -312,6 +312,15 @@ void loop() {
     should_read_imu = false;
   }
 
+  // // Call this function - it handles everything internally
+  // bool shouldSleep = MotionSleepManager::trackNoMotionDuration(&imuSensor);
+  
+  // // Check the return value
+  // if (shouldSleep) {
+  //   // Timeout reached - enter deep sleep
+  //   MotionSleepManager::enterDeepSleep(&imuSensor);
+  // }
+
   long long current_time = TimeSync::getCurrentTimeMillis();
 
   if(is_first_cycle) {
