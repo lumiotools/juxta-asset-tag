@@ -260,7 +260,8 @@ public:
     uint32_t scanPtr = readPtr;
     size_t entryLength = 0;
     bool foundNewline = false;
-    const size_t MAX_ENTRY_SIZE = 100; // Safety limit
+    uint32_t newlinePtr = 0;
+    const size_t MAX_ENTRY_SIZE = 200; // Safety limit
     
     while (entryLength < MAX_ENTRY_SIZE) {
       // Read one byte
@@ -274,6 +275,7 @@ public:
       // Check if it's a newline
       if (byte == '\n') {
         foundNewline = true;
+        newlinePtr = scanPtr;
         break;
       }
       
@@ -299,6 +301,11 @@ public:
     if (entryLength == 0) {
       // Empty entry (just a newline) - skip it
       lastEntryEndPtr = wrapAddress(scanPtr + 1);
+      return String("");
+    }
+    else if (entryLength > 100){
+      Serial.println("ERROR: Entry too large - skipping");
+      lastEntryEndPtr = wrapAddress(scanPtr + newlinePtr);
       return String("");
     }
     
