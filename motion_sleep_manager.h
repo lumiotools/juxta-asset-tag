@@ -50,7 +50,6 @@
 #define ANY_MOTION_DURATION_SAMPLES 1              // Immediate detection
 
 // Global motion tracking variables (must be defined in main .ino file)
-// Forward declarations for ISR access
 extern volatile bool motionInterruptFlag;
 extern unsigned long lastMotionTime;
 extern unsigned long noMotionStartTime;
@@ -397,5 +396,7 @@ public:
 bool MotionSleepManager::interruptsConfigured = false;
 bool MotionSleepManager::motionISRAttached = false;
 unsigned long MotionSleepManager::lastCountdownPrint = 0;
+
+
 
 #endif // MOTION_SLEEP_MANAGER_H
