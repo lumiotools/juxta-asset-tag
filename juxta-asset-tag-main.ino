@@ -355,6 +355,51 @@ void loop() {
     // Check the return value
     if (shouldSleep) {
       // Timeout reached - enter deep sleep
+
+      GPSData gpsData;
+      if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
+        gpsData = gpsSensor.getGPSData();
+      }
+      Serial.println("Transmission cycle time reached - preparing data transmission");
+      Serial.println("Stopping IMU ticker");
+      imuReadTicker.detach();
+      // lastMotionTime = 0;
+      // noMotionStartTime = 0;
+      // noMotionTracking = false;
+
+      Serial.println("Sending transmissions to Model Server and PMC Server");
+      double lastKnownLat = 0.0;
+      double lastKnownLon = 0.0;
+      double lastKnownHdop = -1.0;
+      NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
+      Serial.print("Position - Lat: ");
+      Serial.print(lastKnownLat, 6);
+      Serial.print(", Lon: ");
+      Serial.print(lastKnownLon, 6);
+      Serial.print(", HDOP: ");
+      Serial.println(lastKnownHdop, 2);
+      
+      Serial.println("Sending to Model Server...");
+      bool modelSuccess = modelServerTransmissionHandler.sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
+      Serial.print("Model Server transmission result: ");
+      Serial.println(modelSuccess ? "SUCCESS" : "FAILED");
+
+      if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
+        Serial.println("SCENARIO_1: Saving updated GPS position");
+        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
+      }
+      
+      if(!modelSuccess) {
+        Serial.println("Model Server transmission failed - aborting PMC Server transmission");
+      } else {
+        Serial.print("Sending to PMC Server - Scenario: ");
+        Serial.println(current_scenario);
+        NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
+        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        Serial.print("PMC Server transmission result: ");
+        Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
+      }
+
       MotionSleepManager::enterDeepSleep(&imuSensor);
     }
   }
