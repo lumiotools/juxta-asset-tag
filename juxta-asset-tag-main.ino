@@ -9,6 +9,7 @@
 #include "time_sync.h"
 #include "model_server_transmission.h"
 #include "pmc_server_transmission.h"
+#include "motion_sleep_manager.h"  // Motion detection and deep sleep management
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
@@ -72,6 +73,17 @@ long long gps_cycle_start_time = -1;
 
 Ticker imuReadTicker;
 bool should_read_imu = false;
+
+// // ============================================================================
+// // MOTION SLEEP MANAGER - Global Variables
+// // ============================================================================
+// // These variables are required by MotionSleepManager class
+// // They track motion detection state and are accessed by the ISR and tracking functions
+// volatile bool motionInterruptFlag = false;    // Set by ISR when motion interrupt occurs
+// unsigned long lastMotionTime = 0;             // Timestamp of last detected motion
+// unsigned long noMotionStartTime = 0;         // When no-motion tracking started
+// bool noMotionTracking = false;                // Whether currently tracking no-motion period
+// // ============================================================================
 
 void setPowerLatchPin(bool high) {
   if (high) {
@@ -143,6 +155,7 @@ void setup() {
     Serial.println("EXTERNAL (EXT0/EXT1)");
     setPowerLatchPin(true);
     Serial.println("External wake detected");
+    // MotionSleepManager::handleWakeup(&imuSensor);
 
   } else {
     Serial.println("BUTTON or FIRST BOOT");
@@ -190,6 +203,31 @@ void setup() {
     return;
   }
   Serial.println("All sensors initialized successfully");
+  
+  // // Configure BMI323 motion detection interrupts
+  // // This sets up any-motion and no-motion detection on the IMU
+  // // Motion detection will trigger interrupts on GPIO 5 (MOTION_INT_PIN)
+  // Serial.println("Configuring motion detection...");
+  // if (imu_initialized && MotionSleepManager::configureBMI323Interrupts(&imuSensor)) {
+  //   Serial.println("Motion detection configured successfully");
+    
+  //   // Setup interrupt service routine (ISR) on GPIO 5 (MOTION_INT_PIN)
+  //   // The ISR will set motionInterruptFlag when motion is detected
+  //   // GPIO 5 is RTC-capable, so it can wake device from deep sleep
+  //   MotionSleepManager::setupMotionISR();
+    
+  //   // Initialize motion tracking - set lastMotionTime to current time
+  //   // This prevents immediate sleep on startup (gives device time to initialize)
+  //   lastMotionTime = TimeSync::getCurrentTimeMillis();
+  //   Serial.println("Motion tracking initialized - device will monitor for 5 minutes of no-motion");
+  //   Serial.println("After 5 minutes of stillness, device will enter deep sleep");
+  //   Serial.println("Device will wake automatically when motion is detected");
+  // } else {
+  //   Serial.println("WARNING: Motion detection configuration failed - deep sleep on no-motion disabled");
+  //   Serial.println("Device will continue operating but will not enter deep sleep automatically");
+  //   Serial.println("Check IMU initialization and GPIO 5 connection to BMI323 INT1");
+  // }
+  // // ============================================================================
 
   // bool x = spiFlash.eraseChip();
   // String y = x?"true":"false";

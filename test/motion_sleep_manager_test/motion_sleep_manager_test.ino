@@ -73,7 +73,8 @@ void printNoMotionProgress(unsigned long elapsedMs, unsigned long totalMs) {
   int percentComplete = (elapsedMs * 100) / totalMs;
   
   // Create progress bar
-  char progressBar[52]; // 50 chars + 2 brackets
+  // Array size: 1 ('[') + 50 (bars) + 1 (']') + 1 ('\0') = 53
+  char progressBar[53];
   progressBar[0] = '[';
   int filledBars = percentComplete / 2; // 50 bars for 100%
   for (int i = 0; i < 50; i++) {
@@ -84,7 +85,7 @@ void printNoMotionProgress(unsigned long elapsedMs, unsigned long totalMs) {
     }
   }
   progressBar[51] = ']';
-  progressBar[52] = '\0';
+  progressBar[52] = '\0';  // Null terminator
   
   Serial.println("┌────────────────────────────────────────────────────────────────────────────┐");
   Serial.print("│ NO-MOTION TIMER: ");
