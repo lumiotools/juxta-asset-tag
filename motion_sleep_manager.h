@@ -221,7 +221,7 @@ public:
             return false;
           } else if (int_status & BMI3_INT_STATUS_NO_MOTION) {
             // Hardware no-motion period complete
-            Serial.println("Hardware no-motion period complete - checking software timer");
+            // Serial.println("Hardware no-motion period complete - checking software timer");
             // Continue to software tracking below
           }
         }
