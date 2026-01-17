@@ -12,7 +12,6 @@
 #include <Arduino.h>
 #include "../../motion_sleep_manager.h"
 #include "../../imu_sensor.h"
-#include "../../time_sync.h"
 #include "../power_latch.h"
 
 // Pin definitions
@@ -139,10 +138,6 @@ void setup() {
     Serial.println("Device powered on normally");
   }
   
-  // Initialize TimeSync for millis tracking
-  Serial.println("Initializing time sync...");
-  TimeSync::init();
-  
   // Initialize I2C and IMU
   Serial.println("\nInitializing IMU sensor...");
   Serial.print("  - I2C SDA: GPIO ");
@@ -176,7 +171,7 @@ void setup() {
   MotionSleepManager::setupMotionISR();
   
   // Initialize motion tracking
-  lastMotionTime = TimeSync::getCurrentTimeMillis();
+  lastMotionTime = millis();
   
   systemInitialized = true;
   
@@ -228,7 +223,7 @@ void loop() {
             printMotionDetected();
             
             // Reset tracking
-            lastMotionTime = TimeSync::getCurrentTimeMillis();
+            lastMotionTime = millis();
             noMotionStartTime = 0;
             noMotionTracking = false;
           } else if (int_status & BMI3_INT_STATUS_NO_MOTION) {
@@ -243,7 +238,7 @@ void loop() {
   }
   
   // Track no-motion duration and display progress
-  unsigned long currentTime = TimeSync::getCurrentTimeMillis();
+  unsigned long currentTime = millis();
   
   // Start no-motion tracking after 1 second of no motion
   if (lastMotionTime > 0 && (currentTime - lastMotionTime) > 1000) {
@@ -280,7 +275,7 @@ void loop() {
         if (motionInterruptFlag) {
           Serial.println("Motion detected - sleep cancelled!");
           motionInterruptFlag = false;
-          lastMotionTime = TimeSync::getCurrentTimeMillis();
+          lastMotionTime = millis();
           noMotionStartTime = 0;
           noMotionTracking = false;
         } else {
@@ -290,7 +285,7 @@ void loop() {
         }
       } else {
         Serial.println("Deep sleep disabled for testing - resetting timer");
-        lastMotionTime = TimeSync::getCurrentTimeMillis();
+        lastMotionTime = millis();
         noMotionStartTime = 0;
         noMotionTracking = false;
         delay(2000);
@@ -303,7 +298,8 @@ void loop() {
   if (millis() - lastIMURead >= 2000) {  // Every 2 seconds
     lastIMURead = millis();
     
-    IMUData data = imuSensor.readIMUData();
+    imuSensor.update();
+    IMUData data = imuSensor.getIMUData();
     float magnitude = sqrt(data.accelerometer.x * data.accelerometer.x + 
                           data.accelerometer.y * data.accelerometer.y + 
                           data.accelerometer.z * data.accelerometer.z);

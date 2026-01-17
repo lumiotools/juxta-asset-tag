@@ -49,6 +49,13 @@
 #define NO_MOTION_DURATION_SAMPLES 8191            // Max hardware duration
 #define ANY_MOTION_DURATION_SAMPLES 1              // Immediate detection
 
+// Global motion tracking variables (must be defined in main .ino file)
+// Forward declarations for ISR access
+extern volatile bool motionInterruptFlag;
+extern unsigned long lastMotionTime;
+extern unsigned long noMotionStartTime;
+extern bool noMotionTracking;
+
 class MotionSleepManager {
 private:
   static bool interruptsConfigured;
@@ -390,11 +397,5 @@ public:
 bool MotionSleepManager::interruptsConfigured = false;
 bool MotionSleepManager::motionISRAttached = false;
 unsigned long MotionSleepManager::lastCountdownPrint = 0;
-
-// Global motion tracking variables (must be defined in main .ino file)
-extern volatile bool motionInterruptFlag;
-extern unsigned long lastMotionTime;
-extern unsigned long noMotionStartTime;
-extern bool noMotionTracking;
 
 #endif // MOTION_SLEEP_MANAGER_H
