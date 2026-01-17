@@ -499,8 +499,8 @@ void loop() {
       Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
       imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
       // lastMotionTime = TimeSync::getCurrentTimeMillis();
-      noMotionStartTime = 0;
-      noMotionTracking = false;
+      // noMotionStartTime = 0;
+      // noMotionTracking = false;
 
       transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
       Serial.print("Transmission cycle start time: ");
@@ -541,8 +541,8 @@ void loop() {
           Serial.println("Stopping IMU ticker");
           imuReadTicker.detach();
           // lastMotionTime = 0;
-          noMotionStartTime = 0;
-          noMotionTracking = false;
+          // noMotionStartTime = 0;
+          // noMotionTracking = false;
 
           Serial.println("Sending transmissions to Model Server and PMC Server (GPS accuracy degraded)");
           double lastKnownLat = 0.0;
@@ -596,8 +596,8 @@ void loop() {
       Serial.println("Stopping IMU ticker");
       imuReadTicker.detach();
       // lastMotionTime = 0;
-      noMotionStartTime = 0;
-      noMotionTracking = false;
+      // noMotionStartTime = 0;
+      // noMotionTracking = false;
 
       Serial.println("Sending transmissions to Model Server and PMC Server");
       double lastKnownLat = 0.0;
