@@ -67,61 +67,61 @@ private:
   TransmissionResult sendPayloadWithAutoControl(const String& payload) {
     TransmissionResult result = {false, "None", 0};
     
-    // ========== BLE TRANSMISSION ATTEMPT ==========
-    // Turn on BLE for 4 seconds and wait for connection
-    bool bleWasEnabled = BLEConfig::isEnabled();
-    bool bleConnectionAchieved = false;
+    // // ========== BLE TRANSMISSION ATTEMPT ==========
+    // // Turn on BLE for 4 seconds and wait for connection
+    // bool bleWasEnabled = BLEConfig::isEnabled();
+    // bool bleConnectionAchieved = false;
     
-    Serial.println("PMCServerTransmissionHandler: Starting BLE transmission attempt...");
+    // Serial.println("PMCServerTransmissionHandler: Starting BLE transmission attempt...");
     
-    // Turn on BLE if not already enabled
-    if (!bleWasEnabled) {
-      Serial.println("PMCServerTransmissionHandler: BLE disabled - turning on...");
-      BLEConfig::begin();
-      delay(100); // Give BLE time to initialize
-    }
+    // // Turn on BLE if not already enabled
+    // if (!bleWasEnabled) {
+    //   Serial.println("PMCServerTransmissionHandler: BLE disabled - turning on...");
+    //   BLEConfig::begin();
+    //   delay(100); // Give BLE time to initialize
+    // }
     
-    // Wait up to 4 seconds for BLE connection
-    Serial.println("PMCServerTransmissionHandler: Waiting for BLE connection (4 sec timeout)...");
-    unsigned long long bleStartTime = TimeSync::getCurrentTimeMillis();
-    const unsigned long long BLE_CONNECTION_TIMEOUT = 4000; // 4 seconds
+    // // Wait up to 4 seconds for BLE connection
+    // Serial.println("PMCServerTransmissionHandler: Waiting for BLE connection (4 sec timeout)...");
+    // unsigned long long bleStartTime = TimeSync::getCurrentTimeMillis();
+    // const unsigned long long BLE_CONNECTION_TIMEOUT = 4000; // 4 seconds
     
-    while (!BLEConfig::isConnected() && 
-           (TimeSync::getCurrentTimeMillis() - bleStartTime) < BLE_CONNECTION_TIMEOUT) {
-      BLEConfig::update(); // Process BLE events
-      delay(100); // Small delay to prevent tight loop
-    }
+    // while (!BLEConfig::isConnected() && 
+    //        (TimeSync::getCurrentTimeMillis() - bleStartTime) < BLE_CONNECTION_TIMEOUT) {
+    //   BLEConfig::update(); // Process BLE events
+    //   delay(100); // Small delay to prevent tight loop
+    // }
     
-    bleConnectionAchieved = BLEConfig::isConnected();
+    // bleConnectionAchieved = BLEConfig::isConnected();
     
-    if (bleConnectionAchieved) {
-      Serial.println("PMCServerTransmissionHandler: BLE connection achieved - sending data...");
-      delay(6000);
-      result = sendViaBLE(payload);
+    // if (bleConnectionAchieved) {
+    //   Serial.println("PMCServerTransmissionHandler: BLE connection achieved - sending data...");
+    //   delay(6000);
+    //   result = sendViaBLE(payload);
       
-      if (result.success) {
-        Serial.println("PMCServerTransmissionHandler: BLE transmission successful");
+    //   if (result.success) {
+    //     Serial.println("PMCServerTransmissionHandler: BLE transmission successful");
         
-        // Turn off BLE if it was disabled before
-        if (!bleWasEnabled) {
-          Serial.println("PMCServerTransmissionHandler: Turning BLE off");
-          delay(1000);
-          BLEConfig::stop();
-        }
+    //     // Turn off BLE if it was disabled before
+    //     if (!bleWasEnabled) {
+    //       Serial.println("PMCServerTransmissionHandler: Turning BLE off");
+    //       delay(1000);
+    //       BLEConfig::stop();
+    //     }
         
-        return result;
-      } else {
-        Serial.println("PMCServerTransmissionHandler: BLE transmission failed");
-      }
-    } else {
-      Serial.println("PMCServerTransmissionHandler: BLE connection timeout (4 sec) - no connection");
-    }
+    //     return result;
+    //   } else {
+    //     Serial.println("PMCServerTransmissionHandler: BLE transmission failed");
+    //   }
+    // } else {
+    //   Serial.println("PMCServerTransmissionHandler: BLE connection timeout (4 sec) - no connection");
+    // }
     
-    // Turn off BLE after attempt (success or failure)
-    if (!bleWasEnabled) {
-      Serial.println("PMCServerTransmissionHandler: Turning BLE off");
-      BLEConfig::stop();
-    }
+    // // Turn off BLE after attempt (success or failure)
+    // if (!bleWasEnabled) {
+    //   Serial.println("PMCServerTransmissionHandler: Turning BLE off");
+    //   BLEConfig::stop();
+    // }
     
     // ========== WIFI TRANSMISSION ATTEMPT ==========
     Serial.println("PMCServerTransmissionHandler: BLE failed/unavailable - trying WiFi...");
