@@ -29,7 +29,7 @@ IMUSensor imuSensor;
 
 // Configuration
 #define ENABLE_DEEP_SLEEP false  // Set to false to test without actual sleep
-#define NO_MOTION_TEST_TIME_MS 60000  // Test with 1 minute for faster testing (vs 5 min)
+#define NO_MOTION_TEST_TIME_MS 30000  // Test with 1 minute for faster testing (vs 5 min)
 
 void printBanner(const char* message) {
   Serial.println();
@@ -130,6 +130,7 @@ void setup() {
   // Initialize power latch
   Serial.println("Initializing power latch...");
   initPowerLatch();
+  setPowerLatchPin(true);
   
   // Check wake-up reason
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();

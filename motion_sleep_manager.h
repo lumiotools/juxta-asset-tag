@@ -38,8 +38,8 @@
 // Motion detection thresholds (adjustable)
 // slope_thres range: 0-4095 (higher = less sensitive)
 // Using moderate sensitivity values from Bosch examples
-#define ANY_MOTION_SLOPE_THRES 9                   // Slope threshold for any-motion
-#define NO_MOTION_SLOPE_THRES 9                    // Slope threshold for no-motion
+#define ANY_MOTION_SLOPE_THRES 30                   // Slope threshold for any-motion
+#define NO_MOTION_SLOPE_THRES 30               // Slope threshold for no-motion
 #define MOTION_HYSTERESIS 5                        // Hysteresis (0-1023)
 #define MOTION_WAIT_TIME 5                         // Wait time (0-7)
 

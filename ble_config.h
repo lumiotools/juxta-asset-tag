@@ -140,7 +140,7 @@ private:
       // Format: device_id,device_version,timestamp,battery,voltage,currentSSID,gps_cycle_time,transmission_time,gps_threshold,gps_on_after,gps_active,remaining_time
       Serial.println("BLE: Browser reading current config");
       Serial.println(String(csvBuffer));
-      pCurrentSSIDCharacteristic->setValue(std::string(csvBuffer));
+      pCharacteristic->setValue(std::string(csvBuffer));
     }
   };
 
