@@ -498,7 +498,7 @@ void loop() {
 
       Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
       imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
-      lastMotionTime = TimeSync::getCurrentTimeMillis();
+      // lastMotionTime = TimeSync::getCurrentTimeMillis();
       noMotionStartTime = 0;
       noMotionTracking = false;
 
@@ -540,7 +540,7 @@ void loop() {
           Serial.println("GPS powered off");
           Serial.println("Stopping IMU ticker");
           imuReadTicker.detach();
-          lastMotionTime = 0;
+          // lastMotionTime = 0;
           noMotionStartTime = 0;
           noMotionTracking = false;
 
@@ -595,7 +595,7 @@ void loop() {
       Serial.println("Transmission cycle time reached - preparing data transmission");
       Serial.println("Stopping IMU ticker");
       imuReadTicker.detach();
-      lastMotionTime = 0;
+      // lastMotionTime = 0;
       noMotionStartTime = 0;
       noMotionTracking = false;
 
