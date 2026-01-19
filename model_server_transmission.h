@@ -164,6 +164,16 @@ public:
       return result;
     }
     
+    // Additional WiFi stability check - ensure we have an IP address
+    if (WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
+      Serial.println("ModelServerTransmissionHandler: WiFi connected but no IP address");
+      return result;
+    }
+    
+    // Small delay to ensure TCP/IP stack is fully initialized
+    // This helps avoid UDP socket locking issues during DNS resolution
+    delay(100);
+    
     // Construct payload: GPS coordinates + IMU data
     // Format: (lat,lon,hdop),obj1,obj2,...
     String payload = "(" + String(latitude, 7) + "," + String(longitude, 7) + "," + String(hdop, 2) + "),";
@@ -179,11 +189,14 @@ public:
     Serial.print("  Payload size: ");
     Serial.print(payload.length());
     Serial.println(" bytes");
+    Serial.print("  IP address: ");
+    Serial.println(WiFi.localIP());
     
     // Send via HTTP POST
     HTTPClient http;
     
-    // Use direct begin() like working example - simpler approach
+    // Use direct begin() - HTTPClient handles HTTPS automatically
+    // The delay above helps ensure TCP/IP stack is ready for DNS resolution
     http.begin(MODEL_SERVER_URL);
     
     // Set timeout AFTER begin() (recommended approach)

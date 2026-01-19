@@ -432,21 +432,34 @@ public:
       return result;
     }
     
-    // Check WiFi connection
+    // Check WiFi connection with multiple verifications
     if (!CustomWiFi::isConnected()) {
       Serial.println("PMCServerTransmissionHandler: WiFi not connected");
       return result;
     }
     
+    // Additional WiFi stability check - ensure we have an IP address
+    if (WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
+      Serial.println("PMCServerTransmissionHandler: WiFi connected but no IP address");
+      return result;
+    }
+    
+    // Small delay to ensure TCP/IP stack is fully initialized
+    // This helps avoid UDP socket locking issues during DNS resolution
+    delay(100);
+    
     Serial.println("PMCServerTransmissionHandler: Sending via WiFi...");
     Serial.print("  Data size: ");
     Serial.print(data.length());
     Serial.println(" bytes");
+    Serial.print("  IP address: ");
+    Serial.println(WiFi.localIP());
     
     // Send via HTTP POST
     HTTPClient http;
     
-    // Use direct begin() like working example - simpler approach
+    // Use direct begin() - HTTPClient handles HTTPS automatically
+    // The delay above helps ensure TCP/IP stack is ready for DNS resolution
     http.begin(PMC_SERVER_URL);
     
     // Set timeout AFTER begin() (recommended approach)
