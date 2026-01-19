@@ -149,6 +149,7 @@ void setup() {
     setPowerLatchPin(true);
     is_first_cycle = false;
     gps_search = true;
+    gps_search_start_time = TimeSync::getCurrentTimeMillis();
     Serial.println("Set to normal cycle mode, GPS search enabled");
 
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
