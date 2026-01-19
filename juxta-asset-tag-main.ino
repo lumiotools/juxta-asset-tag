@@ -272,16 +272,18 @@ void setup() {
   } else {
     Serial.println("Normal cycle: Skipping WiFi time sync");
   }
-
+  
   Serial.println("Initializing BLE...");
   BLEConfig::setDeviceId(DEVICE_ID);
   BLEConfig::setDeviceVersion(DEVICE_VERSION);
-  ble_start_time = TimeSync::getCurrentTimeMillis();
-  ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds (5 seconds buffer for accounting delay)
-  Serial.print("BLE start time: ");
-  Serial.println(ble_start_time);
-  BLEConfig::begin();
-  BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
+  if(is_first_cycle) {
+    ble_start_time = TimeSync::getCurrentTimeMillis();
+    ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds (5 seconds buffer for accounting delay)
+    Serial.print("BLE start time: ");
+    Serial.println(ble_start_time);
+    BLEConfig::begin();
+    BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
+  }
   Serial.println("BLE initialized");
   Serial.println("=== Setup Complete ===");
 }
