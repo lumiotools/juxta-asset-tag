@@ -146,6 +146,10 @@ void setup() {
   
   if(wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
     Serial.println("TIMER (scheduled wake)");
+    setPixelAndShow(0, 0, 255, 0); // Green on
+    delay(200);
+    setPixelAndShow(0, 0, 0, 0); // Off
+    gpio_hold_dis(GPIO_NUM_4); // Release GPIO hold on power latch pin
     setPowerLatchPin(true);
     is_first_cycle = false;
     gps_search = true;
@@ -154,6 +158,9 @@ void setup() {
 
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
     Serial.println("EXTERNAL (EXT0/EXT1)");
+    setPixelAndShow(0, 0, 255, 0); // Green on
+    delay(200);
+    setPixelAndShow(0, 0, 0, 0); // Off
     setPowerLatchPin(true);
     Serial.println("External wake detected");
     MotionSleepManager::handleWakeup(&imuSensor);
@@ -163,10 +170,13 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLDOWN);
     pinMode(POWER_LATCH_PIN, OUTPUT);
     power_button_pressed = true;
-    Serial.println("Waiting 5 seconds for button release...");
-    delay(5000);
-    Serial.println("Button pressed - after delay of 5 seconds");
+    Serial.println("Waiting 4 seconds for button release...");
+    delay(4000);
+    Serial.println("Button pressed - after delay of 4 seconds");
     setPowerLatchPin(true);
+    setPixelAndShow(0, 0, 255, 0); // Green on
+    delay(2000);
+    setPixelAndShow(0, 0, 0, 0); // Off
     is_first_cycle = true;
     Serial.println("Set to first cycle mode");
   }
@@ -285,6 +295,14 @@ void setup() {
     BLEConfig::setBleOffAfterTime(&ble_off_after_time, ble_start_time); // Set BLE off after time reference
   }
   Serial.println("BLE initialized");
+  // Green blink pattern: Green -> 300ms -> Off -> 200ms -> Green -> 300ms -> Off
+  setPixelAndShow(0, 0, 255, 0); // Green on
+  delay(200);
+  setPixelAndShow(0, 0, 0, 0); // Off
+  delay(200);
+  setPixelAndShow(0, 0, 255, 0); // Green on
+  delay(200);
+  setPixelAndShow(0, 0, 0, 0); // Off
   Serial.println("=== Setup Complete ===");
 }
 
@@ -300,12 +318,17 @@ void loop() {
   } else {
     if(current_button_state == HIGH) {
       long long current_button_click_time = TimeSync::getCurrentTimeMillis();
-      if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 5000) {
-        Serial.println("Long press detected (5s) - powering off device...");
+      if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 4000) {
+        Serial.println("Long press detected (4s) - powering off device...");
+        setPixelAndShow(0, 255, 0, 0); // Red on
+        delay(500);
         setPowerLatchPin(false);
       } else if(prev_button_state == LOW && (current_button_click_time - prev_button_click_time) < 800) {
         Serial.println("Double press detected - restarting ESP...");
-        delay(100); // Brief delay before restart
+        delay(200); // Brief delay before restart
+        setPixelAndShow(0, 255, 0, 0); // Red on
+        delay(500);
+        setPixelAndShow(0, 0, 0, 0); // Off
         ESP.restart();
       } else {
         if(prev_button_state == LOW) {
