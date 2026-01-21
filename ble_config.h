@@ -84,6 +84,7 @@ private:
   static bool bleDisabled;  // Flag to track if BLE is permanently disabled
   static long long* bleOffAfterTimePtr;  // Pointer to ble_off_after_time variable in main
   static long long bleStartTime;  // BLE start time for calculating time elapsed
+  static bool clientReady;  // Flag to track if client sent "Ready"
 
   // BLE Server Callbacks
   class MyServerCallbacks: public NimBLEServerCallbacks {
@@ -407,6 +408,23 @@ private:
       }
   };
   
+  // Data Characteristic Callbacks (handles Ready handshake)
+  class DataCharacteristicCallbacks: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+      std::string stdValue = pCharacteristic->getValue();
+      String value = String(stdValue.c_str());
+      value.trim();
+      
+      if (value == "READY") {
+        clientReady = true;
+        Serial.println("BLE: Client sent READY - can now send data");
+      } else {
+        Serial.print("BLE: Unknown data characteristic write: ");
+        Serial.println(value);
+      }
+    }
+  };
+
   // Erase Flash Characteristic Callbacks
   class EraseFlashCallbacks: public NimBLECharacteristicCallbacks {
       void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
@@ -520,12 +538,13 @@ public:
     );
     pStatusCharacteristic->setValue("Ready");
     
-    // Create Data Characteristic for sensor data transmission
+    // Create Data Characteristic for sensor data transmission (with WRITE for Ready/Done handshake)
     pDataCharacteristic = pService->createCharacteristic(
       DATA_CHAR_UUID,
-      (uint16_t)(NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY)
+      (uint16_t)(NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::WRITE)
     );
-    pDataCharacteristic->setValue("{}");
+    pDataCharacteristic->setCallbacks(new DataCharacteristicCallbacks());
+    // pDataCharacteristic->setValue("{}");
     
     // Create Current SSID Characteristic (read-only to show saved WiFi)
     pCurrentSSIDCharacteristic = pService->createCharacteristic(
@@ -620,6 +639,7 @@ public:
     bleDisabled = false; // Reset disabled flag when starting BLE
     bleOffAfterTimePtr = nullptr;
     bleStartTime = 0;
+    clientReady = false; // Reset ready flag
     
     return true;
   }
@@ -783,16 +803,24 @@ public:
       return false;
     }
 
-    // Non-blocking delay to ensure connection stability (prevents loop freezing)
+    // Wait for client to send "Ready" before sending data
     unsigned long startWait = millis();
-    while (millis() - startWait < 1500) {
+    const unsigned long maxWaitTime = 10000; // Wait up to 10 seconds for Ready
+    while (!clientReady && (millis() - startWait < maxWaitTime)) {
       yield(); // Allow other tasks to run
-      delay(100); // Small chunks to prevent blocking
+      delay(50); // Small delay to prevent busy waiting
     }
+    
+    if (!clientReady) {
+      Serial.println("BLE: Timeout waiting for client Ready signal");
+      return false;
+    }
+    
+    Serial.println("BLE: Client Ready received, starting data transmission");
     
     // Start blue LED blinking on transmit
     // long long startTime = startStatusLEDBlink(0, 0, 255);
-    
+
     // Calculate safe chunk size (MTU - 3 bytes for ATT header)
     uint16_t maxChunkSize = (mtuSize > 23) ? (mtuSize - 3) : 20;
     
@@ -804,7 +832,7 @@ public:
       pDataCharacteristic->setValue(dataWithNewline.c_str());
       pDataCharacteristic->notify();
       yield(); // Allow other tasks to run instead of blocking delay
-      delay(10); // Minimal delay for BLE stack
+      delay(50); // Minimal delay for BLE stack
     } else {
       // Send data in chunks
       int totalLength = dataWithNewline.length();
@@ -814,7 +842,7 @@ public:
       while (offset < totalLength) {
         int chunkSize = min((int)maxChunkSize, totalLength - offset);
         String chunk = dataWithNewline.substring(offset, offset + chunkSize);
-        
+
         pDataCharacteristic->setValue(chunk.c_str());
         pDataCharacteristic->notify();
         
@@ -827,13 +855,22 @@ public:
         // Reduced delay and periodic yield for large transmissions
         if (chunkCount % 5 == 0) {
           // Every 5 chunks, yield more to prevent watchdog reset
-          delay(5);
+          delay(50);
           yield();
         } else {
-          delay(10); // Minimal delay between chunks
+          delay(50); // Minimal delay between chunks
         }
       }
     }
+    
+    // Send "DONE" to signal end of transmission
+    delay(50); // Small delay before sending DONE
+    pDataCharacteristic->setValue("DONE");
+    pDataCharacteristic->notify();
+    Serial.println("BLE: Sent DONE signal to client");
+    
+    // Reset ready flag for next cycle (client will send Ready again on reconnect)
+    clientReady = false;
     
     // Stop LED blinking and restore to green
     // stopStatusLEDBlink(startTime);
@@ -882,5 +919,6 @@ const char* BLEConfig::deviceVersion = "v2.0.0";
 bool BLEConfig::bleDisabled = false;
 long long* BLEConfig::bleOffAfterTimePtr = nullptr;
 long long BLEConfig::bleStartTime = 0;
+bool BLEConfig::clientReady = false;
 
 #endif
