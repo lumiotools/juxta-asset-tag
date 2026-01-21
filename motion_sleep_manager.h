@@ -33,7 +33,7 @@
 
 // Timing constants
 #define NO_MOTION_SLEEP_MS 300000                  // 5 minutes in milliseconds
-#define NO_MOTION_COUNTDOWN_INTERVAL_MS 30000      // Print countdown every 30 seconds
+#define NO_MOTION_COUNTDOWN_INTERVAL_MS 10000      // Print countdown every 10 seconds
 
 // Motion detection thresholds (adjustable)
 // slope_thres range: 0-4095 (higher = less sensitive)
@@ -273,6 +273,21 @@ public:
     // Set BMI323 to low-power mode (motion detection stays active)
     struct bmi3_dev* dev;
     if (isIMUReady(imu, &dev)) {
+      // Disable no-motion interrupt mapping before deep sleep
+      // This prevents false wake-ups after ~2.73 minutes when hardware no-motion duration completes
+      // Only any-motion should wake the device from deep sleep
+      struct bmi3_map_int map_int = { 0 };  // Initialize to 0 (all interrupts disabled)
+      map_int.any_motion_out = BMI3_INT1;  // Keep any-motion on INT1 to wake on motion
+      map_int.no_motion_out = BMI3_INT_NONE;  // Disable no-motion interrupt
+      
+      int8_t rslt = bmi323_map_interrupt(map_int, dev);
+      if (rslt == BMI323_OK) {
+        Serial.println("✓ No-motion interrupt disabled - only any-motion will wake device");
+      } else {
+        Serial.print("WARNING: Failed to disable no-motion interrupt: ");
+        Serial.println(rslt);
+      }
+      
       struct bmi3_sens_config config = { 0 };
       config.type = BMI323_ACCEL;
       
@@ -365,9 +380,22 @@ public:
       Serial.println("Power-on or unknown");
     }
     
-    // Clear BMI323 interrupt status (clear-on-read)
+    // Restore interrupt mappings (re-enable no-motion interrupt for normal operation)
     struct bmi3_dev* dev;
     if (isIMUReady(imu, &dev)) {
+      struct bmi3_map_int map_int = { 0 };
+      map_int.any_motion_out = BMI3_INT1;  // Keep any-motion on INT1
+      map_int.no_motion_out = BMI3_INT1;   // Re-enable no-motion interrupt for normal operation
+      
+      int8_t rslt = bmi323_map_interrupt(map_int, dev);
+      if (rslt == BMI323_OK) {
+        Serial.println("✓ Interrupt mappings restored (any-motion + no-motion enabled)");
+      } else {
+        Serial.print("WARNING: Failed to restore interrupt mappings: ");
+        Serial.println(rslt);
+      }
+      
+      // Clear BMI323 interrupt status (clear-on-read)
       uint16_t int_status = 0;
       if (bmi323_get_int1_status(&int_status, dev) == BMI323_OK) {
         Serial.print("✓ Interrupt cleared (status: 0x");
