@@ -147,7 +147,7 @@ void setup() {
   if(wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
     Serial.println("TIMER (scheduled wake)");
     setPixelAndShow(0, 0, 255, 0); // Green on
-    delay(200);
+    delay(1000);
     setPixelAndShow(0, 0, 0, 0); // Off
     gpio_hold_dis(GPIO_NUM_4); // Release GPIO hold on power latch pin
     setPowerLatchPin(true);
@@ -159,8 +159,9 @@ void setup() {
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
     Serial.println("EXTERNAL (EXT0/EXT1)");
     setPixelAndShow(0, 0, 255, 0); // Green on
-    delay(200);
+    delay(1000);
     setPixelAndShow(0, 0, 0, 0); // Off
+    gpio_hold_dis(GPIO_NUM_4); // Release GPIO hold on power latch pin
     setPowerLatchPin(true);
     Serial.println("External wake detected");
     MotionSleepManager::handleWakeup(&imuSensor);
@@ -425,6 +426,11 @@ void loop() {
         Serial.print("PMC Server transmission result: ");
         Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
       }
+      
+      delay(200); // Brief delay before restart
+      setPixelAndShow(0, 255, 0, 0); // Red on
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
 
       MotionSleepManager::enterDeepSleep(&imuSensor);
     }
@@ -540,6 +546,10 @@ void loop() {
       Serial.println("Power latch held HIGH - power will remain on during deep sleep");
       
       Serial.println("Entering deep sleep for 30 seconds...");
+      delay(200); // Brief delay before restart
+      setPixelAndShow(0, 255, 0, 0); // Red on
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
       esp_sleep_enable_timer_wakeup(1000 * 1000 * 30); // 30 seconds in microseconds
       esp_deep_sleep_start();
       return; // Will not reach here
