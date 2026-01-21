@@ -74,6 +74,20 @@ private:
              accX, accY, accZ, gyrX, gyrY, gyrZ, timestamp);
     return String(buffer);
   }
+  
+  // Helper function to clean CSV entry - removes garbage characters
+  // Keeps only: numbers 0-9 and symbols: "-", ".", ",", "|"
+  String cleanCSVEntry(const String& entry) {
+    String cleaned = "";
+    for (int i = 0; i < entry.length(); i++) {
+      char c = entry.charAt(i);
+      // Keep only: digits (0-9), minus (-), period (.), comma (,), pipe (|)
+      if ((c >= '0' && c <= '9') || c == '-' || c == '.' || c == ',' || c == '|') {
+        cleaned += c;
+      }
+    }
+    return cleaned;
+  }
 
 public:
   UnifiedCSVStorage() : flashHandler(nullptr), initialized(false),
@@ -169,6 +183,7 @@ public:
       // Update readPtr if it's in the area we're about to overwrite
       if (readPtr >= CSV_FLASH_START_ADDR && readPtr < writeEnd) {
         readPtr = writeEnd; // Skip overwritten data
+        readPtr = wrapAddress(readPtr);
         NVSConfig::setCSVReadPtr(readPtr);
       }
     }
@@ -248,11 +263,13 @@ public:
   // Returns the CSV entry without the newline character
   String readNextCSVEntry() {
     if (!initialized || flashHandler == nullptr) {
+      Serial.println("ERROR: UnifiedCSVStorage not initialized or flash handler is null");
       return String("");
     }
     
     // Check if we have data to read
     if (readPtr == writePtr) {
+      Serial.println("No data available");
       return String(""); // No data available
     }
     
@@ -264,6 +281,12 @@ public:
     const size_t MAX_ENTRY_SIZE = 200; // Safety limit
     
     while (entryLength < MAX_ENTRY_SIZE) {
+      // Check if we've caught up with write pointer (no complete entry available)
+      if (scanPtr == writePtr) {
+        Serial.println("No complete entry found");
+        return String(""); // No complete entry found (partial entry)
+      }
+      
       // Read one byte
       uint8_t byte;
       if (!flashHandler->readBytes(scanPtr, &byte, 1)) {
@@ -273,10 +296,18 @@ public:
       }
       
       // Check if it's a newline
-      if (byte == '\n') {
+      if (byte == '\n' && entryLength > 0) {
         foundNewline = true;
         newlinePtr = scanPtr;
         break;
+      } else if (byte == '\n' && entryLength == 0) {
+        Serial.println("WARNING: Found newline at start of entry - skipping");
+        scanPtr++;
+        if (scanPtr >= flashEndAddr) {
+          scanPtr = CSV_FLASH_START_ADDR;
+        }
+        readPtr = scanPtr; // Update readPtr to skip this newline
+        continue; // Restart search from new position
       }
       
       // Move to next position with wraparound
@@ -285,29 +316,33 @@ public:
       if (scanPtr >= flashEndAddr) {
         scanPtr = CSV_FLASH_START_ADDR;
       }
-      
-      // Check if we've caught up with write pointer (no complete entry available)
-      if (scanPtr == writePtr) {
-        return String(""); // No complete entry found
-      }
     }
     
-    // Check for errors
+    // Check for errors - if we hit MAX_ENTRY_SIZE without finding newline
     if (!foundNewline) {
-      Serial.println("ERROR: Entry too large or no newline found");
+      // No newline found within MAX_ENTRY_SIZE - skip corrupted entry
+      Serial.print("ERROR: No newline found after ");
+      Serial.print(entryLength);
+      Serial.println(" bytes - skipping corrupted entry");
+      
+      // Advance readPtr past the corrupted entry
+      lastEntryEndPtr = wrapAddress(scanPtr);
+      readPtr = lastEntryEndPtr;
+      Serial.print("Advanced readPtr to 0x");
+      Serial.println(readPtr, HEX);
+      
       return String("");
     }
     
     if (entryLength == 0) {
       // Empty entry (just a newline) - skip it
+      Serial.println("Empty entry (just a newline) - skipping");
       lastEntryEndPtr = wrapAddress(scanPtr + 1);
+      readPtr = lastEntryEndPtr;
       return String("");
     }
-    else if (entryLength > 100){
-      Serial.println("ERROR: Entry too large - skipping");
-      lastEntryEndPtr = wrapAddress(scanPtr + newlinePtr);
-      return String("");
-    }
+    // Note: Removed arbitrary entryLength > 100 check
+    // Entries can be any size - we'll read them as long as they have a newline
     
     // Step 2: Allocate buffer and read the complete entry
     char* buffer = (char*)malloc(entryLength + 1);
@@ -319,6 +354,7 @@ public:
     // Read the entry data (excluding the newline)
     if (!readBytesWithWrap(readPtr, (uint8_t*)buffer, entryLength)) {
       free(buffer);
+      Serial.println("ERROR: Failed to read entry data");
       return String("");
     }
     
@@ -332,6 +368,9 @@ public:
     // Step 4: Create result string and cleanup
     String result = String(buffer);
     free(buffer);
+    
+    // Clean entry to remove garbage characters (keep only 0-9, -, ., ,, |)
+    result = cleanCSVEntry(result);
     
     return result;
   }

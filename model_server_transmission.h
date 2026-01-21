@@ -115,7 +115,8 @@ public:
       
       String entry = csvStorage->readNextCSVEntry();
       if (entry.length() == 0) {
-        break; // No more entries or read error
+        Serial.println("ModelServerTransmissionHandler: No entry read");
+        continue;
       }
       
       Serial.print("ModelServerTransmissionHandler: After read - Read pointer: 0x");
