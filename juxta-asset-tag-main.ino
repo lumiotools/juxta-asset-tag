@@ -441,6 +441,14 @@ void loop() {
   if(is_first_cycle) {
     if((current_time - ble_start_time) > ble_off_after_time) {
       Serial.println("BLE timeout reached - ending first cycle");
+
+      Serial.println("Connecting WiFi for time sync...");
+      CustomWiFi::connectWiFi();
+      attemptTimeSyncIfNeeded();
+      CustomWiFi::disconnectWiFi();
+      Serial.println("WiFi disconnected after time sync");
+
+      Serial.println("Stopping BLE...");
       BLEConfig::stop();
       is_first_cycle = false;
       if(!NVSConfig::getGPSActive()) {
