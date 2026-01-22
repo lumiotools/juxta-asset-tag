@@ -495,6 +495,10 @@ void loop() {
       Serial.println("GPS search completed - SCENARIO_1 active");
     } else if((current_time - gps_search_start_time) > (1000 * 60 * 2)) {
       Serial.println("GPS search timeout (2 minutes) reached");
+      double last_known_lat = 0.0;
+      double last_known_lon = 0.0;
+      double last_known_hdop = -1.0;
+      bool has_last_known_position = NVSConfig::getLastKnownPosition(last_known_lat, last_known_lon, last_known_hdop);
       if(gpsData.hasValidFix && !gpsData.isHighAccuracy) {
         Serial.println("SCENARIO_2_LOW_ACCURACY detected!");
         Serial.print("GPS Position - Lat: ");
@@ -509,9 +513,23 @@ void loop() {
         gpsSensor.powerOff();
         Serial.println("GPS powered off (SCENARIO_2)");
       } else if(!gpsData.hasValidFix) {
-        Serial.println("SCENARIO_3_NO_FIX detected - no GPS fix found");
-        current_scenario = SCENARIO_3_NO_FIX;
-        NVSConfig::setScenarioState((uint8_t)SCENARIO_3_NO_FIX);
+        if(has_last_known_position) {
+          Serial.println("Using last known position - Lat: ");
+          Serial.print(last_known_lat, 6);
+          Serial.print(", Lon: ");
+          Serial.println(last_known_lon, 6);
+          Serial.print(", HDOP: ");
+          Serial.println(last_known_hdop, 2);
+          current_scenario = SCENARIO_2_LOW_ACCURACY;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_2_LOW_ACCURACY);
+          NVSConfig::saveLastKnownPosition(last_known_lat, last_known_lon, last_known_hdop);
+          gpsSensor.powerOff();
+          Serial.println("GPS powered off (SCENARIO_2)");
+        } else{
+          Serial.println("No last known position available - entering SCENARIO_3_NO_FIX");
+          current_scenario = SCENARIO_3_NO_FIX;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_3_NO_FIX);
+        }
       }
       gps_search = false;
       Serial.println("GPS search ended");
@@ -555,27 +573,37 @@ void loop() {
       return; // Will not reach here
     }
 
+    if(current_scenario == SCENARIO_NONE) {
+      Serial.println("Scenario none detected - should never happen");
+      delay(200); // Brief delay before restart
+      setPixelAndShow(0, 255, 0, 0); // Red on
+      delay(500);
+      setPixelAndShow(0, 0, 0, 0); // Off
+      setPowerLatchPin(false);
+      return;
+    }
+
     if(transmission_cycle_start_time == -1) {
       Serial.println("Starting transmission cycle...");
-      double lat = 0.0;
-      double lon = 0.0;
-      double hdop = -1.0;
-      if(current_scenario != SCENARIO_4_UI_POSITION && !NVSConfig::getLastKnownPosition(lat, lon, hdop)) {
-        Serial.println("No last known position - getting from GPS");
-        GPSData gpsData = gpsSensor.getGPSData();
-        NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
-        Serial.print("Saved position - Lat: ");
-        Serial.print(gpsData.latitude, 6);
-        Serial.print(", Lon: ");
-        Serial.print(gpsData.longitude, 6);
-        Serial.print(", HDOP: ");
-        Serial.println(gpsData.hdop, 2);
-      } else {
-        Serial.print("Using last known position - Lat: ");
-        Serial.print(lat, 6);
-        Serial.print(", Lon: ");
-        Serial.println(lon, 6);
-      }
+      // double lat = 0.0;
+      // double lon = 0.0;
+      // double hdop = -1.0;
+      // if(current_scenario != SCENARIO_4_UI_POSITION && !NVSConfig::getLastKnownPosition(lat, lon, hdop)) {
+      //   Serial.println("No last known position - getting from GPS");
+      //   GPSData gpsData = gpsSensor.getGPSData();
+      //   NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
+      //   Serial.print("Saved position - Lat: ");
+      //   Serial.print(gpsData.latitude, 6);
+      //   Serial.print(", Lon: ");
+      //   Serial.print(gpsData.longitude, 6);
+      //   Serial.print(", HDOP: ");
+      //   Serial.println(gpsData.hdop, 2);
+      // } else {
+      //   Serial.print("Using last known position - Lat: ");
+      //   Serial.print(lat, 6);
+      //   Serial.print(", Lon: ");
+      //   Serial.println(lon, 6);
+      // }
 
       Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
       imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
@@ -713,8 +741,12 @@ void loop() {
         Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
       }
 
-      transmission_cycle_start_time = -1;
-      Serial.println("Transmission cycle reset");
+      Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
+      imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
+
+      transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("Transmission cycle start time: ");
+      Serial.println(transmission_cycle_start_time);
     }
 
     uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
@@ -727,7 +759,17 @@ void loop() {
       gps_search_start_time = TimeSync::getCurrentTimeMillis();
       Serial.print("GPS search started at: ");
       Serial.println(gps_search_start_time);
-      gps_cycle_start_time = -1;
+      
+      gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("GPS cycle start time: ");
+      Serial.println(gps_cycle_start_time);
+
+      Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
+      imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
+
+      transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("Transmission cycle start time: ");
+      Serial.println(transmission_cycle_start_time);
       return;
     }
   }

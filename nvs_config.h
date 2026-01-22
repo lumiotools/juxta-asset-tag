@@ -485,7 +485,7 @@ bool NVSConfig::setGPSAccuracyThreshold(float threshold) {
 
 // GPS Read Cycle Time implementation
 uint32_t NVSConfig::getGPSReadCycleTime() {
-  return readU32NVS(GPS_READ_CYCLE_TIME_KEY, 0);
+  return readU32NVS(GPS_READ_CYCLE_TIME_KEY, 900);
 }
 
 bool NVSConfig::setGPSReadCycleTime(uint32_t cycleTimeSeconds) {
@@ -494,7 +494,7 @@ bool NVSConfig::setGPSReadCycleTime(uint32_t cycleTimeSeconds) {
 
 // GPS On After implementation
 uint32_t NVSConfig::getGPSOnAfter() {
-  return readU32NVS(GPS_ON_AFTER_KEY, 60); // Default: 60 seconds
+  return readU32NVS(GPS_ON_AFTER_KEY, 900); // Default: 60 seconds
 }
 
 bool NVSConfig::setGPSOnAfter(uint32_t seconds) {
