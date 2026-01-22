@@ -84,7 +84,6 @@ def run_esptool(args, retry_on_fail=True):
         
         if "PermissionError" in error_msg or "ClearCommError" in error_msg:
             print("\n⚠️  Serial port access error!")
-            print_troubleshooting()
             
             if retry_on_fail:
                 retry = input("Put device in bootloader mode and retry? (y/N): ").lower()
@@ -96,7 +95,6 @@ def run_esptool(args, retry_on_fail=True):
         
         elif "No serial data received" in error_msg or "Failed to connect" in error_msg:
             print("\n⚠️  Cannot connect to ESP32-C6!")
-            print_troubleshooting()
         
         return False
     except Exception as e:
