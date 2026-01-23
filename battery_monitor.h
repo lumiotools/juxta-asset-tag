@@ -8,7 +8,7 @@ private:
   // Hardware Configuration (v2.5 - ESP32-C6)
   static const int BATTERY_ADC_PIN = 3;  // GPIO3 (IO3) connected to voltage divider
   static constexpr float BATTERY_MAX_VOLTAGE = 4.2f;  // Fully charged Li-Po
-  static constexpr float BATTERY_MIN_VOLTAGE = 3.0f;  // Safe discharge limit
+  static constexpr float BATTERY_MIN_VOLTAGE = 3.2f;  // Safe discharge limit
   
   // Voltage Divider Configuration
   // VBAT → R11 (220K) → [ADC Node] → R12 (220K) → GND
