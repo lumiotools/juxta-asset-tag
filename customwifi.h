@@ -25,10 +25,15 @@ public:
     String ssid = NVSConfig::getWiFiSSID();
     String password = NVSConfig::getWiFiPassword();
 
+    // Trim whitespace from both strings
+    ssid.trim();
+    password.trim();
+
     Serial.println("Connecting to WiFi SSID: " + ssid);
     Serial.println("Using password: " + password);
     
     if (ssid.length() == 0 || password.length() == 0) {
+      Serial.println("WiFi credentials are empty or not set. Cannot connect.");
       return false;
     }
     

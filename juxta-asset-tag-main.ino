@@ -108,6 +108,7 @@ void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
 
 // Attempt time synchronization if needed (WiFi must be connected first)
 void attemptTimeSyncIfNeeded() {
+  CustomWiFi::connectWiFi();
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("Attempting NTP time sync...");
     bool syncSuccess = TimeSync::syncTimeNTP();
@@ -119,6 +120,7 @@ void attemptTimeSyncIfNeeded() {
   } else {
     Serial.println("WiFi not connected - skipping time sync");
   }
+  CustomWiFi::disconnectWiFi();
 }
 
 void triggerIMURead() {
@@ -274,15 +276,7 @@ void setup() {
     gpsSensor.powerOff();
   }
 
-  if(is_first_cycle) {
-    Serial.println("First cycle: Connecting WiFi for time sync...");
-    CustomWiFi::connectWiFi();
-    attemptTimeSyncIfNeeded();
-    CustomWiFi::disconnectWiFi();
-    Serial.println("WiFi disconnected after time sync");
-  } else {
-    Serial.println("Normal cycle: Skipping WiFi time sync");
-  }
+  attemptTimeSyncIfNeeded();
   
   Serial.println("Initializing BLE...");
   BLEConfig::setDeviceId(DEVICE_ID);
@@ -443,9 +437,7 @@ void loop() {
       Serial.println("BLE timeout reached - ending first cycle");
 
       Serial.println("Connecting WiFi for time sync...");
-      CustomWiFi::connectWiFi();
       attemptTimeSyncIfNeeded();
-      CustomWiFi::disconnectWiFi();
       Serial.println("WiFi disconnected after time sync");
 
       Serial.println("Stopping BLE...");
