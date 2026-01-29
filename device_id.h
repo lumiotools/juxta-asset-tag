@@ -30,7 +30,7 @@ public:
     macNoColons[j] = '\0';
     
     // Format: ASSET_TAG_{MAC}
-    snprintf(buffer, bufSize, "ASSET_TAG_%s", macNoColons);
+    snprintf(buffer, bufSize, "AT%s", macNoColons);
   }
 };
 

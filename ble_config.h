@@ -488,9 +488,9 @@ public:
   static bool begin() {
     // Create device name with device ID (will be set via setDeviceId() before begin())
     if (deviceId != nullptr) {
-      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta %s v2.0.0", deviceId);
+      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta %s", deviceId);
     } else {
-      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta AssetTag v2.0.0");
+      snprintf(bleDeviceName, sizeof(bleDeviceName), "Juxta AT_UNKNOWN");
     }
     
     // Initialize BLE Device
