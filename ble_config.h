@@ -607,7 +607,7 @@ public:
     pAdvertising->setConnectableMode(2);
     pAdvertising->setMinInterval(244);   
     pAdvertising->setMaxInterval(252);
-    pAdvertising->enableScanResponse(true);
+    pAdvertising->enableScanResponse(false);
     
     // Add service UUID to advertising data
     
