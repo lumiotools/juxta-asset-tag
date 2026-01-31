@@ -39,7 +39,6 @@ struct GPSData {
 class GPSSensor {
 private:
   GPSData data;
-  GPSData lastKnownData;  // Store last known values when fix is lost
   String nmeaSentence = "";
   bool configured = false;
   
@@ -198,93 +197,74 @@ private:
       return false;
     }
   }
-  
-  // Parse RMC sentence: $GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A
-  void parseRMC(String sentence) {
-    int commaPos[12];
+
+  // Parse GGA sentence: $GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47
+  void parseGGA(String sentence) {
+    int commaPos[15];
     int commaCount = 0;
     
     // Find comma positions
-    for (int i = 0; i < sentence.length() && commaCount < 12; i++) {
-      if (sentence.charAt(i) == ',') {
-        commaPos[commaCount++] = i;
-      }
+    for (int i = 0; i < sentence.length() && commaCount < 15; i++) {
+        if (sentence.charAt(i) == ',') {
+            commaPos[commaCount++] = i;
+        }
     }
     
-    if (commaCount < 9) return;
+    if (commaCount < 14) return;
     
-    // Extract status (A = valid, V = invalid)
-    String status = sentence.substring(commaPos[1] + 1, commaPos[2]);
+    // Extract Fix Quality (indicates if fix is valid)
+    String fixQuality = sentence.substring(commaPos[5] + 1, commaPos[6]);
     
-    if (status == "A") {
-      // GPS HAS FIX
-      data.hasValidFix = true;
-      data.fixType = 3;  // Assume 3D fix when status is A
-      data.lastFixTimeMillis = TimeSync::getCurrentTimeMillis();  // Record timestamp when fix was received
-      
-      // Extract position data
-      String lat = sentence.substring(commaPos[2] + 1, commaPos[3]);
-      String latDir = sentence.substring(commaPos[3] + 1, commaPos[4]);
-      String lon = sentence.substring(commaPos[4] + 1, commaPos[5]);
-      String lonDir = sentence.substring(commaPos[5] + 1, commaPos[6]);
-      String speedStr = sentence.substring(commaPos[6] + 1, commaPos[7]);
-      String courseStr = sentence.substring(commaPos[7] + 1, commaPos[8]);
-      
-      // Convert coordinates
-      double latDeg = formatCoordinate(lat);
-      double lonDeg = formatCoordinate(lon);
-      
-      // Apply direction (N/S, E/W)
-      if (latDir == "S") latDeg = -latDeg;
-      if (lonDir == "W") lonDeg = -lonDeg;
-      
-      data.latitude = latDeg;
-      data.longitude = lonDeg;
-      
-      // Speed in knots to m/s
-      data.speed = speedStr.toFloat() * 0.514444;  // knots to m/s
-      
-      // Course/heading
-      data.heading = courseStr.toFloat();
-      
-      // RMC doesn't provide altitude, satellites, or HDOP
-      // Keep last known values if available, otherwise keep defaults
-      if (lastKnownData.hasValidFix) {
-        data.altitude = lastKnownData.altitude;
-        data.satellites = lastKnownData.satellites;
-        data.hdop = lastKnownData.hdop;
+    if (fixQuality.toInt() > 0) {
+        // Valid Fix
+        data.hasValidFix = true;
+        data.fixType = 3; // Assume 3D fix
+        data.lastFixTimeMillis = TimeSync::getCurrentTimeMillis();
+
+        // Latitude
+        String lat = sentence.substring(commaPos[1] + 1, commaPos[2]);
+        String latDir = sentence.substring(commaPos[2] + 1, commaPos[3]);
+        
+        // Longitude
+        String lon = sentence.substring(commaPos[3] + 1, commaPos[4]);
+        String lonDir = sentence.substring(commaPos[4] + 1, commaPos[5]);
+        
+        // Convert coordinates
+        double latDeg = formatCoordinate(lat);
+        double lonDeg = formatCoordinate(lon);
+        
+        // Apply direction (N/S, E/W)
+        if (latDir == "S") latDeg = -latDeg;
+        if (lonDir == "W") lonDeg = -lonDeg;
+        
+        data.latitude = latDeg;
+        data.longitude = lonDeg;
+
+        // Satellites
+        String satStr = sentence.substring(commaPos[6] + 1, commaPos[7]);
+        data.satellites = satStr.toInt();
+        
+        // HDOP
+        String hdopStr = sentence.substring(commaPos[7] + 1, commaPos[8]);
+        data.hdop = hdopStr.toFloat();
+        
+        // Altitude
+        String altStr = sentence.substring(commaPos[8] + 1, commaPos[9]);
+        data.altitude = altStr.toFloat();
+
+        // Update accuracy flag
         data.isHighAccuracy = isHighAccuracy(data.hdop);
-      } else {
-        // Defaults for first fix
-        data.altitude = 0.0;
-        data.satellites = 0;
-        data.hdop = 0.0;
-        data.isHighAccuracy = false;  // No HDOP data means we can't determine accuracy
-      }
-      
-      // Store as last known values
-      lastKnownData = data;
-      
-      // Save complete GPS data to NVS for hot start on next boot
-      NVSConfig::saveLastGPSData(data);
-      
+
+        // GGA doesn't provide Speed/Heading, so default them
+        data.speed = 0.0;
+        data.heading = 0.0;
+        
+        // Save complete GPS data to NVS for hot start on next boot
+        NVSConfig::saveLastGPSData(data);
     } else {
-      // NO FIX - use last known values
-      data.hasValidFix = false;
-      data.fixType = 0;
-      
-      // Restore last known values if available
-      if (lastKnownData.hasValidFix) {
-        data.latitude = lastKnownData.latitude;
-        data.longitude = lastKnownData.longitude;
-        data.altitude = lastKnownData.altitude;
-        data.speed = lastKnownData.speed;
-        data.heading = lastKnownData.heading;
-        data.satellites = lastKnownData.satellites;
-        data.hdop = lastKnownData.hdop;
-        data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
-        data.isHighAccuracy = isHighAccuracy(data.hdop);
-      }
+        // NO FIX
+        data.hasValidFix = false;
+        data.fixType = 0;
     }
   }
 
@@ -343,41 +323,50 @@ public:
     // Power on GPS first
     powerOn();
     
-    // Initialize Serial1 at 9600 baud for configuration
-    Serial1.begin(9600, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
-    delay(500); // Give GPS time to power up
-    
-    // Configure GPS for fastest operation
-    Serial.println("\nConfiguring GPS...");
-    Serial1.println("$PCAS03,0,0,0,0,1,0,0,0*03"); // RMC only
-    delay(100);
-    Serial1.println("$PCAS04,1*18"); // GPS only
-    delay(100);
-    Serial1.println("$PCAS01,5*19"); // 115200 baud
-    // delay(100);
-    // Serial1.println("$PCAS04,2*3F\r\n"); // low power mode
-    delay(100);
-    Serial1.println("$PCAS00*01"); // Save config
-    delay(300);
-    
-    // Detect which baud rate is working (9600 or 115200)
+    // 1. Detect which baud rate the GPS is CURRENTLY using
     Serial.println("\nDetecting GPS baud rate...");
     uint32_t detectedBaud = detectBaudRate();
     
     // Check if GPS device is responding
     if (detectedBaud == 0) {
       Serial.println("ERROR: GPS device not responding at any baud rate!");
-      Serial.println("GPS initialization failed - device may not be working properly");
-      // powerOff(); // Turn off GPS to save power
-      configured = false;
-      return false;
+      // Fallback: try default 9600 just in case
+      detectedBaud = 9600;
     }
     
-    // Switch to detected baud rate
-    Serial1.end();
-    delay(100);
+    // 2. Connect at the detected baud rate to allow sending commands
     Serial1.begin(detectedBaud, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
     delay(200);
+    
+    // 3. Configure GPS (Disable RMC, Enable GGA)
+    // We send this AT THE CURRENT BAUD RATE so the GPS understands it
+    Serial.println("Configuring GPS sentences (GGA Only)...");
+    
+    // CAS03: 1=Open, 0=Close. Order: GGA,GLL,GSA,GSV,RMC,VTG,ZDA,ANT
+    Serial1.println("$PCAS03,1,0,0,0,0,0,0,0*03"); 
+    delay(200);
+    
+    // CAS04: Set System ID (1=GPS Only)
+    Serial1.println("$PCAS04,1*18"); 
+    delay(200);
+
+    // 4. Ensure we are running at 115200 baud
+    if (detectedBaud != 115200) {
+      Serial.println("Switching GPS to 115200 baud...");
+      Serial1.println("$PCAS01,5*19"); // Set GPS to 115200
+      delay(200);
+      
+      // Re-connect ESP Serial at new baud rate
+      Serial1.end();
+      delay(100);
+      Serial1.begin(115200, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+      detectedBaud = 115200;
+      delay(200);
+    }
+    
+    // 5. Save Configuration
+    Serial1.println("$PCAS00*01"); 
+    delay(300);
     
     Serial.print("Using baud rate: ");
     Serial.println(detectedBaud);
@@ -396,14 +385,14 @@ public:
     data.lastFixTimeMillis = 0;
     data.isHighAccuracy = false;
     
-    // Load last known GPS data from NVS and send hot start command
-    if (NVSConfig::loadLastGPSData(lastKnownData)) {
-      Serial.println("Found last known GPS data in NVS");
-      // Send hot start command to GPS module for faster fix (only needs position)
-      sendHotStartCommand(lastKnownData.latitude, lastKnownData.longitude, lastKnownData.altitude);
+    // Load last known GPS data from NVS purely for hot start command
+    GPSData savedData;
+    if (NVSConfig::loadLastGPSData(savedData)) {
+      Serial.println("Found saved GPS data in NVS, attempting hot start");
+      // Send hot start command to GPS module for faster fix
+      sendHotStartCommand(savedData.latitude, savedData.longitude, savedData.altitude);
     } else {
       Serial.println("No saved GPS data found");
-      lastKnownData = data;
     }
     
     Serial.println("Waiting for GPS fix...\n");
@@ -418,42 +407,22 @@ public:
       char c = Serial1.read();
       
       if (c == '\n') {
+        Serial.print("Received GPS Sentence: ");
+        Serial.println(nmeaSentence);
         // Complete sentence received
-        if (nmeaSentence.startsWith("$GPRMC") || nmeaSentence.startsWith("$GNRMC")) {
-          parseRMC(nmeaSentence);
+        if (nmeaSentence.startsWith("$GPGGA") || nmeaSentence.startsWith("$GNGGA")) {
+          parseGGA(nmeaSentence);
         }
         nmeaSentence = "";
       } else if (c != '\r') {
         nmeaSentence += c;
       }
     }
-    
-    // If no data available and we don't have a fix, use last known values
-    if (!Serial1.available() && !data.hasValidFix && lastKnownData.hasValidFix) {
-      data.latitude = lastKnownData.latitude;
-      data.longitude = lastKnownData.longitude;
-      data.altitude = lastKnownData.altitude;
-      data.speed = lastKnownData.speed;
-      data.heading = lastKnownData.heading;
-      data.satellites = lastKnownData.satellites;
-      data.hdop = lastKnownData.hdop;
-      data.lastFixTimeMillis = lastKnownData.lastFixTimeMillis;  // Preserve timestamp of last valid fix
-      data.isHighAccuracy = isHighAccuracy(lastKnownData.hdop);
-      // hasValidFix remains false to indicate this is stale data
-    }
   }
   
   GPSData getGPSData() {
     update();
     return data;
-  }
-  
-  // Public method to send hot start command if last known location exists
-  void sendHotStartIfAvailable() {
-    // Only send hot start if we have last known location and don't currently have a fix
-    if (lastKnownData.hasValidFix && !data.hasValidFix) {
-      sendHotStartCommand(lastKnownData.latitude, lastKnownData.longitude, lastKnownData.altitude);
-    }
   }
 
 };

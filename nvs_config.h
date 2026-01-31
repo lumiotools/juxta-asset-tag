@@ -463,7 +463,7 @@ float NVSConfig::getGPSAccuracyThreshold() {
   // Read as string to preserve float precision
   String thresholdStr = readStringNVS(GPS_ACCURACY_THRESHOLD_KEY);
   if (thresholdStr.length() == 0) {
-    return 0.0; // No value set
+    return 1.0; // No value set
   }
   return thresholdStr.toFloat();
 }

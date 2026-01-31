@@ -617,55 +617,14 @@ void loop() {
         Serial.println(gpsData.isHighAccuracy ? "YES" : "NO");
         
         if(!gpsData.hasValidFix || !gpsData.isHighAccuracy) {
-          Serial.println("GPS accuracy degraded - transitioning to SCENARIO_2_CALCULATED");
-          Serial.print("Last position - Lat: ");
-          Serial.print(gpsData.latitude, 6);
-          Serial.print(", Lon: ");
-          Serial.println(gpsData.longitude, 6);
-          current_scenario = SCENARIO_2_CALCULATED;
-          NVSConfig::setScenarioState((uint8_t)SCENARIO_2_CALCULATED);
-          gpsSensor.powerOff();
-          Serial.println("GPS powered off");
-          Serial.println("Stopping IMU ticker");
-          imuReadTicker.detach();
-
-          Serial.println("Sending transmissions to Model Server and PMC Server (GPS accuracy degraded)");
-          double lastKnownLat = 0.0;
-          double lastKnownLon = 0.0;
-          double lastKnownHdop = -1.0;
-          NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-          Serial.print("Position - Lat: ");
-          Serial.print(lastKnownLat, 6);
-          Serial.print(", Lon: ");
-          Serial.print(lastKnownLon, 6);
-          Serial.print(", HDOP: ");
-          Serial.println(lastKnownHdop, 2);
-          
-          Serial.println("Sending to Model Server...");
-          bool modelSuccess = modelServerTransmissionHandler.sendData(lastKnownLat, lastKnownLon, lastKnownHdop);
-          Serial.print("Model Server transmission result: ");
-          Serial.println(modelSuccess ? "SUCCESS" : "FAILED");
-
-          if(!modelSuccess) {
-            Serial.println("Model Server transmission failed - aborting PMC Server transmission");
-          } else {
-            Serial.print("Sending to PMC Server - Scenario: ");
-            Serial.println(current_scenario);
-            NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-            bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
-            Serial.print("PMC Server transmission result: ");
-            Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
-          }
-          
-
-          NVSConfig::saveLastKnownPosition(gpsData.latitude, gpsData.longitude, gpsData.hdop);
-          transmission_cycle_start_time = -1;
-          gps_cycle_start_time = -1;
-          Serial.println("Transmission and GPS cycles reset");
-          return;
+          Serial.println("GPS accuracy degraded");
+          // Force transmission cycle to run immediately in the next block
+          Serial.println("Forcing transmission cycle due to degradation");
+          transmission_cycle_start_time = 0;           
+        } else {
+           Serial.println("GPS still high accuracy - resetting GPS cycle");
+           gps_cycle_start_time = current_time;
         }
-        Serial.println("GPS still high accuracy - resetting GPS cycle");
-        gps_cycle_start_time = -1;
       }
     }
 
@@ -676,6 +635,16 @@ void loop() {
       GPSData gpsData;
       if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
         gpsData = gpsSensor.getGPSData();
+        
+        if(!gpsData.hasValidFix || !gpsData.isHighAccuracy) {
+          Serial.println("GPS accuracy degraded - transitioning to SCENARIO_2_CALCULATED");
+          current_scenario = SCENARIO_2_CALCULATED;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_2_CALCULATED);
+          gpsSensor.powerOff(); 
+          Serial.println("GPS powered off");
+        } else {
+          gps_cycle_start_time = -1;
+        }
       }
       Serial.println("Transmission cycle time reached - preparing data transmission");
       Serial.println("Stopping IMU ticker");
@@ -714,36 +683,30 @@ void loop() {
         Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
       }
 
-      uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
-      unsigned long long gpsOnAfterTimeMs = (unsigned long long)gpsOnAfterTime * 1000ULL;
+      transmission_cycle_start_time = -1;
+    }
 
-      if(current_scenario == SCENARIO_2_CALCULATED && (current_time - gps_cycle_start_time) >= gpsOnAfterTimeMs) {
-        Serial.println("SCENARIO_2: GPS on-after time reached - powering on GPS for search");
-        gpsSensor.powerOn();
-        gps_search = true;
-        gps_search_start_time = TimeSync::getCurrentTimeMillis();
-        Serial.print("GPS search started at: ");
-        Serial.println(gps_search_start_time);
+    uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
+    unsigned long long gpsOnAfterTimeMs = (unsigned long long)gpsOnAfterTime * 1000ULL;
 
-        Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
-        imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
+    if(current_scenario == SCENARIO_2_CALCULATED && (current_time - gps_cycle_start_time) >= gpsOnAfterTimeMs) {
+      Serial.println("SCENARIO_2: GPS on-after time reached - powering on GPS for search");
+      gpsSensor.powerOn();
+      gps_search = true;
+      gps_search_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("GPS search started at: ");
+      Serial.println(gps_search_start_time);
 
-        transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
-        Serial.print("Transmission cycle start time: ");
-        Serial.println(transmission_cycle_start_time);
+      Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
+      imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
 
-        gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
-        Serial.print("GPS cycle start time: ");
-        Serial.println(gps_cycle_start_time);
-        return;
-      } else {
-        Serial.println("Starting IMU ticker at 100Hz (10ms interval)");
-        imuReadTicker.attach_ms(10, triggerIMURead); // 10ms = 100Hz
+      transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("Transmission cycle start time: ");
+      Serial.println(transmission_cycle_start_time);
 
-        transmission_cycle_start_time = TimeSync::getCurrentTimeMillis();
-        Serial.print("Transmission cycle start time: ");
-        Serial.println(transmission_cycle_start_time);
-      }
+      gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
+      Serial.print("GPS cycle start time: ");
+      Serial.println(gps_cycle_start_time);
     }
   }
 }
