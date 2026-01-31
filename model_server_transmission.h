@@ -36,7 +36,7 @@ private:
   // Batch reading configuration
   static const uint32_t CSV_HEADER_SIZE = 40;          // 16 bytes (DeviceID) + 3 doubles (Lat, Lon, Hdop)
   static const uint32_t RECORD_SIZE = sizeof(TimestampedIMUReading); // 32 bytes
-  static const uint32_t MAX_BATCH_READINGS = 2000;     // 64KB (2000 * 32 = 64,000 bytes)
+  static const uint32_t MAX_BATCH_READINGS = 1984;     // 64KB (1984 * 32 = 63,488 bytes)
   
   // Single Zero-Copy Buffer (Holds Header + Data)
   uint8_t* zeroCopyBuffer;

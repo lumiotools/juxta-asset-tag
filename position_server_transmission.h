@@ -15,10 +15,10 @@ const char* POSITION_SERVER_URL = "https://juxta.pmcprecision.com/api/record/wif
 const int POSITION_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // FIFO Queue configuration (using blob arrays)
-const char* POSITION_QUEUE_HEAD_KEY = "position_q_head";      // Head pointer (write position)
-const char* POSITION_QUEUE_TAIL_KEY = "position_q_tail";      // Tail pointer (read position)
-const char* POSITION_QUEUE_COUNT_KEY = "position_q_count";    // Number of entries in queue
-const char* POSITION_QUEUE_MAX_KEY = "position_q_max";        // Max queue size
+const char* POSITION_QUEUE_HEAD_KEY = "pos_q_head";      // Head pointer (write position)
+const char* POSITION_QUEUE_TAIL_KEY = "pos_q_tail";      // Tail pointer (read position)
+const char* POSITION_QUEUE_COUNT_KEY = "pos_q_count";    // Number of entries in queue
+const char* POSITION_QUEUE_MAX_KEY = "pos_q_max";        // Max queue size
 const int POSITION_MAX_ENTRY_SIZE = 200;                 // Max size per entry (bytes)
 const int POSITION_BATCH_READ_SIZE = 10;                 // Default batch size for reading
 const int POSITION_CHUNK_SIZE = 5;                       // Max entries per transmission (RAM safety)
@@ -57,7 +57,7 @@ private:
   // Get blob key name for queue index
   String getQueueBlobKey(uint32_t index) {
     char key[16];
-    snprintf(key, sizeof(key), "position_b%lu", (unsigned long)index);
+    snprintf(key, sizeof(key), "pos_b%lu", (unsigned long)index);
     return String(key);
   }
   
