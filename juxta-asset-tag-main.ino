@@ -328,7 +328,7 @@ void loop() {
          setPixelAndShow(0, 255, 0, 0); // Red
          delay(500);
          setPixelAndShow(0, 0, 0, 0); // Off
-         ESP.restart();
+         setPowerLatchPin(false);
 
       } else if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 4000) {
         // Just show pending shutdown indication (Red)
