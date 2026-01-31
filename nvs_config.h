@@ -41,6 +41,15 @@ private:
   static const char* LAST_KNOWN_POSITION_HDOP_KEY;
 
 public:
+  // Erase all NVS data
+  static bool eraseAll() {
+    esp_err_t err = nvs_flash_erase();
+    if (err == ESP_OK) {
+      err = nvs_flash_init();
+    }
+    return (err == ESP_OK);
+  }
+
   // Initialize NVS flash memory
   static bool initializeNVS() {
     esp_err_t err = nvs_flash_init();

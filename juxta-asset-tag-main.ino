@@ -305,11 +305,38 @@ void loop() {
   } else {
     if(current_button_state == HIGH) {
       long long current_button_click_time = TimeSync::getCurrentTimeMillis();
-      if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 4000) {
-        Serial.println("Long press detected (4s) - powering off device...");
-        setPixelAndShow(0, 255, 0, 0); // Red on
-        delay(500);
-        setPowerLatchPin(false);
+      if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 20000) {
+         Serial.println("Factory Reset Triggered (>20s)");
+         
+         // 1. Ensure power remains on
+         setPowerLatchPin(true);
+         
+         // 2. Visual indication (Blue - Reset Mode)
+         setPixelAndShow(0, 0, 0, 255); 
+
+         // 3. Erase NVS (First for safety)
+         Serial.println("Erasing NVS...");
+         NVSConfig::eraseAll();
+
+         // 4. Erase SPI Flash
+         Serial.println("Erasing SPI Flash...");
+         spiFlash.eraseChip();
+         
+         // 5. Restart with Red blink indication
+         Serial.println("Reset complete. Restarting...");
+         setPixelAndShow(0, 255, 0, 0); // Red
+         delay(500);
+         setPixelAndShow(0, 0, 0, 0); // Off
+         ESP.restart();
+
+      } else if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 4000) {
+        // Just show pending shutdown indication (Red)
+        // Actual shutdown happens on release if duration < 20s
+        if ((current_button_click_time / 250) % 2 == 0) {
+            setPixelAndShow(0, 255, 0, 0); // Red
+         } else {
+            setPixelAndShow(0, 0, 0, 0); // Off
+         }
       } else if(prev_button_state == LOW && (current_button_click_time - prev_button_click_time) < 800) {
         Serial.println("Double press detected - restarting ESP...");
         delay(200); // Brief delay before restart
@@ -325,6 +352,16 @@ void loop() {
         prev_button_state = HIGH;
       }
     } else {
+      if(prev_button_state == HIGH) {
+        long long release_time = TimeSync::getCurrentTimeMillis();
+        long long duration = release_time - prev_button_click_time;
+        if(duration > 4000) {
+          Serial.println("Long press release detected (>4s) - powering off device...");
+          setPixelAndShow(0, 255, 0, 0); // Red on
+          delay(500);
+          setPowerLatchPin(false);
+        }
+      }
       prev_button_state = LOW;
     }
   }
