@@ -57,11 +57,12 @@ long long prev_button_click_time = -1;
 long long ble_start_time = -1;
 long long ble_off_after_time = 1000 * 60 * 1 + 1000 * 5; // 1 minute + 5 seconds
 
-bool gps_search = true;
+bool gps_search = false;
 long long gps_search_start_time = -1;
 
 long long transmission_cycle_start_time = -1;
 long long gps_cycle_start_time = -1;
+int transmission_count = 0;
 
 Ticker imuReadTicker;
 bool should_read_imu = false;
@@ -640,7 +641,7 @@ void loop() {
       Serial.println(transmission_cycle_start_time);
     }
 
-    if(gps_cycle_start_time == -1) {
+    if(gps_cycle_start_time == -1 && current_scenario == SCENARIO_1_HIGH_ACCURACY) {
       gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
       Serial.print("GPS cycle start time: ");
       Serial.println(gps_cycle_start_time);
@@ -729,12 +730,16 @@ void loop() {
       }
 
       transmission_cycle_start_time = -1;
+      transmission_count += 1;
+      Serial.print("Transmission count: ");
+      Serial.println(transmission_count);
     }
 
     uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();
     unsigned long long gpsOnAfterTimeMs = (unsigned long long)gpsOnAfterTime * 1000ULL;
+    int gpsOnAfterTransmissionCount = gpsOnAfterTimeMs / transmissionCycleTimeMs;
 
-    if(current_scenario == SCENARIO_2_CALCULATED && (current_time - gps_cycle_start_time) >= gpsOnAfterTimeMs) {
+    if(current_scenario == SCENARIO_2_CALCULATED && transmission_count >= gpsOnAfterTransmissionCount) {
       Serial.println("SCENARIO_2: GPS on-after time reached - powering on GPS for search");
       gpsSensor.powerOn();
       gps_search = true;
@@ -752,6 +757,8 @@ void loop() {
       gps_cycle_start_time = TimeSync::getCurrentTimeMillis();
       Serial.print("GPS cycle start time: ");
       Serial.println(gps_cycle_start_time);
+
+      transmission_count = 0;
     }
   }
 }
