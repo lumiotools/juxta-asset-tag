@@ -409,6 +409,14 @@ void loop() {
       GPSData gpsData;
       if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
         gpsData = gpsSensor.getGPSData();
+        
+        if(!gpsData.hasValidFix || !gpsData.isHighAccuracy) {
+          Serial.println("GPS accuracy degraded during sleep prep - transitioning to SCENARIO_2_CALCULATED");
+          current_scenario = SCENARIO_2_CALCULATED;
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_2_CALCULATED);
+          gpsSensor.powerOff(); 
+          Serial.println("GPS powered off");
+        }
       }
       Serial.println("Transmission cycle time reached - preparing data transmission");
       Serial.println("Stopping IMU ticker");
