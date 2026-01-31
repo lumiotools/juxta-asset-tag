@@ -7,6 +7,7 @@
 #include "customwifi.h"
 #include "nvs_config.h"
 #include "time_sync.h"
+#include "device_id.h"
 
 // Server URL and configuration
 const char* MODEL_SERVER_URL = "https://juxta.pmcprecision.com/api/model"; // Model server endpoint
@@ -33,8 +34,12 @@ private:
   bool positionInitialized;
   
   // Batch reading configuration
-  static const uint32_t MAX_BATCH_SIZE = 1200;        // Maximum number of CSV entries per batch
-  static const uint32_t MAX_BATCH_BYTES = 51200;     // Maximum 8KB per batch (to fit in memory)
+  static const uint32_t CSV_HEADER_SIZE = 40;          // 16 bytes (DeviceID) + 3 doubles (Lat, Lon, Hdop)
+  static const uint32_t RECORD_SIZE = sizeof(TimestampedIMUReading); // 32 bytes
+  static const uint32_t MAX_BATCH_READINGS = 2000;     // 64KB (2000 * 32 = 64,000 bytes)
+  
+  // Single Zero-Copy Buffer (Holds Header + Data)
+  uint8_t* zeroCopyBuffer;
   
   // Response structure for delta position from model server
   struct DeltaPosition {
@@ -46,7 +51,7 @@ private:
 public:
   ModelServerTransmissionHandler() : csvStorage(nullptr), initialized(false), 
                                       currentLat(0.0), currentLon(0.0), currentHdop(-1.0),
-                                      positionInitialized(false) {}
+                                      positionInitialized(false), zeroCopyBuffer(nullptr) {}
   
   // Initialize with CSV storage handler
   bool begin(UnifiedCSVStorage* storage) {
@@ -76,7 +81,7 @@ public:
     Serial.println("========== Model Server Transmission Handler ==========");
     Serial.println("Protocol: WiFi ONLY");
     Serial.println("Server: " + String(MODEL_SERVER_URL));
-    Serial.println("Batch: " + String(MAX_BATCH_SIZE) + " entries or " + String(MAX_BATCH_BYTES) + " bytes max");
+    Serial.println("Batch: " + String(MAX_BATCH_READINGS) + " entries max");
     Serial.println("=======================================================");
     
     return initialized;
@@ -87,75 +92,39 @@ public:
     return initialized;
   }
   
-  // Read batch of CSV data from flash storage
-  // Returns: CSV string with multiple entries (obj1,obj2,...\nobj1,obj2,...\n)
-  String readBatchFromFlash(uint32_t& entriesRead) {
-    if (!initialized || csvStorage == nullptr) {
-      Serial.println("ModelServerTransmissionHandler: Not initialized");
-      entriesRead = 0;
-      return String("");
+  // Read batch of Binary data from flash storage
+  // Returns: number of readings read
+  size_t readBatchFromFlash() {
+    if (!initialized || csvStorage == nullptr || zeroCopyBuffer == nullptr) {
+      Serial.println("ModelServerTransmissionHandler: Buffer or Storage not initialized");
+      return 0;
     }
     
-    String batchData = "";
-    entriesRead = 0;
-    uint32_t bytesAccumulated = 0;
+    // ZERO COPY OPTIMIZATION:
+    // Read directly into buffer at offset CSV_HEADER_SIZE (Leave space for Header)
+    // Cast the byte pointer + offset to the struct pointer
+    TimestampedIMUReading* writeLocation = (TimestampedIMUReading*)(zeroCopyBuffer + CSV_HEADER_SIZE);
+
+    size_t count = csvStorage->readBatch(writeLocation, MAX_BATCH_READINGS);
     
-    // Read multiple CSV entries until batch size limit
-    while (entriesRead < MAX_BATCH_SIZE && bytesAccumulated < MAX_BATCH_BYTES) {
-      // Check if data available
-      if (!csvStorage->hasDataToRead()) {
-        break; // No more data
-      }
-      
-      // Read next entry
-      Serial.print("ModelServerTransmissionHandler: Read pointer: 0x");
-      Serial.print(csvStorage->getReadPtr(), HEX);
-      Serial.print(", Write pointer: 0x");
-      Serial.println(csvStorage->getWritePtr(), HEX);
-      
-      String entry = csvStorage->readNextCSVEntry();
-      if (entry.length() == 0) {
-        Serial.println("ModelServerTransmissionHandler: No entry read");
-        continue;
-      }
-      
-      Serial.print("ModelServerTransmissionHandler: After read - Read pointer: 0x");
-      Serial.print(csvStorage->getReadPtr(), HEX);
-      Serial.print(", Write pointer: 0x");
-      Serial.println(csvStorage->getWritePtr(), HEX);
-      
-      // Add to batch (with newline separator)
-      if (batchData.length() > 0) {
-        batchData += "\n";
-      }
-      batchData += entry;
-      
-      entriesRead++;
-      bytesAccumulated += entry.length() + 1; // +1 for newline
-      
-      // Yield to prevent watchdog
-      if (entriesRead % 10 == 0) {
-        yield();
-      }
+    if (count > 0) {
+        Serial.print("ModelServerTransmissionHandler: Buffered ");
+        Serial.print(count);
+        Serial.print(" readings (");
+        Serial.print(count * RECORD_SIZE);
+        Serial.println(" bytes)");
     }
     
-    Serial.print("ModelServerTransmissionHandler: Read ");
-    Serial.print(entriesRead);
-    Serial.print(" entries (");
-    Serial.print(bytesAccumulated);
-    Serial.println(" bytes)");
-    
-    return batchData;
+    return count;
   }
   
-  // Send batch to model server with GPS coordinates
-  // Format: (latitude,longitude,hdop),imuObj1,imuObj2,...
+  // Send BINARY batch to model server with GPS coordinates
+  // Payload Format: [DEVICE_ID(16)][LAT(8)][LON(8)][HDOP(8)][IMU_DATA(N*32)]
   // Returns: DeltaPosition with delta_lat, delta_lon from server response
-  DeltaPosition sendBatchToModelServer(double latitude, double longitude, double hdop, const String& imuBatchData) {
+  DeltaPosition sendBatchToModelServer(double latitude, double longitude, double hdop, size_t readingCount) {
     DeltaPosition result = {0.0, 0.0, false};
     
-    if (!initialized) {
-      Serial.println("ModelServerTransmissionHandler: Not initialized");
+    if (!initialized || readingCount == 0 || zeroCopyBuffer == nullptr) {
       return result;
     }
     
@@ -171,43 +140,53 @@ public:
       return result;
     }
     
-    // Small delay to ensure TCP/IP stack is fully initialized
-    // This helps avoid UDP socket locking issues during DNS resolution
-    delay(100);
+    delay(10);
     
-    // Construct payload: GPS coordinates + IMU data
-    // Format: (lat,lon,hdop),obj1,obj2,...
-    String payload = "(" + String(latitude, 7) + "," + String(longitude, 7) + "," + String(hdop, 2) + "),";
-    payload += imuBatchData;
+    // ZERO COPY PAYLOAD CONSTRUCTION
+    // 1. Write Header to execution buffer (first 40 bytes)
     
-    Serial.println("ModelServerTransmissionHandler: Sending to model server...");
+    // 1a. Device ID (First 16 bytes)
+    char deviceId[20]; // Buffer for getting ID
+    DeviceID::getDeviceId(deviceId, sizeof(deviceId));
+    
+    // Clear first 16 bytes
+    memset(zeroCopyBuffer, 0, 16);
+    // Copy ID (up to 16 bytes or null terminator)
+    strncpy((char*)zeroCopyBuffer, deviceId, 16);
+    
+    // 1b. GPS Data (Offsets 16, 24, 32)
+    memcpy(zeroCopyBuffer + 16, &latitude, sizeof(double));
+    memcpy(zeroCopyBuffer + 24, &longitude, sizeof(double));
+    memcpy(zeroCopyBuffer + 32, &hdop, sizeof(double));
+    
+    // 2. Data is already there (from readBatchFromFlash) at offset 40
+    
+    // Calculate total size
+    size_t dataSize = readingCount * RECORD_SIZE;
+    size_t totalSize = CSV_HEADER_SIZE + dataSize;
+    
+    Serial.println("ModelServerTransmissionHandler: Sending BINARY to model server...");
+    Serial.print("  Device: ");
+    Serial.println(deviceId);
     Serial.print("  GPS: (");
     Serial.print(latitude, 7);
     Serial.print(", ");
     Serial.print(longitude, 7);
-    Serial.print("), HDOP: ");
-    Serial.println(hdop, 2);
-    Serial.print("  Payload size: ");
-    Serial.print(payload.length());
+    Serial.print(")");
+    Serial.print("  Size: ");
+    Serial.print(totalSize);
     Serial.println(" bytes");
-    Serial.print("  IP address: ");
-    Serial.println(WiFi.localIP());
     
     // Send via HTTP POST
     HTTPClient http;
-    
-    // Use direct begin() - HTTPClient handles HTTPS automatically
-    // The delay above helps ensure TCP/IP stack is ready for DNS resolution
     http.begin(MODEL_SERVER_URL);
-    
-    // Set timeout AFTER begin() (recommended approach)
     http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
+    http.addHeader("Content-Type", "application/octet-stream");
     
-    // Only set Content-Type header (like working example)
-    http.addHeader("Content-Type", "text/csv");
+    // Send the zeroCopyBuffer directly
+    int httpResponseCode = http.POST(zeroCopyBuffer, totalSize);
     
-    Serial.println("ModelServerTransmissionHandler: Sending POST request...");
-    int httpResponseCode = http.POST(payload);
+    // NO FREEING HERE - Buffer is reused for next batch
     
     Serial.print("ModelServerTransmissionHandler: Response code: ");
     Serial.println(httpResponseCode);
@@ -223,18 +202,7 @@ public:
         result.deltaLat = response.substring(0, commaPos).toDouble();
         result.deltaLon = response.substring(commaPos + 1).toDouble();
         result.valid = true;
-        
-        Serial.print("ModelServerTransmissionHandler: Delta position: (");
-        Serial.print(result.deltaLat, 7);
-        Serial.print(", ");
-        Serial.print(result.deltaLon, 7);
-        Serial.println(")");
-      } else {
-        Serial.println("ModelServerTransmissionHandler: Failed to parse delta position from response");
       }
-    } else {
-      Serial.print("ModelServerTransmissionHandler: HTTP error - code ");
-      Serial.println(httpResponseCode);
     }
     
     http.end();
@@ -307,6 +275,23 @@ public:
     Serial.print("), HDOP: ");
     Serial.println(currentHdop, 2);
     
+    Serial.print("ModelServerTransmissionHandler: Free RAM before buffer alloc: ");
+    Serial.println(ESP.getFreeHeap());
+
+    // ALLOCATE BUFFER DYNAMICALLY (Zero Copy Sized)
+    if (zeroCopyBuffer == nullptr) {
+        // Size = Header (24) + Max Data (4000 * 32)
+        size_t allocSize = CSV_HEADER_SIZE + (MAX_BATCH_READINGS * RECORD_SIZE);
+        zeroCopyBuffer = (uint8_t*) malloc(allocSize);
+        if (zeroCopyBuffer == nullptr) {
+            Serial.println("ModelServerTransmissionHandler: Failed to allocate zero-copy buffer!");
+            return 0;
+        }
+    }
+    
+    Serial.print("ModelServerTransmissionHandler: Free RAM after buffer alloc: ");
+    Serial.println(ESP.getFreeHeap());
+
     uint32_t batchesSent = 0;
     uint32_t totalEntriesSent = 0;
     
@@ -314,27 +299,26 @@ public:
     while (csvStorage->hasDataToRead()) {
       yield(); // Prevent watchdog on long transmission cycles
       
-      // Read batch from flash
-      uint32_t entriesRead = 0;
-      String batchData = readBatchFromFlash(entriesRead);
+      // Read batch from flash (Now returns count of items, not a string)
+      size_t itemsRead = readBatchFromFlash();
       
-      if (batchData.length() == 0 || entriesRead == 0) {
+      if (itemsRead == 0) {
         Serial.println("ModelServerTransmissionHandler: No data read from flash");
         break;
       }
       
       // Send batch to model server with current position
-      DeltaPosition deltaPos = sendBatchToModelServer(currentLat, currentLon, currentHdop, batchData);
+      DeltaPosition deltaPos = sendBatchToModelServer(currentLat, currentLon, currentHdop, itemsRead);
       
       if (deltaPos.valid) {
         // Success - mark entries as sent in flash
-        csvStorage->markAsSent();
+        csvStorage->markAsSent(itemsRead);
         
         batchesSent++;
-        totalEntriesSent += entriesRead;
+        totalEntriesSent += itemsRead;
         
         Serial.print("ModelServerTransmissionHandler: Batch sent successfully (");
-        Serial.print(entriesRead);
+        Serial.print(itemsRead);
         Serial.print(" entries, total: ");
         Serial.print(totalEntriesSent);
         Serial.println(")");
@@ -360,9 +344,8 @@ public:
         
         yield(); // Prevent watchdog
       } else {
-        // Transmission failed - mark as failed (will retry on next cycle)
-        csvStorage->markAsFailed();
-        
+        // Transmission failed - do NOT mark as sent
+        // Pointer remains at current position for retry on next cycle
         Serial.println("ModelServerTransmissionHandler: Batch transmission failed - stopping");
         break;
       }
@@ -385,14 +368,25 @@ public:
     Serial.print(currentLon, 7);
     Serial.println(")");
     Serial.println("==========================================");
+
+    // FREE BUFFER
+    if (zeroCopyBuffer != nullptr) {
+        free(zeroCopyBuffer);
+        zeroCopyBuffer = nullptr;
+    }
+    
+    Serial.print("ModelServerTransmissionHandler: Free RAM after buffer release: ");
+    Serial.println(ESP.getFreeHeap());
     
     // ========== WIFI AUTO DISCONNECT LOGIC ==========
-    // Turn off WiFi if it wasn't connected before transmission
-    if (!wifiWasConnected) {
-      Serial.println("ModelServerTransmissionHandler: Turning WiFi off (was not connected before)");
+    // OPTIMIZATION: Only disconnect if transmission FAILED entirely (batchesSent == 0).
+    // If successful, keep WiFi on for Position server transmission to reuse.
+    
+    if (batchesSent == 0 && !wifiWasConnected) {
+      Serial.println("ModelServerTransmissionHandler: Transmission failed - turning WiFi off (restoring state)");
       CustomWiFi::disconnectWiFi();
     } else {
-      Serial.println("ModelServerTransmissionHandler: WiFi remains on (was connected before)");
+      Serial.println("ModelServerTransmissionHandler: WiFi remains on (success or was already connected)");
     }
     
     return batchesSent;

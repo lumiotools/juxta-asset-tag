@@ -1,5 +1,5 @@
-#ifndef PMC_SERVER_TRANSMISSION_H
-#define PMC_SERVER_TRANSMISSION_H
+#ifndef POSITION_SERVER_TRANSMISSION_H
+#define POSITION_SERVER_TRANSMISSION_H
 
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -11,22 +11,22 @@
 #include "time_sync.h"
 
 // Server URL and configuration
-const char* PMC_SERVER_URL = "https://juxta.pmcprecision.com/api/record/wifi/v2.0.0?source=wifi"; // PMC database server endpoint
-const int PMC_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
+const char* POSITION_SERVER_URL = "https://juxta.pmcprecision.com/api/record/wifi/v2.0.0?source=wifi"; // Position database server endpoint
+const int POSITION_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // FIFO Queue configuration (using blob arrays)
-const char* PMC_QUEUE_HEAD_KEY = "pmc_q_head";      // Head pointer (write position)
-const char* PMC_QUEUE_TAIL_KEY = "pmc_q_tail";      // Tail pointer (read position)
-const char* PMC_QUEUE_COUNT_KEY = "pmc_q_count";    // Number of entries in queue
-const char* PMC_QUEUE_MAX_KEY = "pmc_q_max";        // Max queue size
-const int PMC_MAX_ENTRY_SIZE = 200;                 // Max size per entry (bytes)
-const int PMC_BATCH_READ_SIZE = 10;                 // Default batch size for reading
-const int PMC_CHUNK_SIZE = 5;                       // Max entries per transmission (RAM safety)
+const char* POSITION_QUEUE_HEAD_KEY = "position_q_head";      // Head pointer (write position)
+const char* POSITION_QUEUE_TAIL_KEY = "position_q_tail";      // Tail pointer (read position)
+const char* POSITION_QUEUE_COUNT_KEY = "position_q_count";    // Number of entries in queue
+const char* POSITION_QUEUE_MAX_KEY = "position_q_max";        // Max queue size
+const int POSITION_MAX_ENTRY_SIZE = 200;                 // Max size per entry (bytes)
+const int POSITION_BATCH_READ_SIZE = 10;                 // Default batch size for reading
+const int POSITION_CHUNK_SIZE = 5;                       // Max entries per transmission (RAM safety)
 
 // ============================================================================
-// PMC SERVER TRANSMISSION HANDLER
+// Position SERVER TRANSMISSION HANDLER
 // ============================================================================
-// Purpose: Send sensor data to PMC database server
+// Purpose: Send sensor data to Position database server
 // Protocol: BLE (primary) -> WiFi (fallback) -> Internal Flash Storage
 // Data Flow: 
 //   1. Try BLE (4-sec timeout with auto on/off)
@@ -41,7 +41,7 @@ const int PMC_CHUNK_SIZE = 5;                       // Max entries per transmiss
 //   - No automatic retry mechanism
 // ============================================================================
 
-class PMCServerTransmissionHandler {
+class PositionServerTransmissionHandler {
 private:
   bool initialized;
   uint32_t maxQueueSize;    // Maximum queue entries (calculated from 50% NVS capacity)
@@ -57,12 +57,12 @@ private:
   // Get blob key name for queue index
   String getQueueBlobKey(uint32_t index) {
     char key[16];
-    snprintf(key, sizeof(key), "pmc_b%lu", (unsigned long)index);
+    snprintf(key, sizeof(key), "position_b%lu", (unsigned long)index);
     return String(key);
   }
   
   // Internal: Common transmission logic with BLE/WiFi auto on/off control
-  // Used by both handlePMCServerTransmission and retryPendingTransmissions
+  // Used by both handlePositionServerTransmission and retryPendingTransmissions
   // Takes pre-formatted payload and attempts transmission via BLE then WiFi
   TransmissionResult sendPayloadWithAutoControl(const String& payload) {
     TransmissionResult result = {false, "None", 0};
@@ -72,17 +72,17 @@ private:
     // bool bleWasEnabled = BLEConfig::isEnabled();
     // bool bleConnectionAchieved = false;
     
-    // Serial.println("PMCServerTransmissionHandler: Starting BLE transmission attempt...");
+    // Serial.println("PositionServerTransmissionHandler: Starting BLE transmission attempt...");
     
     // // Turn on BLE if not already enabled
     // if (!bleWasEnabled) {
-    //   Serial.println("PMCServerTransmissionHandler: BLE disabled - turning on...");
+    //   Serial.println("PositionServerTransmissionHandler: BLE disabled - turning on...");
     //   BLEConfig::begin();
     //   delay(100); // Give BLE time to initialize
     // }
     
     // // Wait up to 4 seconds for BLE connection
-    // Serial.println("PMCServerTransmissionHandler: Waiting for BLE connection (4 sec timeout)...");
+    // Serial.println("PositionServerTransmissionHandler: Waiting for BLE connection (4 sec timeout)...");
     // unsigned long long bleStartTime = TimeSync::getCurrentTimeMillis();
     // const unsigned long long BLE_CONNECTION_TIMEOUT = 4000; // 4 seconds
     
@@ -95,43 +95,43 @@ private:
     // bleConnectionAchieved = BLEConfig::isConnected();
     
     // if (bleConnectionAchieved) {
-    //   Serial.println("PMCServerTransmissionHandler: BLE connection achieved - sending data...");
+    //   Serial.println("PositionServerTransmissionHandler: BLE connection achieved - sending data...");
     //   delay(6000);
     //   result = sendViaBLE(payload);
       
     //   if (result.success) {
-    //     Serial.println("PMCServerTransmissionHandler: BLE transmission successful");
+    //     Serial.println("PositionServerTransmissionHandler: BLE transmission successful");
         
     //     // Turn off BLE if it was disabled before
     //     if (!bleWasEnabled) {
-    //       Serial.println("PMCServerTransmissionHandler: Turning BLE off");
+    //       Serial.println("PositionServerTransmissionHandler: Turning BLE off");
     //       delay(1000);
     //       BLEConfig::stop();
     //     }
         
     //     return result;
     //   } else {
-    //     Serial.println("PMCServerTransmissionHandler: BLE transmission failed");
+    //     Serial.println("PositionServerTransmissionHandler: BLE transmission failed");
     //   }
     // } else {
-    //   Serial.println("PMCServerTransmissionHandler: BLE connection timeout (4 sec) - no connection");
+    //   Serial.println("PositionServerTransmissionHandler: BLE connection timeout (4 sec) - no connection");
     // }
     
     // // Turn off BLE after attempt (success or failure)
     // if (!bleWasEnabled) {
-    //   Serial.println("PMCServerTransmissionHandler: Turning BLE off");
+    //   Serial.println("PositionServerTransmissionHandler: Turning BLE off");
     //   BLEConfig::stop();
     // }
     
     // ========== WIFI TRANSMISSION ATTEMPT ==========
-    Serial.println("PMCServerTransmissionHandler: BLE failed/unavailable - trying WiFi...");
+    Serial.println("PositionServerTransmissionHandler: BLE failed/unavailable - trying WiFi...");
     
     bool wifiWasConnected = CustomWiFi::isConnected();
     bool wifiConnectionAchieved = false;
     
     // Turn on WiFi if not already connected
     if (!wifiWasConnected) {
-      Serial.println("PMCServerTransmissionHandler: WiFi disconnected - connecting...");
+      Serial.println("PositionServerTransmissionHandler: WiFi disconnected - connecting...");
       CustomWiFi::connectWiFi();
       
       // Wait for WiFi connection (with timeout)
@@ -147,29 +147,29 @@ private:
     wifiConnectionAchieved = CustomWiFi::isConnected();
     
     if (wifiConnectionAchieved) {
-      Serial.println("PMCServerTransmissionHandler: WiFi connected - sending data...");
+      Serial.println("PositionServerTransmissionHandler: WiFi connected - sending data...");
       result = sendViaWiFi(payload);
       
       if (result.success) {
-        Serial.println("PMCServerTransmissionHandler: WiFi transmission successful");
+        Serial.println("PositionServerTransmissionHandler: WiFi transmission successful");
         
         // Turn off WiFi if it wasn't connected before
         if (!wifiWasConnected) {
-          Serial.println("PMCServerTransmissionHandler: Turning WiFi off");
+          Serial.println("PositionServerTransmissionHandler: Turning WiFi off");
           CustomWiFi::disconnectWiFi();
         }
         
         return result;
       } else {
-        Serial.println("PMCServerTransmissionHandler: WiFi transmission failed");
+        Serial.println("PositionServerTransmissionHandler: WiFi transmission failed");
       }
     } else {
-      Serial.println("PMCServerTransmissionHandler: WiFi connection failed");
+      Serial.println("PositionServerTransmissionHandler: WiFi connection failed");
     }
     
     // Turn off WiFi after attempt if it wasn't connected before
     if (!wifiWasConnected) {
-      Serial.println("PMCServerTransmissionHandler: Turning WiFi off");
+      Serial.println("PositionServerTransmissionHandler: Turning WiFi off");
       CustomWiFi::disconnectWiFi();
     }
     
@@ -179,36 +179,36 @@ private:
   
   // Get queue head (write position)
   uint32_t getQueueHead() {
-    return NVSConfig::readU32(PMC_QUEUE_HEAD_KEY, 0);
+    return NVSConfig::readU32(POSITION_QUEUE_HEAD_KEY, 0);
   }
   
   // Set queue head
   bool setQueueHead(uint32_t head) {
-    return NVSConfig::writeU32(PMC_QUEUE_HEAD_KEY, head);
+    return NVSConfig::writeU32(POSITION_QUEUE_HEAD_KEY, head);
   }
   
   // Get queue tail (read position)
   uint32_t getQueueTail() {
-    return NVSConfig::readU32(PMC_QUEUE_TAIL_KEY, 0);
+    return NVSConfig::readU32(POSITION_QUEUE_TAIL_KEY, 0);
   }
   
   // Set queue tail
   bool setQueueTail(uint32_t tail) {
-    return NVSConfig::writeU32(PMC_QUEUE_TAIL_KEY, tail);
+    return NVSConfig::writeU32(POSITION_QUEUE_TAIL_KEY, tail);
   }
   
   // Get queue count
   uint32_t getQueueCount() {
-    return NVSConfig::readU32(PMC_QUEUE_COUNT_KEY, 0);
+    return NVSConfig::readU32(POSITION_QUEUE_COUNT_KEY, 0);
   }
   
   // Set queue count
   bool setQueueCount(uint32_t count) {
-    return NVSConfig::writeU32(PMC_QUEUE_COUNT_KEY, count);
+    return NVSConfig::writeU32(POSITION_QUEUE_COUNT_KEY, count);
   }
 
 public:
-  PMCServerTransmissionHandler() : initialized(false), maxQueueSize(0), maxCapacityBytes(0) {}
+  PositionServerTransmissionHandler() : initialized(false), maxQueueSize(0), maxCapacityBytes(0) {}
   
   // Initialize handler
   bool begin() {
@@ -221,14 +221,14 @@ public:
     maxCapacityBytes = availableSpace / 2;
     
     // Calculate max queue size based on entry size
-    maxQueueSize = maxCapacityBytes / PMC_MAX_ENTRY_SIZE;
+    maxQueueSize = maxCapacityBytes / POSITION_MAX_ENTRY_SIZE;
     
     // Store max queue size
-    NVSConfig::writeU32(PMC_QUEUE_MAX_KEY, maxQueueSize);
+    NVSConfig::writeU32(POSITION_QUEUE_MAX_KEY, maxQueueSize);
     
-    Serial.println("========== PMC Server Transmission Handler ==========");
+    Serial.println("========== Position Server Transmission Handler ==========");
     Serial.println("Protocol: BLE (primary) -> WiFi (fallback) -> Internal Flash (fallback)");
-    Serial.println("Server: " + String(PMC_SERVER_URL));
+    Serial.println("Server: " + String(POSITION_SERVER_URL));
     Serial.print("Available NVS Space: ");
     Serial.print(availableSpace);
     Serial.println(" bytes");
@@ -250,9 +250,9 @@ public:
     return initialized;
   }
   
-  // Format sensor data with GPS coordinates for PMC server
+  // Format sensor data with GPS coordinates for Position server
   // Format: device_id,battery%,voltage,timestamp,scenario,lat,lon,hdop
-  String formatPMCData(const char* deviceId, int batteryPercent, float batteryVoltage, 
+  String formatPositionData(const char* deviceId, int batteryPercent, float batteryVoltage, 
                        unsigned long long timestamp, int scenario, double latitude, double longitude, double hdop) {
     char payload[200];
     snprintf(payload, sizeof(payload), "%s,%d,%.2f,%llu,%d,%.7f,%.7f,%.2f", 
@@ -263,10 +263,10 @@ public:
   
   // Save failed transmission to internal flash (NVS) using FIFO blob array
   bool saveToInternalFlash(const String& data) {
-    Serial.println("PMCServerTransmissionHandler: Saving failed transmission to NVS FIFO queue...");
+    Serial.println("PositionServerTransmissionHandler: Saving failed transmission to NVS FIFO queue...");
     
-    if (data.length() > PMC_MAX_ENTRY_SIZE) {
-      Serial.println("PMCServerTransmissionHandler: ERROR - Data exceeds max entry size");
+    if (data.length() > POSITION_MAX_ENTRY_SIZE) {
+      Serial.println("PositionServerTransmissionHandler: ERROR - Data exceeds max entry size");
       return false;
     }
     
@@ -276,7 +276,7 @@ public:
     
     // Check if queue is full (FIFO mode - remove oldest)
     if (count >= maxQueueSize) {
-      Serial.println("PMCServerTransmissionHandler: Queue full - removing oldest entry (FIFO)");
+      Serial.println("PositionServerTransmissionHandler: Queue full - removing oldest entry (FIFO)");
       
       // Remove oldest entry (at tail)
       String oldKey = getQueueBlobKey(tail);
@@ -298,14 +298,14 @@ public:
       setQueueHead(head);
       setQueueCount(count + 1);
       
-      Serial.print("PMCServerTransmissionHandler: Saved to blob '");
+      Serial.print("PositionServerTransmissionHandler: Saved to blob '");
       Serial.print(blobKey);
       Serial.print("' (");
       Serial.print(data.length());
       Serial.print(" bytes). Queue count: ");
       Serial.println(count + 1);
     } else {
-      Serial.println("PMCServerTransmissionHandler: Failed to save blob to NVS");
+      Serial.println("PositionServerTransmissionHandler: Failed to save blob to NVS");
     }
     
     return success;
@@ -319,14 +319,14 @@ public:
     uint32_t tail = getQueueTail();
     
     if (count == 0) {
-      Serial.println("PMCServerTransmissionHandler: Queue is empty");
+      Serial.println("PositionServerTransmissionHandler: Queue is empty");
       return false;
     }
     
     // Read up to batchSize entries
     uint32_t entriesToRead = min(batchSize, count);
     
-    Serial.print("PMCServerTransmissionHandler: Reading ");
+    Serial.print("PositionServerTransmissionHandler: Reading ");
     Serial.print(entriesToRead);
     Serial.println(" entries from queue");
     
@@ -336,14 +336,14 @@ public:
       
       // Get blob size first
       size_t blobSize = NVSConfig::getBlobSize(blobKey.c_str());
-      if (blobSize == 0 || blobSize > PMC_MAX_ENTRY_SIZE) {
-        Serial.print("PMCServerTransmissionHandler: Invalid blob size for key ");
+      if (blobSize == 0 || blobSize > POSITION_MAX_ENTRY_SIZE) {
+        Serial.print("PositionServerTransmissionHandler: Invalid blob size for key ");
         Serial.println(blobKey);
         continue;
       }
       
       // Read blob
-      char buffer[PMC_MAX_ENTRY_SIZE];
+      char buffer[POSITION_MAX_ENTRY_SIZE];
       size_t readSize = NVSConfig::readBlob(blobKey.c_str(), buffer, sizeof(buffer));
       
       if (readSize > 0) {
@@ -364,7 +364,7 @@ public:
     uint32_t tail = getQueueTail();
     
     if (count > queueCount) {
-      Serial.println("PMCServerTransmissionHandler: ERROR - Trying to remove more entries than available");
+      Serial.println("PositionServerTransmissionHandler: ERROR - Trying to remove more entries than available");
       return false;
     }
     
@@ -379,7 +379,7 @@ public:
     setQueueTail(tail);
     setQueueCount(queueCount - count);
     
-    Serial.print("PMCServerTransmissionHandler: Removed ");
+    Serial.print("PositionServerTransmissionHandler: Removed ");
     Serial.print(count);
     Serial.print(" entries. Remaining: ");
     Serial.println(queueCount - count);
@@ -393,17 +393,17 @@ public:
     TransmissionResult result = {false, "BLE", 0};
     
     if (!initialized) {
-      Serial.println("PMCServerTransmissionHandler: Not initialized");
+      Serial.println("PositionServerTransmissionHandler: Not initialized");
       return result;
     }
     
     // Check BLE connection
     if (!BLEConfig::isConnected()) {
-      Serial.println("PMCServerTransmissionHandler: BLE not connected");
+      Serial.println("PositionServerTransmissionHandler: BLE not connected");
       return result;
     }
     
-    Serial.println("PMCServerTransmissionHandler: Sending via BLE...");
+    Serial.println("PositionServerTransmissionHandler: Sending via BLE...");
     Serial.print("  Data size: ");
     Serial.print(data.length());
     Serial.println(" bytes");
@@ -412,35 +412,35 @@ public:
     bool bleSuccess = BLEConfig::sendDataViaBLE(data);
     
     if (bleSuccess) {
-      Serial.println("PMCServerTransmissionHandler: BLE transmission successful");
+      Serial.println("PositionServerTransmissionHandler: BLE transmission successful");
       result.success = true;
       result.responseCode = 200; // Assume success (BLE doesn't return HTTP codes)
     } else {
-      Serial.println("PMCServerTransmissionHandler: BLE transmission failed");
+      Serial.println("PositionServerTransmissionHandler: BLE transmission failed");
     }
     
     return result;
   }
   
-  // Send data via WiFi to PMC server
+  // Send data via WiFi to Position server
   // Returns: TransmissionResult with success status and method
   TransmissionResult sendViaWiFi(const String& data) {
     TransmissionResult result = {false, "WiFi", 0};
     
     if (!initialized) {
-      Serial.println("PMCServerTransmissionHandler: Not initialized");
+      Serial.println("PositionServerTransmissionHandler: Not initialized");
       return result;
     }
     
     // Check WiFi connection with multiple verifications
     if (!CustomWiFi::isConnected()) {
-      Serial.println("PMCServerTransmissionHandler: WiFi not connected");
+      Serial.println("PositionServerTransmissionHandler: WiFi not connected");
       return result;
     }
     
     // Additional WiFi stability check - ensure we have an IP address
     if (WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
-      Serial.println("PMCServerTransmissionHandler: WiFi connected but no IP address");
+      Serial.println("PositionServerTransmissionHandler: WiFi connected but no IP address");
       return result;
     }
     
@@ -448,7 +448,7 @@ public:
     // This helps avoid UDP socket locking issues during DNS resolution
     delay(100);
     
-    Serial.println("PMCServerTransmissionHandler: Sending via WiFi...");
+    Serial.println("PositionServerTransmissionHandler: Sending via WiFi...");
     Serial.print("  Data size: ");
     Serial.print(data.length());
     Serial.println(" bytes");
@@ -460,26 +460,26 @@ public:
     
     // Use direct begin() - HTTPClient handles HTTPS automatically
     // The delay above helps ensure TCP/IP stack is ready for DNS resolution
-    http.begin(PMC_SERVER_URL);
+    http.begin(POSITION_SERVER_URL);
     
     // Set timeout AFTER begin() (recommended approach)
-    http.setTimeout(PMC_TRANSMISSION_TIMEOUT);
+    http.setTimeout(POSITION_TRANSMISSION_TIMEOUT);
     
     // Only set Content-Type header (like working example)
     http.addHeader("Content-Type", "text/csv");
     
     int httpResponseCode = http.POST(data);
     
-    Serial.print("PMCServerTransmissionHandler: Response code: ");
+    Serial.print("PositionServerTransmissionHandler: Response code: ");
     Serial.println(httpResponseCode);
     
     result.responseCode = httpResponseCode;
     
     if (httpResponseCode == 200) {
-      Serial.println("PMCServerTransmissionHandler: WiFi transmission successful");
+      Serial.println("PositionServerTransmissionHandler: WiFi transmission successful");
       result.success = true;
     } else {
-      Serial.print("PMCServerTransmissionHandler: WiFi transmission failed - code ");
+      Serial.print("PositionServerTransmissionHandler: WiFi transmission failed - code ");
       Serial.println(httpResponseCode);
     }
     
@@ -487,14 +487,14 @@ public:
     return result;
   }
   
-  // Main transmission handler for PMC server
+  // Main transmission handler for Position server
   // Try BLE first, then WiFi if BLE fails
   // Automatically gathers device ID, battery info, and timestamp from device at current time
   // Parameters: scenario, GPS coordinates, HDOP
   // Returns: TransmissionResult with success status and method used
-  TransmissionResult handlePMCServerTransmission(int scenario, double latitude, double longitude, double hdop) {
+  TransmissionResult handlePositionServerTransmission(int scenario, double latitude, double longitude, double hdop) {
     if (!initialized) {
-      Serial.println("PMCServerTransmissionHandler: Not initialized");
+      Serial.println("PositionServerTransmissionHandler: Not initialized");
       return {false, "None", 0};
     }
     
@@ -506,7 +506,7 @@ public:
     float batteryVoltage = BatteryMonitor::readBatteryVoltage();
     unsigned long long timestamp = TimeSync::getCurrentTimeMillis();
     
-    Serial.println("========== PMC Server Transmission ==========");
+    Serial.println("========== Position Server Transmission ==========");
     Serial.print("Device ID: ");
     Serial.println(deviceId);
     Serial.print("Battery: ");
@@ -525,14 +525,14 @@ public:
     Serial.print("), HDOP: ");
     Serial.println(hdop, 2);
     
-    // Format current data for PMC server
-    String currentData = formatPMCData(deviceId, batteryPercent, batteryVoltage, timestamp, scenario, latitude, longitude, hdop);
+    // Format current data for Position server
+    String currentData = formatPositionData(deviceId, batteryPercent, batteryVoltage, timestamp, scenario, latitude, longitude, hdop);
     
     // Save current data to queue FIRST (ensures FIFO order: earliest first)
-    Serial.println("PMCServerTransmissionHandler: Adding current data to queue");
+    Serial.println("PositionServerTransmissionHandler: Adding current data to queue");
     bool savedCurrent = saveToInternalFlash(currentData);
     if (!savedCurrent) {
-      Serial.println("PMCServerTransmissionHandler: CRITICAL - Failed to save current data to queue");
+      Serial.println("PositionServerTransmissionHandler: CRITICAL - Failed to save current data to queue");
       TransmissionResult failResult = {false, "None", 0};
       return failResult;
     }
@@ -543,16 +543,16 @@ public:
     uint32_t chunksProcessed = 0;
     TransmissionResult result = {false, "None", 0};
     
-    Serial.print("PMCServerTransmissionHandler: Starting FIFO chunked transmission (");
+    Serial.print("PositionServerTransmissionHandler: Starting FIFO chunked transmission (");
     Serial.print(totalInQueue);
     Serial.println(" entries in queue)");
     
     // Loop: Send chunks from earliest (tail) until queue is empty or transmission fails
     while (getQueueCount() > 0) {
       uint32_t pendingCount = getQueueCount();
-      uint32_t chunkSize = min((uint32_t)PMC_CHUNK_SIZE, pendingCount);
+      uint32_t chunkSize = min((uint32_t)POSITION_CHUNK_SIZE, pendingCount);
       
-      Serial.print("PMCServerTransmissionHandler: Chunk ");
+      Serial.print("PositionServerTransmissionHandler: Chunk ");
       Serial.print(chunksProcessed + 1);
       Serial.print(" - Reading ");
       Serial.print(chunkSize);
@@ -565,7 +565,7 @@ public:
       
       if (!readBatchFromQueue(batch, chunkSize, actualCount)) {
         delete[] batch;
-        Serial.println("PMCServerTransmissionHandler: Failed to read from queue");
+        Serial.println("PositionServerTransmissionHandler: Failed to read from queue");
         break;
       }
       
@@ -595,7 +595,7 @@ public:
         totalSent += actualCount;
         chunksProcessed++;
         
-        Serial.print("PMCServerTransmissionHandler: Chunk ");
+        Serial.print("PositionServerTransmissionHandler: Chunk ");
         Serial.print(chunksProcessed);
         Serial.print(" sent successfully (");
         Serial.print(actualCount);
@@ -606,17 +606,17 @@ public:
         
         // Continue to next chunk if queue not empty
         if (getQueueCount() == 0) {
-          Serial.println("PMCServerTransmissionHandler: All data sent successfully!");
+          Serial.println("PositionServerTransmissionHandler: All data sent successfully!");
           break;
         }
         
         yield(); // Prevent watchdog
       } else {
         // Transmission failed - data remains in queue for next attempt
-        Serial.print("PMCServerTransmissionHandler: Chunk ");
+        Serial.print("PositionServerTransmissionHandler: Chunk ");
         Serial.print(chunksProcessed + 1);
         Serial.println(" transmission failed - stopping loop");
-        Serial.print("PMCServerTransmissionHandler: ");
+        Serial.print("PositionServerTransmissionHandler: ");
         Serial.print(getQueueCount());
         Serial.println(" entries remain in queue for next attempt");
         break;
@@ -645,19 +645,19 @@ public:
     return result;
   }
   
-  // Send current data to PMC server (automatically gathers all device values)
-  // This is the main method for sending real-time data to PMC database server
+  // Send current data to Position server (automatically gathers all device values)
+  // This is the main method for sending real-time data to Position database server
   // All device values (ID, battery, voltage, timestamp) are gathered automatically at current time
   bool sendData(int scenario, double latitude, double longitude, double hdop) {
     if (!initialized) {
-      Serial.println("PMCServerTransmissionHandler: Not initialized");
+      Serial.println("PositionServerTransmissionHandler: Not initialized");
       return false;
     }
     
-    TransmissionResult result = handlePMCServerTransmission(scenario, latitude, longitude, hdop);
+    TransmissionResult result = handlePositionServerTransmission(scenario, latitude, longitude, hdop);
     return result.success;
   }
   
 };
 
-#endif // PMC_SERVER_TRANSMISSION_H
+#endif // POSITION_SERVER_TRANSMISSION_H

@@ -8,7 +8,7 @@
 #include "battery_indicator_led.h"
 #include "time_sync.h"
 #include "model_server_transmission.h"
-#include "pmc_server_transmission.h"
+#include "position_server_transmission.h"
 #include "motion_sleep_manager.h"  // Motion detection and deep sleep management
 #include <Adafruit_NeoPixel.h>
 #include <esp_system.h>
@@ -39,7 +39,7 @@ GPSSensor gpsSensor;
 SPIFlashHandler spiFlash;
 UnifiedCSVStorage unifiedCSVStorage;
 ModelServerTransmissionHandler modelServerTransmissionHandler;
-PMCServerTransmissionHandler pmcServerTransmissionHandler;
+PositionServerTransmissionHandler positionServerTransmissionHandler;
 
 // Sensor status flags
 bool imu_initialized = false;
@@ -250,8 +250,8 @@ void setup() {
   Serial.println("Initializing Model Server Transmission...");
   modelServerTransmissionHandler.begin(&unifiedCSVStorage);
 
-  Serial.println("Initializing PMC Server Transmission...");
-  pmcServerTransmissionHandler.begin();
+  Serial.println("Initializing Position Server Transmission...");
+  positionServerTransmissionHandler.begin();
 
   uint8_t savedScenario = NVSConfig::getScenarioState();
   Serial.print("Restored scenario from NVS: ");
@@ -426,7 +426,7 @@ void loop() {
       // noMotionStartTime = 0;
       // noMotionTracking = false;
 
-      Serial.println("Sending transmissions to Model Server and PMC Server");
+      Serial.println("Sending transmissions to Model Server and Position Server");
       double lastKnownLat = 0.0;
       double lastKnownLon = 0.0;
       double lastKnownHdop = -1.0;
@@ -449,14 +449,14 @@ void loop() {
       }
       
       if(!modelSuccess) {
-        Serial.println("Model Server transmission failed - aborting PMC Server transmission");
+        Serial.println("Model Server transmission failed - aborting Position Server transmission");
       } else {
-        Serial.print("Sending to PMC Server - Scenario: ");
+        Serial.print("Sending to Position Server - Scenario: ");
         Serial.println(current_scenario);
         NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
-        Serial.print("PMC Server transmission result: ");
-        Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
+        bool positionSuccess = positionServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        Serial.print("Position Server transmission result: ");
+        Serial.println(positionSuccess ? "SUCCESS" : "FAILED");
       }
       
       delay(200); // Brief delay before restart
@@ -478,6 +478,12 @@ void loop() {
       attemptTimeSyncIfNeeded();
       Serial.println("WiFi disconnected after time sync");
 
+      Serial.println("Initializing Model Server Transmission...");
+      modelServerTransmissionHandler.begin(&unifiedCSVStorage);
+
+      Serial.println("Initializing Position Server Transmission...");
+      positionServerTransmissionHandler.begin();
+
       Serial.println("Stopping BLE...");
       BLEConfig::stop();
       is_first_cycle = false;
@@ -493,7 +499,7 @@ void loop() {
           Serial.println("No last known position - saved default (0.0, 0.0, -1.0)");
         }
 
-        Serial.println("Sending transmission to PMC server (SCENARIO_4_GPS_OFF)");
+        Serial.println("Sending transmission to Position server (SCENARIO_4_GPS_OFF)");
         double lastKnownLat = 0.0;
         double lastKnownLon = 0.0;
         double lastKnownHdop = -1.0;
@@ -504,9 +510,9 @@ void loop() {
         Serial.print(lastKnownLon, 6);
         Serial.print(", HDOP: ");
         Serial.println(lastKnownHdop, 2);
-        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
-        Serial.print("PMC transmission result: ");
-        Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
+        bool positionSuccess = positionServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        Serial.print("Position transmission result: ");
+        Serial.println(positionSuccess ? "SUCCESS" : "FAILED");
       } else {
         Serial.println("GPS is active - starting GPS search");
         gps_search = true;
@@ -581,7 +587,7 @@ void loop() {
     if(gps_search == false) {
       if(scenario_changed) {
         Serial.println("GPS search completed - preparing transmission");
-        Serial.print("Sending transmission to PMC server - Scenario: ");
+        Serial.print("Sending transmission to Position server - Scenario: ");
         Serial.println(current_scenario);
         double lastKnownLat = 0.0;
         double lastKnownLon = 0.0;
@@ -593,9 +599,9 @@ void loop() {
         Serial.print(lastKnownLon, 6);
         Serial.print(", HDOP: ");
         Serial.println(lastKnownHdop, 2);
-        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
-        Serial.print("PMC transmission result: ");
-        Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
+        bool positionSuccess = positionServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        Serial.print("Position transmission result: ");
+        Serial.println(positionSuccess ? "SUCCESS" : "FAILED");
       } else {
         Serial.println("GPS search completed - Scenario unchanged, skipping transmission");
       }
@@ -696,7 +702,7 @@ void loop() {
       Serial.println("Stopping IMU ticker");
       imuReadTicker.detach();
 
-      Serial.println("Sending transmissions to Model Server and PMC Server");
+      Serial.println("Sending transmissions to Model Server and Position Server");
       double lastKnownLat = 0.0;
       double lastKnownLon = 0.0;
       double lastKnownHdop = -1.0;
@@ -719,20 +725,23 @@ void loop() {
       }
       
       if(!modelSuccess) {
-        Serial.println("Model Server transmission failed - aborting PMC Server transmission");
+        Serial.println("Model Server transmission failed - aborting Position Server transmission");
       } else {
-        Serial.print("Sending to PMC Server - Scenario: ");
+        Serial.print("Sending to Position Server - Scenario: ");
         Serial.println(current_scenario);
         NVSConfig::getLastKnownPosition(lastKnownLat, lastKnownLon, lastKnownHdop);
-        bool pmcSuccess = pmcServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
-        Serial.print("PMC Server transmission result: ");
-        Serial.println(pmcSuccess ? "SUCCESS" : "FAILED");
+        bool positionSuccess = positionServerTransmissionHandler.sendData((uint8_t)current_scenario, lastKnownLat, lastKnownLon, lastKnownHdop);
+        Serial.print("Position Server transmission result: ");
+        Serial.println(positionSuccess ? "SUCCESS" : "FAILED");
       }
 
       transmission_cycle_start_time = -1;
-      transmission_count += 1;
-      Serial.print("Transmission count: ");
-      Serial.println(transmission_count);
+
+      if(current_scenario == SCENARIO_2_CALCULATED) {
+        transmission_count += 1;
+        Serial.print("Transmission count: ");
+        Serial.println(transmission_count);
+      }
     }
 
     uint32_t gpsOnAfterTime = NVSConfig::getGPSOnAfter();

@@ -1,465 +1,229 @@
-// Unified CSV Storage - Uses entire external flash as circular buffer
-// Stores IMU data as CSV strings: obj1,obj2,obj3,...\n
-// Format: accx|accy|accz|gyrx|gyry|gyrz|timestamp
-
 #ifndef UNIFIED_CSV_STORAGE_H
 #define UNIFIED_CSV_STORAGE_H
 
 #include "spi_flash_handler.h"
 #include "nvs_config.h"
-#include "time_sync.h"
-#include "imu_sensor.h"
 
 // Flash memory: Use entire external flash as circular buffer
-// Start from address 0, use full capacity
-#define CSV_FLASH_START_ADDR 0x000000
-#define CSV_SECTOR_SIZE 4096  // 4KB sectors
+// NOTE: Now using BINARY storage despite the filename/defines
+// Operations are now aligned to 32-byte blocks (sizeof(TimestampedIMUReading))
+#define BINARY_FLASH_START_ADDR 0x000000
+#define FLASH_SECTOR_SIZE 4096 
 
 // Structure for IMU reading with timestamp
-struct TimestampedIMUReading {
+// PACKED to ensure it's exactly 32 bytes (6 floats = 24 bytes + 8 bytes timestamp)
+// This allows for direct binary block transfer.
+struct __attribute__((packed)) TimestampedIMUReading {
   float accX, accY, accZ;
   float gyrX, gyrY, gyrZ;
   unsigned long long timestamp;
 };
 
+// Class name kept as UnifiedCSVStorage for compatibility with existing code
+// but internally uses Binary storage.
 class UnifiedCSVStorage {
 private:
   SPIFlashHandler* flashHandler;
   bool initialized;
-  
+ 
   // Circular buffer pointers (stored in NVS)
-  uint32_t writePtr;      // Where to write next CSV entry
+  uint32_t writePtr;      // Where to write next batch
   uint32_t readPtr;       // Where to read from (for transmission)
   uint32_t flashCapacity; // Total flash capacity in bytes
-  uint32_t flashEndAddr;  // End address (capacity - 1)
-  uint32_t lastEntryEndPtr; // Store where last read entry ended (for markAsSent)
-  
-  // Sector management
   uint32_t lastErasedSector;
-  
+ 
   // Ensure sector is erased before writing
   void ensureSectorErased(uint32_t addr) {
-    if (addr >= flashEndAddr) return;
-    
-    uint32_t sectorStart = (addr / CSV_SECTOR_SIZE) * CSV_SECTOR_SIZE;
+    uint32_t sectorStart = (addr / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
     
     if (sectorStart != lastErasedSector) {
-      if (sectorStart < flashEndAddr) {
+      // Only erase if within capacity
+      if (sectorStart < flashCapacity) {
         if (!flashHandler->eraseSector(sectorStart)) {
           Serial.print("ERROR: Failed to erase sector at 0x");
           Serial.println(sectorStart, HEX);
           return;
         }
-        delay(50); // Sector erase takes time
+        // Metadata tracking
         lastErasedSector = sectorStart;
       }
     }
   }
-  
+ 
   // Wrap address for circular buffer
   uint32_t wrapAddress(uint32_t addr) {
-    if (addr >= flashEndAddr) {
-      return CSV_FLASH_START_ADDR + (addr - flashEndAddr);
+    if (addr >= flashCapacity) {
+      return BINARY_FLASH_START_ADDR + (addr - flashCapacity);
     }
     return addr;
-  }
-  
-  // Format single IMU object: accx|accy|accz|gyrx|gyry|gyrz|timestamp
-  String formatIMUObject(float accX, float accY, float accZ, 
-                        float gyrX, float gyrY, float gyrZ, 
-                        unsigned long long timestamp) {
-    char buffer[100];
-    snprintf(buffer, sizeof(buffer), 
-             "%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%llu",
-             accX, accY, accZ, gyrX, gyrY, gyrZ, timestamp);
-    return String(buffer);
-  }
-  
-  // Helper function to clean CSV entry - removes garbage characters
-  // Keeps only: numbers 0-9 and symbols: "-", ".", ",", "|"
-  String cleanCSVEntry(const String& entry) {
-    String cleaned = "";
-    for (int i = 0; i < entry.length(); i++) {
-      char c = entry.charAt(i);
-      // Keep only: digits (0-9), minus (-), period (.), comma (,), pipe (|)
-      if ((c >= '0' && c <= '9') || c == '-' || c == '.' || c == ',' || c == '|') {
-        cleaned += c;
-      }
-    }
-    return cleaned;
   }
 
 public:
   UnifiedCSVStorage() : flashHandler(nullptr), initialized(false),
-                       writePtr(0), readPtr(0), flashCapacity(0), 
-                       flashEndAddr(0), lastEntryEndPtr(0), lastErasedSector(0xFFFFFFFF) {}
-  
+                       writePtr(0), readPtr(0), flashCapacity(0),
+                       lastErasedSector(0xFFFFFFFF) {}
+ 
   bool begin(SPIFlashHandler* handler) {
     if (initialized) return true;
-    
+   
     if (handler == nullptr || !handler->isInitialized()) {
       Serial.println("UnifiedCSVStorage: Invalid flash handler");
       return false;
     }
-    
+   
     flashHandler = handler;
-    
+   
     // Get flash capacity
     flashCapacity = flashHandler->getCapacity();
     if (flashCapacity == 0) {
       Serial.println("ERROR: Invalid flash capacity");
       return false;
     }
-    flashEndAddr = flashCapacity;
-    
+   
     // Load pointers from NVS
     writePtr = NVSConfig::getCSVWritePtr();
     readPtr = NVSConfig::getCSVReadPtr();
-    
+   
     // Validate pointers
-    if (writePtr >= flashEndAddr) {
+    if (writePtr >= flashCapacity) {
       Serial.print("WARNING: Invalid writePtr from NVS (0x");
       Serial.print(writePtr, HEX);
       Serial.println(") - resetting to start");
-      writePtr = CSV_FLASH_START_ADDR;
+      writePtr = BINARY_FLASH_START_ADDR;
       NVSConfig::setCSVWritePtr(writePtr);
     }
-    if (readPtr >= flashEndAddr) {
+    if (readPtr >= flashCapacity) {
       Serial.print("WARNING: Invalid readPtr from NVS (0x");
       Serial.print(readPtr, HEX);
       Serial.println(") - resetting to start");
-      readPtr = CSV_FLASH_START_ADDR;
+      readPtr = BINARY_FLASH_START_ADDR;
       NVSConfig::setCSVReadPtr(readPtr);
     }
-    
-    Serial.println("========== Unified CSV Storage ==========");
+   
+    Serial.println("========== Unified Binary Storage (via CSV Class) ==========");
     Serial.print("Flash Capacity: ");
     Serial.print(flashCapacity / 1024 / 1024);
     Serial.println(" MB");
-    Serial.print("Flash Range: 0x");
-    Serial.print(CSV_FLASH_START_ADDR, HEX);
-    Serial.print(" - 0x");
-    Serial.print(flashEndAddr, HEX);
-    Serial.println();
     Serial.print("Write Pointer: 0x");
     Serial.println(writePtr, HEX);
     Serial.print("Read Pointer: 0x");
     Serial.println(readPtr, HEX);
-    
+    Serial.println("Mode: BINARY (High Speed)");
+   
     initialized = true;
     return true;
   }
-  
-  // Write CSV entry (obj1,obj2,obj3,...,objN\n)
-  bool writeCSVEntry(const String& csvData) {
-    if (!initialized || flashHandler == nullptr) {
-      Serial.println("ERROR: UnifiedCSVStorage not initialized");
+ 
+  // Write IMU readings in BINARY format
+  // Replaces CSV writing with direct memory dump
+  bool writeIMUReadings(TimestampedIMUReading* readings, int count) {
+    if (!initialized || flashHandler == nullptr || count <= 0) {
       return false;
     }
-    
-    // Calculate entry size (CSV string + newline)
-    size_t entrySize = csvData.length() + 1; // +1 for \n
-    
-    // Check if entry fits in remaining space
-    uint32_t writeEnd = writePtr + entrySize;
-    
-    // Handle wrap-around: if entry would exceed flash end, wrap to start
-    if (writeEnd > flashEndAddr) {
-      // Need to wrap - erase start sector
-      writePtr = CSV_FLASH_START_ADDR;
-      ensureSectorErased(writePtr);
-      writeEnd = writePtr + entrySize;
-      
-      // If entry is larger than flash capacity, it won't fit
-      if (entrySize > flashCapacity) {
-        Serial.print("ERROR: CSV entry too large (");
-        Serial.print(entrySize);
-        Serial.print(" bytes) for flash capacity (");
-        Serial.print(flashCapacity);
-        Serial.println(" bytes)");
-        return false;
-      }
-      
-      // Update readPtr if it's in the area we're about to overwrite
-      if (readPtr >= CSV_FLASH_START_ADDR && readPtr < writeEnd) {
-        readPtr = writeEnd; // Skip overwritten data
-        readPtr = wrapAddress(readPtr);
-        NVSConfig::setCSVReadPtr(readPtr);
-      }
+   
+    size_t size = count * sizeof(TimestampedIMUReading);
+   
+    // Check if wrap-around is needed
+    if (writePtr + size > flashCapacity) {
+      // For simplicity in binary block mode, we just wrap to start if it doesn't fit at the end
+      // This wastes a tiny bit of space at the end of flash but simplifies logic immensely
+      writePtr = BINARY_FLASH_START_ADDR;
     }
-    
+   
     // Ensure sectors are erased
-    ensureSectorErased(writePtr);
-    if (writeEnd > ((writePtr / CSV_SECTOR_SIZE + 1) * CSV_SECTOR_SIZE)) {
-      // Entry crosses sector boundary - erase next sector too
-      uint32_t nextSector = ((writePtr / CSV_SECTOR_SIZE + 1) * CSV_SECTOR_SIZE);
-      if (nextSector < flashEndAddr) {
-        ensureSectorErased(nextSector);
-      }
-    }
+    // We erase sector by sector as needed
+    uint32_t startAddr = writePtr;
+    uint32_t endAddr = writePtr + size;
     
-    // Write CSV string
-    if (!flashHandler->writeCharArray(writePtr, csvData.c_str(), csvData.length())) {
-      Serial.print("ERROR: Failed to write CSV data to flash at 0x");
+    // Erase all sectors covered by this write
+    for (uint32_t addr = startAddr; addr < endAddr; addr += FLASH_SECTOR_SIZE) {
+         ensureSectorErased(addr);
+    }
+    // Also check the end boundary
+    ensureSectorErased(endAddr - 1);
+   
+    // Write binary data
+    // Cast struct pointer to const char* for the writeCharArray function
+    if (!flashHandler->writeCharArray(writePtr, (const char*)readings, size)) {
+      Serial.print("ERROR: Failed to write binary data to flash at 0x");
       Serial.println(writePtr, HEX);
       return false;
     }
-    
-    // Write newline delimiter
-    const char newline = '\n';
-    if (!flashHandler->writeCharArray(writePtr + csvData.length(), &newline, 1)) {
-      Serial.println("ERROR: Failed to write newline delimiter");
-      return false;
-    }
-    
+   
     // Update write pointer
-    writePtr = writeEnd;
-    writePtr = wrapAddress(writePtr);
-    
-    // Save write pointer to NVS periodically (every 10 entries to reduce wear)
-    static uint32_t writeCount = 0;
-    writeCount++;
-    if (writeCount % 10 == 0) {
-      NVSConfig::setCSVWritePtr(writePtr);
-    }
-    
-    return true;
-  }
-  
-private:
-  // Helper: Read data from flash with automatic wraparound handling
-  bool readBytesWithWrap(uint32_t startAddr, uint8_t* buffer, size_t length) {
-    if (length == 0) return true;
-    
-    size_t bytesRead = 0;
-    uint32_t addr = startAddr;
-    
-    while (bytesRead < length) {
-      // Calculate how many bytes we can read before hitting the end
-      size_t remainingInFlash = flashEndAddr - addr;
-      size_t toRead = min(length - bytesRead, remainingInFlash);
-      
-      // Read chunk
-      if (!flashHandler->readBytes(addr, buffer + bytesRead, toRead)) {
-        Serial.print("ERROR: Failed to read bytes at 0x");
-        Serial.println(addr, HEX);
-        return false;
-      }
-      
-      bytesRead += toRead;
-      addr += toRead;
-      
-      // Wrap to start if we hit the end
-      if (addr >= flashEndAddr) {
-        addr = CSV_FLASH_START_ADDR;
-      }
-    }
-    
+    writePtr = wrapAddress(writePtr + size);
+   
+    // Save to NVS
+    // In high freq version, we write this every time because accuracy of pointers is critical
+    NVSConfig::setCSVWritePtr(writePtr);
+   
     return true;
   }
 
-public:
-  // Read next CSV entry (does NOT advance readPtr - call markAsSent() after successful transmission)
-  // Returns the CSV entry without the newline character
-  String readNextCSVEntry() {
-    if (!initialized || flashHandler == nullptr) {
-      Serial.println("ERROR: UnifiedCSVStorage not initialized or flash handler is null");
-      return String("");
+  // HIGH SPEED READ: Pulls binary data directly into buffer
+  // Returns number of readings actually read into the buffer
+  // This performs a PEEK (does not advance NVS pointer until markAsSent is called)
+  // BUT it DOES update the internal readPtr to allow subsequent reads in same session if desired?
+  // Current logic: readBatch reads FROM readPtr. It returns data.
+  // It does NOT update readPtr.
+  // To advance, you must call markAsSent(count).
+  size_t readBatch(TimestampedIMUReading* outputBuffer, size_t maxReadings) {
+    if (!initialized || readPtr == writePtr) return 0;
+
+    // Calculate how much we can read
+    uint32_t bytesAvailable = 0;
+    if (writePtr > readPtr) {
+        bytesAvailable = writePtr - readPtr;
+    } else {
+        // Wrapped around
+        bytesAvailable = flashCapacity - readPtr;
     }
     
-    // Check if we have data to read
-    if (readPtr == writePtr) {
-      Serial.println("No data available");
-      return String(""); // No data available
+    size_t readingsAvailable = bytesAvailable / sizeof(TimestampedIMUReading);
+    size_t toRead = min((size_t)maxReadings, readingsAvailable); // Cast to size_t 
+
+    if (toRead == 0) return 0;
+
+    // Single SPI Read - Reads 'toRead' blocks directly into buffer
+    if (flashHandler->readBytes(readPtr, (uint8_t*)outputBuffer, toRead * sizeof(TimestampedIMUReading))) {
+      return toRead; 
     }
-    
-    // Step 1: Find the newline character and calculate entry length
-    uint32_t scanPtr = readPtr;
-    size_t entryLength = 0;
-    bool foundNewline = false;
-    uint32_t newlinePtr = 0;
-    const size_t MAX_ENTRY_SIZE = 200; // Safety limit
-    
-    while (entryLength < MAX_ENTRY_SIZE) {
-      // Check if we've caught up with write pointer (no complete entry available)
-      if (scanPtr == writePtr) {
-        Serial.println("No complete entry found");
-        return String(""); // No complete entry found (partial entry)
-      }
-      
-      // Read one byte
-      uint8_t byte;
-      if (!flashHandler->readBytes(scanPtr, &byte, 1)) {
-        Serial.print("ERROR: Failed to read byte at 0x");
-        Serial.println(scanPtr, HEX);
-        return String("");
-      }
-      
-      // Check if it's a newline
-      if (byte == '\n' && entryLength > 0) {
-        foundNewline = true;
-        newlinePtr = scanPtr;
-        break;
-      } else if (byte == '\n' && entryLength == 0) {
-        Serial.println("WARNING: Found newline at start of entry - skipping");
-        scanPtr++;
-        if (scanPtr >= flashEndAddr) {
-          scanPtr = CSV_FLASH_START_ADDR;
-        }
-        readPtr = scanPtr; // Update readPtr to skip this newline
-        continue; // Restart search from new position
-      }
-      
-      // Move to next position with wraparound
-      entryLength++;
-      scanPtr++;
-      if (scanPtr >= flashEndAddr) {
-        scanPtr = CSV_FLASH_START_ADDR;
-      }
-    }
-    
-    // Check for errors - if we hit MAX_ENTRY_SIZE without finding newline
-    if (!foundNewline) {
-      // No newline found within MAX_ENTRY_SIZE - skip corrupted entry
-      Serial.print("ERROR: No newline found after ");
-      Serial.print(entryLength);
-      Serial.println(" bytes - skipping corrupted entry");
-      
-      // Advance readPtr past the corrupted entry
-      lastEntryEndPtr = wrapAddress(scanPtr);
-      readPtr = lastEntryEndPtr;
-      Serial.print("Advanced readPtr to 0x");
-      Serial.println(readPtr, HEX);
-      
-      return String("");
-    }
-    
-    if (entryLength == 0) {
-      // Empty entry (just a newline) - skip it
-      Serial.println("Empty entry (just a newline) - skipping");
-      lastEntryEndPtr = wrapAddress(scanPtr + 1);
-      readPtr = lastEntryEndPtr;
-      return String("");
-    }
-    // Note: Removed arbitrary entryLength > 100 check
-    // Entries can be any size - we'll read them as long as they have a newline
-    
-    // Step 2: Allocate buffer and read the complete entry
-    char* buffer = (char*)malloc(entryLength + 1);
-    if (!buffer) {
-      Serial.println("ERROR: Failed to allocate memory for CSV entry");
-      return String("");
-    }
-    
-    // Read the entry data (excluding the newline)
-    if (!readBytesWithWrap(readPtr, (uint8_t*)buffer, entryLength)) {
-      free(buffer);
-      Serial.println("ERROR: Failed to read entry data");
-      return String("");
-    }
-    
-    // Null-terminate the string
-    buffer[entryLength] = '\0';
-    
-    // Step 3: Update lastEntryEndPtr to point after the newline
-    lastEntryEndPtr = wrapAddress(scanPtr + 1);
-    readPtr = lastEntryEndPtr;
-    
-    // Step 4: Create result string and cleanup
-    String result = String(buffer);
-    free(buffer);
-    
-    // Clean entry to remove garbage characters (keep only 0-9, -, ., ,, |)
-    result = cleanCSVEntry(result);
-    
-    return result;
+
+    return 0; // Read failed
   }
-  
+ 
   // Check if data is available to read
   bool hasDataToRead() {
     if (!initialized) return false;
     return (readPtr != writePtr);
   }
-  
-  // Get current read pointer
-  uint32_t getReadPtr() const { return readPtr; }
-  
-  // Get current write pointer
-  uint32_t getWritePtr() const { return writePtr; }
-  
-  // Reset read pointer (for new transmission cycle - start from oldest unsent data)
-  void resetReadPtr() {
-    // Start from current readPtr (which points to oldest unsent data)
-    // Don't change it - it's already correct
-    // Just save to NVS
+ 
+  // Mark entry as successfully sent (Update NVS and next read pointer)
+  void markAsSent(size_t readingsCount) {
+    size_t bytesProcessed = readingsCount * sizeof(TimestampedIMUReading);
+    readPtr = wrapAddress(readPtr + bytesProcessed);
     NVSConfig::setCSVReadPtr(readPtr);
   }
   
-  // Set read pointer (for restoring position after counting)
-  void setReadPtr(uint32_t ptr) {
-    readPtr = ptr;
-    readPtr = wrapAddress(readPtr);
-    NVSConfig::setCSVReadPtr(readPtr);
-  }
-  
-  // Mark entry as successfully sent (advance readPtr past the entry we just read)
-  void markAsSent() {
-    // Use the stored end position from last readNextCSVEntry() call
-    // readPtr = lastEntryEndPtr;
-    NVSConfig::setCSVReadPtr(readPtr);
-  }
-  
-  // Get last entry end pointer (set by last readNextCSVEntry())
-  uint32_t getLastEntryEndPtr() const { return lastEntryEndPtr; }
-  
-  // Mark entry as failed (don't advance readPtr - entry remains for retry)
-  void markAsFailed() {
-    // readPtr stays at current position (entry not consumed)
-    // No action needed - entry will be retried on next cycle
-    readPtr = NVSConfig::getCSVReadPtr();
-  }
-  
-  // Save state to NVS
-  void saveState() {
+  // Legacy support for loop/clear/logic
+  void clear() {
+    writePtr = BINARY_FLASH_START_ADDR;
+    readPtr = BINARY_FLASH_START_ADDR;
+    lastErasedSector = 0xFFFFFFFF;
     NVSConfig::setCSVWritePtr(writePtr);
     NVSConfig::setCSVReadPtr(readPtr);
+    Serial.println("Unified Storage cleared (Binary Mode)");
   }
-  
-  // Clear all data (reset pointers)
-  void clear() {
-    writePtr = CSV_FLASH_START_ADDR;
-    readPtr = CSV_FLASH_START_ADDR;
-    lastErasedSector = 0xFFFFFFFF;
-    saveState();
-    Serial.println("Unified CSV storage cleared");
-  }
-  
+ 
   bool isInitialized() const { return initialized; }
   
-  // Format and write IMU reading buffer as CSV entry
-  // Buffer contains multiple readings, format as: obj1,obj2,obj3,...,objN
-  bool writeIMUReadings(TimestampedIMUReading* readings, int count) {
-    if (count == 0) return false;
-    
-    String csv = "";
-    
-    for (int i = 0; i < count; i++) {
-      // Format single object
-      String obj = formatIMUObject(
-        readings[i].accX, readings[i].accY, readings[i].accZ,
-        readings[i].gyrX, readings[i].gyrY, readings[i].gyrZ,
-        readings[i].timestamp
-      );
-      
-      // Append to CSV string
-      if (csv.length() > 0) {
-        csv += ","; // Add comma separator
-      }
-      csv += obj;
-    }
-    
-    // Write CSV entry to flash
-    return writeCSVEntry(csv);
+  // Getters for debugging
+  uint32_t getReadPtr() const { return readPtr; }
+  uint32_t getWritePtr() const { return writePtr; }
+  
+  // DEPRECATED: Do not use. Preserved to allow compilation if called, but returns empty.
+  String readNextCSVEntry() {
+      return "";
   }
 };
 

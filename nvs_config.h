@@ -118,7 +118,7 @@ private:
   }
 
 public:
-  // Public wrapper methods for U32 NVS operations (used by PMCServerTransmissionHandler)
+  // Public wrapper methods for U32 NVS operations (used by PositionServerTransmissionHandler)
   static uint32_t readU32(const char* key, uint32_t defaultVal = 0) {
     return readU32NVS(key, defaultVal);
   }
