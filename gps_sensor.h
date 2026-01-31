@@ -6,6 +6,15 @@
 #include "nvs_config.h"
 #include "time_sync.h"
 
+// Scenario definitions
+enum GPSScenario {
+  SCENARIO_NONE,           // Initial state, no scenario determined yet
+  SCENARIO_1_HIGH_ACCURACY, // High accuracy GPS fix found
+  SCENARIO_2_CALCULATED,  // Calculated position from last known GPS fix
+  SCENARIO_3_NO_FIX,        // No GPS fix found
+  SCENARIO_4_GPS_OFF    // GPS is turned off  
+};
+
 // GPS pin definitions
 #define GPS_TX_PIN 17     // GPS_TX connects to ESP32 RX (RXD0)
 #define GPS_RX_PIN 16     // GPS_RX connects to ESP32 TX (TXD0)

@@ -74,7 +74,6 @@ private:
   // static bool credentialsReceived;
   static bool gpsActiveReceived;
   static bool cycleTimeReceived;
-  static bool initialPositionReceived;
   static bool gpsReadCycleReceived;
   static bool gpsAccuracyThresholdReceived;
   static bool gpsOnAfterReceived;
@@ -204,59 +203,21 @@ private:
         // Handle GPS OFF
         if (receivedGPSActive == 0) {
           Serial.println("GPS turned OFF via BLE");
-          
-          // Always turn off GPS when receiving 0, regardless of initial position
           GPSSensor::powerOff();
           Serial.println("GPS powered off");
           
-          // If initial position exists, switch to Scenario 4 and clear data
-          if (NVSConfig::hasInitialPosition()) {
-            Serial.println("Initial position exists - Switching to Scenario 4 and clearing data...");
-            
-            // Switch to Scenario 4
-            // if (gpsScenarioHandler != nullptr) {
-            //   gpsScenarioHandler->setCurrentScenario(SCENARIO_4_UI_POSITION);
-            //   Serial.println("Scenario switched to Scenario 4");
-            // }
-            
-            // Clear external flash
-            if (unifiedCSVStorage.isInitialized()) {
-              unifiedCSVStorage.clear();
-              Serial.println("External flash cleared");
-            }
-            
-            // Clear initial position
-            bool cleared = NVSConfig::clearInitialPosition();
-            Serial.print("Initial position cleared: ");
-            Serial.println(cleared ? "Success" : "Failed");
-            
-            // Clear last known position (save zero values)
-            bool lastKnownCleared = NVSConfig::saveLastKnownPosition(0.0, 0.0, -1.0);
-            Serial.print("Last known position cleared: ");
-            Serial.println(lastKnownCleared ? "Success" : "Failed");
-            
-            // Save scenario state to NVS
-            // if (gpsScenarioHandler != nullptr) {
-            //   NVSConfig::setScenarioState((uint8_t)SCENARIO_4_UI_POSITION);
-            // }
-          }
-        }
-        
-        // Handle GPS ON
-        if (receivedGPSActive == 1) {
+          NVSConfig::setScenarioState((uint8_t)SCENARIO_4_GPS_OFF);
+        } else {
           Serial.println("GPS turned ON via BLE");
           GPSSensor::powerOn();
           Serial.println("GPS powered on");
-        }
 
-        if (NVSConfig::hasInitialPosition()) {
-            Serial.println("Initial position exists - Switching from Scenario 4 and clearing data...");
-           
-            // Clear initial position
-            bool cleared = NVSConfig::clearInitialPosition();
-            Serial.print("Initial position cleared: ");
-            Serial.println(cleared ? "Success" : "Failed");
+          if (NVSConfig::hasLastKnownPosition()) {
+            NVSConfig::setScenarioState((uint8_t)SCENARIO_2_CALCULATED);
+          } else {
+            NVSConfig::setScenarioState((uint8_t)SCENARIO_NONE);
           }
+        }
       }
       
       // Stop LED blinking and restore to green
@@ -304,22 +265,14 @@ private:
         if (commaPos > 0) {
           double lat = value.substring(0, commaPos).toFloat();
           double lon = value.substring(commaPos + 1).toFloat();
-          bool savedInitialPosition = NVSConfig::setInitialPosition(lat, lon);
           bool savedLastKnownPosition = NVSConfig::saveLastKnownPosition(lat, lon, -1.0);
-          initialPositionReceived = true;
           Serial.print("Initial Position received: (");
           Serial.print(lat, 7);
           Serial.print(", ");
           Serial.print(lon, 7);
           Serial.print(") - ");
-          Serial.print("Last Known Position saved: ");
+          Serial.print("Initial Position saved: ");
           Serial.print(savedLastKnownPosition ? "Success" : "Failed");
-          Serial.print(" - Initial Position saved: ");
-          Serial.print(savedInitialPosition ? "Success" : "Failed");
-          
-          // Turn off GPS immediately when position is received (even if 2-minute cycle incomplete)
-          GPSSensor::powerOff();
-          Serial.println("GPS powered off immediately after receiving initial position from UI");
         }
       }
     }
@@ -630,7 +583,6 @@ public:
     // credentialsReceived = false;
     gpsActiveReceived = false;
     cycleTimeReceived = false;
-    initialPositionReceived = false;
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
     gpsOnAfterReceived = false;
@@ -760,7 +712,6 @@ public:
     // credentialsReceived = false;
     gpsActiveReceived = false;
     cycleTimeReceived = false;
-    initialPositionReceived = false;
     gpsReadCycleReceived = false;
     gpsAccuracyThresholdReceived = false;
     gpsOnAfterReceived = false;
@@ -908,7 +859,6 @@ uint32_t BLEConfig::receivedGPSOnAfter = 60;
 // bool BLEConfig::credentialsReceived = false;
 bool BLEConfig::gpsActiveReceived = false;
 bool BLEConfig::cycleTimeReceived = false;
-bool BLEConfig::initialPositionReceived = false;
 bool BLEConfig::gpsReadCycleReceived = false;
 bool BLEConfig::gpsAccuracyThresholdReceived = false;
 bool BLEConfig::gpsOnAfterReceived = false;
