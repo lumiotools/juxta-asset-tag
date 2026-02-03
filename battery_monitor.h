@@ -63,10 +63,10 @@ public:
           sampleCount++;
           lastReadingTime = currentTime;
           
-          // Check if we have all 10 samples
-          if (sampleCount >= 10) {
+          // Check if we have all 5 samples
+          if (sampleCount >= 5) {
             // Convert to actual battery voltage using divider ratio
-            latestVoltage = (accumulatedVoltage / 10.0f / 1000.0f) * VOLTAGE_DIVIDER_RATIO;
+            latestVoltage = (accumulatedVoltage / 5.0f / 1000.0f) * VOLTAGE_DIVIDER_RATIO;
             readingState = BATTERY_READY;
           }
         }
