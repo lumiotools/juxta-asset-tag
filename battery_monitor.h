@@ -3,6 +3,13 @@
 
 #include <Arduino.h>
 
+// Battery reading states for non-blocking operation
+enum BatteryReadingState {
+  BATTERY_IDLE,     // Not currently reading
+  BATTERY_READING,  // Taking readings over time
+  BATTERY_READY     // New reading available
+};
+
 class BatteryMonitor {
 private:
   // Hardware Configuration (v2.5 - ESP32-C6)
@@ -19,6 +26,13 @@ private:
   //   - R11=220K, R12=100K → ratio = 3.2
   //   - R11=220K, R12=68K  → ratio = 4.235 (older v2 hardware)
   static constexpr float VOLTAGE_DIVIDER_RATIO = 2.0f;
+  
+  // Non-blocking reading state variables
+  static BatteryReadingState readingState;
+  static unsigned long lastReadingTime;
+  static int sampleCount;
+  static uint32_t accumulatedVoltage;
+  static float latestVoltage;
 
 public:
   static void initializeADC() {
@@ -26,18 +40,55 @@ public:
     analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);  // 0-3.3V range
   }
 
-  static float readBatteryVoltage() {
-    uint32_t Vbatt = 0;
+  // Non-blocking battery voltage reading - call this repeatedly in main loop
+  static void updateBatteryReading() {
+    unsigned long currentTime = millis();
     
-    // Take 16 samples and average for stability
-    for(int i = 0; i < 16; i++) {
-      Vbatt = Vbatt + analogReadMilliVolts(BATTERY_ADC_PIN);
+    switch (readingState) {
+      case BATTERY_IDLE:
+        // Start new reading cycle
+        readingState = BATTERY_READING;
+        lastReadingTime = currentTime;
+        sampleCount = 0;
+        accumulatedVoltage = 0;
+        // Take first sample immediately
+        accumulatedVoltage += analogReadMilliVolts(BATTERY_ADC_PIN);
+        sampleCount++;
+        break;
+        
+      case BATTERY_READING:
+        // Check if 500 milliseconds has passed since last reading
+        if (currentTime - lastReadingTime >= 500) {
+          accumulatedVoltage += analogReadMilliVolts(BATTERY_ADC_PIN);
+          sampleCount++;
+          lastReadingTime = currentTime;
+          
+          // Check if we have all 10 samples
+          if (sampleCount >= 10) {
+            // Convert to actual battery voltage using divider ratio
+            latestVoltage = (accumulatedVoltage / 10.0f / 1000.0f) * VOLTAGE_DIVIDER_RATIO;
+            readingState = BATTERY_READY;
+          }
+        }
+        break;
+        
+      case BATTERY_READY:
+        // Reading complete, wait for next request
+        break;
     }
-    
-    // Convert to actual battery voltage using divider ratio
-    // Average the samples (÷16), convert mV to V (÷1000), apply divider ratio
-    float Vbattf = (Vbatt / 16.0f / 1000.0f) * VOLTAGE_DIVIDER_RATIO;
-    return Vbattf;
+  }
+  
+  // Check if a new battery reading is available
+  static bool isNewReadingAvailable() {
+    return readingState == BATTERY_READY;
+  }
+  
+  // Get the latest battery voltage and start next reading cycle
+  static float readBatteryVoltage() {
+    if (readingState == BATTERY_READY) {
+      readingState = BATTERY_IDLE; // Start next cycle
+    }
+    return latestVoltage;
   }
 
   static int getBatteryPercentage() {
@@ -73,5 +124,12 @@ public:
     }
   }
 };
+
+// Static variable definitions
+BatteryReadingState BatteryMonitor::readingState = BATTERY_IDLE;
+unsigned long BatteryMonitor::lastReadingTime = 0;
+int BatteryMonitor::sampleCount = 0;
+uint32_t BatteryMonitor::accumulatedVoltage = 0;
+float BatteryMonitor::latestVoltage = 3.7f;  // Default safe value
 
 #endif

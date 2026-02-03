@@ -177,6 +177,14 @@ public:
 
   // Update blinking state (call this in loop for non-blocking blink)
   void update() {
+    // Update non-blocking battery reading
+    BatteryMonitor::updateBatteryReading();
+    
+    // Only update LED state when new reading is available
+    if (BatteryMonitor::isNewReadingAvailable()) {
+      updateBatteryLED(); // Check battery level and update state
+    }
+    
     updateBlink(); // Handle asynchronous blinking
   }
   
