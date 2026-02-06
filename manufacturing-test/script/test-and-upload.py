@@ -344,8 +344,8 @@ def main():
         sys.exit(1)
 
     # Give device a moment to boot and start printing
-    print("\n⏳ Waiting 1.5s for device reboot...")
-    time.sleep(1.5)
+    # print("\n⏳ Waiting 1.5s for device reboot...")
+    # time.sleep(1.5)
 
     ready_re = re.compile(READY_REGEX)
     pass_re = re.compile(PASS_REGEX)

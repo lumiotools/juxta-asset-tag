@@ -223,8 +223,9 @@ static void releasePowerLatchAndPowerOff() {
 }
 
 // Block here until the operator holds the button to request firmware upload.
-// This function never returns - it keeps the device powered and provides visual
-// feedback until the upload readiness string is printed.
+// This function normally never returns - it keeps the device powered and provides visual
+// feedback until the upload readiness string is printed. With a timeout, we will
+// power off if no hold is detected within the timeout window.
 static void waitForUploadRequest() {
   Serial.println("Awaiting operator to hold button to enable firmware upload...");
 
@@ -235,10 +236,25 @@ static void waitForUploadRequest() {
   unsigned long last_toggle = millis();
   bool led_on = false;
 
+  // Timeout: power off after this many milliseconds if no hold detected
+  const unsigned long UPLOAD_REQUEST_TIMEOUT_MS = 10000; // 10 seconds
+  unsigned long wait_start = millis();
+
   // Ensure button pin is configured for pull-down input
   pinMode(BUTTON_PIN, INPUT_PULLDOWN);
 
   while (true) {
+    // If a readiness hasn't been printed and timeout elapsed -> power off
+    if (!ready_printed && (millis() - wait_start) >= UPLOAD_REQUEST_TIMEOUT_MS) {
+      Serial.println("UPLOAD TIMEOUT: no button press detected - powering off");
+      // Visual: RED
+      setPixelAndShow(0, 255, 0, 0);
+      setPixelAndShow(1, 255, 0, 0);
+      waitCountdown("Powering off in", 3);
+      releasePowerLatchAndPowerOff();
+      return;
+    }
+
     // Toggle every 500 ms
     if ((millis() - last_toggle) >= 500) {
       last_toggle = millis();
@@ -568,9 +584,6 @@ static bool testHubConnect() {
     // Visual cue: Hub connected -> PURPLE on both pixels
     setPixelAndShow(0, 128, 0, 128);
     setPixelAndShow(1, 128, 0, 128);
-
-    // Stay connected briefly so the hub sees the connection
-    delay(2000);
 
     return true;
   } else {

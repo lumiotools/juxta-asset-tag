@@ -1,15 +1,11 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
-#include <WiFi.h>
 #include <string.h>
 #include <vector>
 
 // Configuration
-static const char AP_SSID[] = "PMC Test Hub";
-static const char AP_PWD[] = "PMC.Hub@Test";
 static const char PREFIX[] = "Juxta AT";
-// ESP32 usually supports ~7 concurrent connections, but we limit to 4 for stability
-static const int MAX_CLIENTS = 4; 
+static const int MAX_CLIENTS = 5; 
 
 // Track connected clients
 std::vector<NimBLEClient*> connectedClients;
@@ -29,11 +25,6 @@ void setup() {
   // 1. Setup BLE
   NimBLEDevice::init("JuxtaHub");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
-  
-  // 2. Setup WiFi (host-only AP)
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PWD);
-  Serial.printf("AP Started: %s (IP: %s)\n", AP_SSID, WiFi.softAPIP().toString().c_str());
 }
 
 void loop() {
@@ -47,7 +38,7 @@ void loop() {
     pScan->start(0); 
 
     unsigned long scanStart = millis();
-    while ((millis() - scanStart) < 2500) {
+    while ((millis() - scanStart) < 5000) {
       delay(50);
     }
 
@@ -57,14 +48,19 @@ void loop() {
       const NimBLEAdvertisedDevice* d = results.getDevice(i);
       String name = d->getName().c_str();
 
-      // If advertised name starts with the PREFIX, attempt connection if not already connected
       if (name.startsWith(PREFIX)) {
+        // Found a Juxta device
         if (!isAlreadyConnected(d->getAddress())) {
+          Serial.printf("Found new target: %s\n", name.c_str());
+          
           NimBLEClient* pClient = NimBLEDevice::createClient();
           if (pClient->connect(d->getAddress())) {
+            Serial.printf("Connected to %s\n", name.c_str());
             connectedClients.push_back(pClient);
+            
             if (connectedClients.size() >= MAX_CLIENTS) break; // Stop connecting if full
           } else {
+            Serial.println("Connection failed.");
             NimBLEDevice::deleteClient(pClient);
           }
         }
