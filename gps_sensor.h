@@ -102,7 +102,7 @@ private:
   // Detect which baud rate is working (9600 or 115200)
   // Returns the baud rate that receives valid NMEA data, or 0 if neither works
   uint32_t detectBaudRate() {
-    uint32_t baudRates[] = {4800,9600,19200,38400,57600,115200};
+    uint32_t baudRates[] = {115200};
     const int detectionTimeout = 1000; // 1 second to detect data
     const int minValidChars = 10; // Minimum characters to consider valid data
     
