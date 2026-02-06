@@ -62,9 +62,7 @@ static const char HUB_AP_PWD[] = "PMC.Hub@Test";
 // Track whether any BLE client connected at any time during the setup
 static bool bleConnectedDuringSetup = false;
 
-// -------------------- Operator-flow configuration --------------------
-static const int STARTUP_COUNTDOWN_SEC = 5;
-static const uint32_t STEP_PAUSE_MS = 900;
+static const uint32_t STEP_PAUSE_MS = 500;
 static const uint32_t OPERATOR_INPUT_TIMEOUT_MS = 20000;
 
 // -------------------- Logging helpers --------------------
@@ -224,6 +222,57 @@ static void releasePowerLatchAndPowerOff() {
   setPowerLatchPin(false); // Set LOW to release power latch
 }
 
+// Block here until the operator holds the button to request firmware upload.
+// This function never returns - it keeps the device powered and provides visual
+// feedback until the upload readiness string is printed.
+static void waitForUploadRequest() {
+  Serial.println("Awaiting operator to hold button to enable firmware upload...");
+
+  // Blink green indefinitely until a button hold is detected. On a hold, print readiness
+  // string and keep device powered on (do NOT release power latch).
+  bool ready_printed = false;
+  unsigned long press_start = 0;
+  unsigned long last_toggle = millis();
+  bool led_on = false;
+
+  // Ensure button pin is configured for pull-down input
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);
+
+  while (true) {
+    // Toggle every 500 ms
+    if ((millis() - last_toggle) >= 500) {
+      last_toggle = millis();
+      led_on = !led_on;
+      if (led_on) {
+        setPixelAndShow(0, 0, 255, 0);
+        setPixelAndShow(1, 0, 255, 0);
+      } else {
+        setPixelAndShow(0, 0, 0, 0);
+        setPixelAndShow(1, 0, 0, 0);
+      }
+    }
+
+    // Debounced hold detection: require >=500 ms continuous HIGH
+    bool pressed = (digitalRead(BUTTON_PIN) == HIGH);
+    if (pressed) {
+      if (press_start == 0) press_start = millis();
+      else if (!ready_printed && (millis() - press_start) >= 500) {
+        Serial.println("UPLOAD FIRMWARE READY");
+        ready_printed = true;
+
+        // Make LED solid green after readiness announced
+        setPixelAndShow(0, 0, 255, 0);
+        setPixelAndShow(1, 0, 255, 0);
+      }
+    } else {
+      press_start = 0;
+    }
+
+    // Small sleep to reduce CPU usage
+    delay(50);
+  }
+}
+
 // -------------------- Individual tests --------------------
 static bool testDeviceId() {
   DeviceID::getDeviceId(deviceIdBuffer, sizeof(deviceIdBuffer));
@@ -238,10 +287,10 @@ static bool testDeviceId() {
 }
 
 static bool testStatusLED() {
-  Serial.println("LED: both pixels WHITE (1s)");
+  Serial.println("LED: both pixels WHITE (500ms)");
   setPixelAndShow(0, 255, 255, 255);
   setPixelAndShow(1, 255, 255, 255);
-  delay(1000);
+  delay(500);
 
   // Test both pixels, one-by-one, for each color.
   // Keep the *other* pixel off while testing the current one.
@@ -553,8 +602,6 @@ void setup() {
   setPixelAndShow(1, 0, 255, 0); // Green: latch asserted
   Serial.println("POWER LATCH ASSERTED - you can release the button now.");
 
-  waitCountdown("Starting test in", STARTUP_COUNTDOWN_SEC);
-
   // Start BLE advertising ASAP (so operator has time to find it while other tests run)
   DeviceID::getDeviceId(deviceIdBuffer, sizeof(deviceIdBuffer));
   BLEConfig::setDeviceId(deviceIdBuffer);
@@ -577,26 +624,26 @@ void setup() {
   stepHeader(step++, STEP_COUNT, "Identity + NVS");
   overall &= testDeviceId();
   overall &= testNVS();
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "GPS");
   overall &= testGPS();
   Serial.println("GPS step done.");
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "Status LEDs");
   overall &= testStatusLED();
   // No operator feedback required for LEDs
   logPass("LED");
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "Battery ADC");
   overall &= testBatteryADC(3000);
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "External SPI flash R/W/C");
   overall &= testSPIFlashRW();
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "IMU readings + motion interrupt (tap/shake)");
   overall &= testIMUReadings(2000);
@@ -641,28 +688,30 @@ void setup() {
   // Visual cue: BLE seen -> BLUE on both pixels
   setPixelAndShow(0, 0, 0, 255);
   setPixelAndShow(1, 0, 0, 255);
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   // Proceed to hub WiFi connection
   stepHeader(step++, STEP_COUNT, "Hub WiFi connect (if BLE connected)");
   overall &= testHubConnect();
-  pauseBetweenSteps();
+  // pauseBetweenSteps();
 
   Serial.println();
   if (overall) {
     Serial.println("OVERALL: PASS");
-    // Green on pixel 0 for 1s
-    setPixelAndShow(0, 0, 255, 0);
-    setPixelAndShow(1, 0, 255, 0);
+
+    // Block here until the operator signals readiness to upload the production firmware.
+    waitForUploadRequest();
+
   } else {
     Serial.println("OVERALL: FAIL");
     // Red on pixel 0 for 2s
     setPixelAndShow(0, 255, 0, 0);
     setPixelAndShow(1, 255, 0, 0);
-  }
 
-  waitCountdown("Powering off in", 3);
-  releasePowerLatchAndPowerOff();
+    waitCountdown("Powering off in", 3);
+    releasePowerLatchAndPowerOff();
+    return;
+  }
 }
 
 void loop() {}
