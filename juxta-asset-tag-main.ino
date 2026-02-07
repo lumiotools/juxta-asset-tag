@@ -358,6 +358,10 @@ void loop() {
         long long duration = release_time - prev_button_click_time;
         if(duration > 4000) {
           Serial.println("Long press release detected (>4s) - powering off device...");
+          
+          // Save pointers before manual shutdown
+          unifiedCSVStorage.savePointers();
+          
           setPixelAndShow(0, 255, 0, 0); // Red on
           delay(500);
           setPowerLatchPin(false);
@@ -406,7 +410,9 @@ void loop() {
     // Check the return value
     if (shouldSleep) {
       // Timeout reached - enter deep sleep
-
+      // SAVE STORAGE POINTERS BEFORE SLEEP
+      Serial.println("Saving storage pointers before sleep...");
+      unifiedCSVStorage.savePointers();
       GPSData gpsData;
       if(current_scenario == SCENARIO_1_HIGH_ACCURACY) {
         gpsData = gpsSensor.getGPSData();
@@ -734,6 +740,9 @@ void loop() {
         Serial.print("Position Server transmission result: ");
         Serial.println(positionSuccess ? "SUCCESS" : "FAILED");
       }
+
+      // Save pointers after transmission cycle
+      unifiedCSVStorage.savePointers();
 
       transmission_cycle_start_time = -1;
 
