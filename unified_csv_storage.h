@@ -49,6 +49,119 @@ private:
       }
     }
   }
+
+  // Scan forward from current writePtr to find the actual end of data
+  void recoverWritePointer() {
+    if (flashHandler == nullptr) return;
+
+    const uint32_t recordSize = sizeof(TimestampedIMUReading);
+    const uint32_t recordsPerSector = FLASH_SECTOR_SIZE / recordSize;
+    if (recordsPerSector == 0) return;
+
+    auto isErasedRecord = [&](uint32_t addr) -> bool {
+      TimestampedIMUReading buffer;
+      if (!flashHandler->readBytes(addr, (uint8_t*)&buffer, recordSize)) {
+        return false;
+      }
+      const uint8_t* p = (const uint8_t*)&buffer;
+      for (uint32_t i = 0; i < recordSize; i++) {
+        if (p[i] != 0xFF) return false;
+      }
+      return true;
+    };
+
+    uint32_t currentAddr = writePtr;
+    // Scan up to full capacity if needed (safe due to sector skipping optimization)
+    const uint32_t scanLimitBytes = flashCapacity; 
+    uint32_t scannedBytes = 0;
+    bool advanced = false;
+
+    Serial.print("Recovering writePtr from: 0x");
+    Serial.print(currentAddr, HEX);
+
+    // Fast path: if currentAddr is already erased, no recovery needed
+    if (isErasedRecord(currentAddr)) {
+      Serial.println(" -> No recovery needed.");
+      return;
+    }
+
+    // Sector-wise probing: skip fully-written sectors by checking the last slot in the sector.
+    while (scannedBytes < scanLimitBytes) {
+      uint32_t sectorStart = (currentAddr / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
+      uint32_t sectorEnd = sectorStart + FLASH_SECTOR_SIZE;
+      uint32_t lastSlotAddr = sectorEnd - recordSize;
+
+      // Handle wrap-around for the last slot address
+      if (lastSlotAddr >= flashCapacity) {
+        lastSlotAddr = wrapAddress(lastSlotAddr);
+      }
+
+      // If the last slot is NOT erased, sector is full (or at least written to the end).
+      // Jump to next sector.
+      if (!isErasedRecord(lastSlotAddr)) {
+        uint32_t nextSector = sectorStart + FLASH_SECTOR_SIZE;
+        if (nextSector >= flashCapacity) nextSector = BINARY_FLASH_START_ADDR;
+
+        uint32_t delta;
+        if (nextSector >= currentAddr) {
+          delta = nextSector - currentAddr;
+        } else {
+          // Wrapped
+          delta = (flashCapacity - currentAddr) + nextSector;
+        }
+        scannedBytes += delta;
+        currentAddr = nextSector;
+        advanced = true;
+
+        // Watchdog-friendly
+        if ((scannedBytes & 0xFFFF) == 0) {
+          yield();
+        }
+        continue;
+      }
+
+      // Boundary is inside this sector: find the first erased record starting from currentAddr.
+      uint32_t offsetInSector = currentAddr - sectorStart;
+      uint32_t startIndex = offsetInSector / recordSize;
+      if (startIndex >= recordsPerSector) startIndex = 0;
+
+      for (uint32_t i = startIndex; i < recordsPerSector; i++) {
+        uint32_t addr = sectorStart + (i * recordSize);
+        if (addr >= flashCapacity) addr = wrapAddress(addr);
+
+        if (isErasedRecord(addr)) {
+          currentAddr = addr;
+          Serial.print(" -> Recovered to: 0x");
+          Serial.println(currentAddr, HEX);
+          writePtr = currentAddr;
+          NVSConfig::setCSVWritePtr(writePtr);
+          return;
+        }
+        advanced = true;
+        scannedBytes += recordSize;
+      }
+
+      // If we didn't find an erased record inside the sector (should be rare), advance to next sector.
+      uint32_t nextSector = sectorStart + FLASH_SECTOR_SIZE;
+      if (nextSector >= flashCapacity) nextSector = BINARY_FLASH_START_ADDR;
+      uint32_t delta;
+      if (nextSector >= currentAddr) {
+        delta = nextSector - currentAddr;
+      } else {
+        delta = (flashCapacity - currentAddr) + nextSector;
+      }
+      scannedBytes += delta;
+      currentAddr = nextSector;
+      yield();
+    }
+
+    // Scan limit hit: fall back to keeping existing pointer.
+    if (advanced) {
+      Serial.println(" -> Recovery scan limit hit; keeping NVS writePtr.");
+    } else {
+      Serial.println(" -> No recovery needed.");
+    }
+  }
  
   // Wrap address for circular buffer
   uint32_t wrapAddress(uint32_t addr) {
@@ -99,6 +212,11 @@ public:
       readPtr = BINARY_FLASH_START_ADDR;
       NVSConfig::setCSVReadPtr(readPtr);
     }
+
+    // RECOVERY SCAN: Check if we have valid data after the NVS write pointer
+    // This handles cases where the device crashed before saving the pointer to NVS
+    Serial.println("Checking for unsaved data after write pointer...");
+    recoverWritePointer();
    
     Serial.println("========== Unified Binary Storage (via CSV Class) ==========");
     Serial.print("Flash Capacity: ");
@@ -154,10 +272,20 @@ public:
     writePtr = wrapAddress(writePtr + size);
    
     // Save to NVS
-    // In high freq version, we write this every time because accuracy of pointers is critical
-    NVSConfig::setCSVWritePtr(writePtr);
+    // REMOVED: Writing to NVS every 10ms destroys the internal flash (16MB external flash is fine).
+    // Now relying on explicit calls to savePointers() at appropriate intervals (e.g. before sleep).
+    // NVSConfig::setCSVWritePtr(writePtr);
    
     return true;
+  }
+
+  // Save current pointers to NVS (Call this before sleep or periodically)
+  void savePointers() {
+    if (initialized) {
+        NVSConfig::setCSVWritePtr(writePtr);
+        NVSConfig::setCSVReadPtr(readPtr);
+        // Serial.println("Storage pointers saved to NVS");
+    }
   }
 
   // HIGH SPEED READ: Pulls binary data directly into buffer
@@ -199,10 +327,14 @@ public:
   }
  
   // Mark entry as successfully sent (Update NVS and next read pointer)
-  void markAsSent(size_t readingsCount) {
+  // recovery: Update internal pointer immediately. Only update NVS if saveToNVS is true.
+  // Set saveToNVS=false for batch operations, then call savePointers() at the end.
+  void markAsSent(size_t readingsCount, bool saveToNVS = true) {
     size_t bytesProcessed = readingsCount * sizeof(TimestampedIMUReading);
     readPtr = wrapAddress(readPtr + bytesProcessed);
-    NVSConfig::setCSVReadPtr(readPtr);
+    if (saveToNVS) {
+      NVSConfig::setCSVReadPtr(readPtr);
+    }
   }
   
   // Legacy support for loop/clear/logic
