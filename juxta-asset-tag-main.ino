@@ -204,7 +204,7 @@ void setup() {
   gps_initialized = gpsSensor.begin();
   Serial.print("GPS sensor initialized: ");
   Serial.println(gps_initialized ? "SUCCESS" : "FAILED");
-  gps_initialized = true;
+
   if(!flash_initialized || !csv_storage_initialized || !imu_initialized || !gps_initialized) {
     Serial.println("ERROR: Critical initialization failed - aborting setup");
     return;
