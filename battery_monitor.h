@@ -14,6 +14,7 @@ class BatteryMonitor {
 private:
   // Hardware Configuration (v2.5 - ESP32-C6)
   static const int BATTERY_ADC_PIN = 3;  // GPIO3 (IO3) connected to voltage divider
+  static const int USB_DETECTION_PIN = 21;
   static constexpr float BATTERY_MAX_VOLTAGE = 4.2f;  // Fully charged Li-Po
   static constexpr float BATTERY_MIN_VOLTAGE = 3.2f;  // Safe discharge limit
   
@@ -38,6 +39,7 @@ public:
   static void initializeADC() {
     pinMode(BATTERY_ADC_PIN, INPUT);
     analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);  // 0-3.3V range
+    pinMode(USB_DETECTION_PIN, INPUT);
   }
 
   // Non-blocking battery voltage reading - call this repeatedly in main loop
@@ -92,6 +94,10 @@ public:
   }
 
   static int getBatteryPercentage() {
+    if (digitalRead(USB_DETECTION_PIN) == HIGH) {
+      return -1;
+    }
+
     float voltage = readBatteryVoltage();
     
     if (voltage >= BATTERY_MAX_VOLTAGE) return 100;
