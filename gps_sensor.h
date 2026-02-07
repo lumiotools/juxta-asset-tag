@@ -273,14 +273,14 @@ public:
   static void powerOn() {
     // GPS_POWER_PIN must be defined with a pin number (e.g., #define GPS_POWER_PIN D3)
     // If defined as empty or 0, power control is disabled
-    // Note: LOW = GPS ON, HIGH = GPS OFF (inverted logic)
+    // Note: HIGH = GPS ON, LOW = GPS OFF (N-Channel Logic)
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, LOW);
+      digitalWrite(GPS_POWER_PIN, HIGH);
       delay(500); // Give GPS time to power up
       Serial.print("GPS power turned ON (pin ");
       Serial.print(GPS_POWER_PIN);
-      Serial.println(" set to LOW)");
+      Serial.println(" set to HIGH)");
 
       if(!NVSConfig::getGPSActive()) {
         NVSConfig::setGPSActive(1);
@@ -294,10 +294,10 @@ public:
   static void powerOff() {
     if (GPS_POWER_PIN > 0) {
       pinMode(GPS_POWER_PIN, OUTPUT);
-      digitalWrite(GPS_POWER_PIN, HIGH);
+      digitalWrite(GPS_POWER_PIN, LOW);
       Serial.print("GPS power turned OFF (pin ");
       Serial.print(GPS_POWER_PIN);
-      Serial.println(" set to HIGH)");
+      Serial.println(" set to LOW)");
 
       if(NVSConfig::getGPSActive()) {
         NVSConfig::setGPSActive(0);
