@@ -356,6 +356,22 @@ static bool testNVS() {
   return true;
 }
 
+static bool testCharging() {
+  BatteryMonitor::initializeADC();
+  delay(50); // Settlement time
+
+  // getBatteryPercentage returns -1 when USB/Charging is detected
+  if (BatteryMonitor::getBatteryPercentage() == -1) {
+    Serial.println("USB/Charging detected: YES");
+    logPass("Charging Detect");
+    return true;
+  }
+  
+  Serial.println("USB/Charging detected: NO"); 
+  logFail("Charging Detect", "USB pin low (not plugged in?)");
+  return false;
+}
+
 static bool testBatteryADC(uint32_t maxMillisBudget) {
   BatteryMonitor::initializeADC();
 
@@ -630,7 +646,7 @@ void setup() {
   Serial.println("Starting step-by-step tests...");
 
   // Human-friendly step-by-step execution
-  const int STEP_COUNT = 8;
+  const int STEP_COUNT = 9;
   int step = 1;
   bool overall = true;
 
@@ -648,6 +664,10 @@ void setup() {
   overall &= testStatusLED();
   // No operator feedback required for LEDs
   logPass("LED");
+  // pauseBetweenSteps();
+
+  stepHeader(step++, STEP_COUNT, "Charging Connected");
+  overall &= testCharging();
   // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "Battery ADC");
