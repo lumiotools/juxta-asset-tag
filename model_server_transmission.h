@@ -312,7 +312,8 @@ public:
       
       if (deltaPos.valid) {
         // Success - mark entries as sent in flash
-        csvStorage->markAsSent(itemsRead);
+        // OPTIMIZATION: Do NOT save to NVS yet (false). We save once at the end.
+        csvStorage->markAsSent(itemsRead, false);
         
         batchesSent++;
         totalEntriesSent += itemsRead;
@@ -332,15 +333,10 @@ public:
         Serial.print(currentLat, 7);
         Serial.print(", ");
         Serial.print(currentLon, 7);
-        Serial.print("), Delta: (");
-        Serial.print(deltaPos.deltaLat, 7);
-        Serial.print(", ");
-        Serial.print(deltaPos.deltaLon, 7);
         Serial.println(")");
         
-        // Save updated position to NVS after every batch
-        NVSConfig::saveLastKnownPosition(currentLat, currentLon, currentHdop);
-        Serial.println("ModelServerTransmissionHandler: Saved updated position to NVS");
+        // OPTIMIZATION: Do not save GPS to NVS after every batch. 
+        // We will save valid position at the end of the cycle.
         
         yield(); // Prevent watchdog
       } else {
@@ -353,8 +349,11 @@ public:
     
     // Final confirmation save (position already saved after each batch)
     if (batchesSent > 0) {
+      // SAVE CHECKPOINT: Save updated GPS position AND Flash pointers
+      // This is the single commit point for the entire transmission cycle.
       NVSConfig::saveLastKnownPosition(currentLat, currentLon, currentHdop);
-      Serial.println("ModelServerTransmissionHandler: Final position confirmed in NVS");
+      csvStorage->savePointers(); 
+      Serial.println("ModelServerTransmissionHandler: Final position and pointers saved to NVS");
     }
     
     Serial.println("========== Transmission Summary ==========");
