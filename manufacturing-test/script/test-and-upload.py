@@ -270,7 +270,7 @@ def stream_serial_for_signals(port: str, baud: int, ready_re, pass_re, fail_re, 
             # Detect overall fail
             if fail_re and fail_re.search(text):
                 _print_banner('OVERALL: FAIL', kind='fail')
-                return 'fail'
+                continue
 
             # Detect overall pass: announce and keep waiting for readiness
             if pass_re and pass_re.search(text):
