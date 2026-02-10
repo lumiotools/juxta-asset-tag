@@ -10,7 +10,7 @@
 #include "device_id.h"
 
 // Server URL and configuration
-const char* MODEL_SERVER_URL = "https://juxta.pmcprecision.com/api/model"; // Model server endpoint
+const char* MODEL_SERVER_URL = "https://assetserver.usejuxta.org/infer"; // Model server endpoint
 const int MODEL_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // ============================================================================

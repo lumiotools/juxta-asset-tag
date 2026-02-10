@@ -11,7 +11,7 @@
 #include "time_sync.h"
 
 // Server URL and configuration
-const char* POSITION_SERVER_URL = "https://juxta.pmcprecision.com/api/record/wifi/v2.0.0?source=wifi"; // Position database server endpoint
+const char* POSITION_SERVER_URL = "https://tags.juxta.com/api/record/wifi/v2.0.0?source=wifi"; // Position database server endpoint
 const int POSITION_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // FIFO Queue configuration (using blob arrays)
