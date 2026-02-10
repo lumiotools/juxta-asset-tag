@@ -329,6 +329,23 @@ public:
         currentLon += deltaPos.deltaLon;
         currentHdop = -1.0; // Mark as calculated position (not from real GPS)
         
+        // 1. Handle latitude crossing the poles (reflect + flip longitude)
+        while (currentLat > 90.0 || currentLat < -90.0) {
+          if (currentLat > 90.0) {
+            currentLat = 180.0 - currentLat;
+            currentLon += 180.0;
+          } else if (currentLat < -90.0) {
+            currentLat = -180.0 - currentLat;
+            currentLon += 180.0;
+          }
+        }
+        
+        // 2. Wrap Longitude to -180 to 180 (Efficiently handles large values)
+        // Logic: (((Lon + 180) % 360) - 180)
+        currentLon = fmod(currentLon + 180.0, 360.0);
+        if (currentLon < 0) currentLon += 360.0;
+        currentLon -= 180.0;
+
         Serial.print("ModelServerTransmissionHandler: Updated position: (");
         Serial.print(currentLat, 7);
         Serial.print(", ");
