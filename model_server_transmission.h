@@ -208,9 +208,23 @@ public:
       
       int commaPos = response.indexOf(',');
       if (commaPos > 0) {
-        result.deltaLat = response.substring(0, commaPos).toDouble();
-        result.deltaLon = response.substring(commaPos + 1).toDouble();
-        result.valid = true;
+        double dLat = response.substring(0, commaPos).toDouble();
+        double dLon = response.substring(commaPos + 1).toDouble();
+        
+        // CHECK FOR NaN: If server sends "NaN,NaN" or invalid float, toDouble() might process it blindly
+        // or we need to check isnan() explicitly.
+        // Also check if response actually contains "NaN" string to be safe.
+        if (isnan(dLat) || isnan(dLon) || response.indexOf("NaN") >= 0 || response.indexOf("nan") >= 0) {
+            Serial.print("ModelServerTransmissionHandler: NaN response received, treating as 0.0, 0.0: ");
+            Serial.println(response);
+            result.deltaLat = 0.0;
+            result.deltaLon = 0.0;
+            result.valid = true;
+        } else {
+            result.deltaLat = dLat;
+            result.deltaLon = dLon;
+            result.valid = true;
+        }
       }
     }
     
