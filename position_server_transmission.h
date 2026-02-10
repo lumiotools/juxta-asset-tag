@@ -458,17 +458,20 @@ public:
     // Send via HTTP POST
     HTTPClient http;
     
-    // Use direct begin() - HTTPClient handles HTTPS automatically
-    // The delay above helps ensure TCP/IP stack is ready for DNS resolution
-    http.begin(POSITION_SERVER_URL);
-    
-    // Set timeout AFTER begin() (recommended approach)
-    http.setTimeout(POSITION_TRANSMISSION_TIMEOUT);
-    
-    // Only set Content-Type header (like working example)
-    http.addHeader("Content-Type", "text/csv");
-    
-    int httpResponseCode = http.POST(data);
+    int httpResponseCode = -1;
+
+    try {
+        if (http.begin(POSITION_SERVER_URL)) {
+             http.setTimeout(POSITION_TRANSMISSION_TIMEOUT);
+             http.addHeader("Content-Type", "text/csv");
+             httpResponseCode = http.POST(data);
+        } else {
+             Serial.println("PositionServerTransmissionHandler: server connection failed");
+        }
+    } catch (...) {
+        Serial.println("PositionServerTransmissionHandler: EXCEPTION during HTTP transmission");
+        httpResponseCode = -1;
+    }
     
     Serial.print("PositionServerTransmissionHandler: Response code: ");
     Serial.println(httpResponseCode);

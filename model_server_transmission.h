@@ -179,12 +179,21 @@ public:
     
     // Send via HTTP POST
     HTTPClient http;
-    http.begin(MODEL_SERVER_URL);
-    http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
-    http.addHeader("Content-Type", "application/octet-stream");
-    
-    // Send the zeroCopyBuffer directly
-    int httpResponseCode = http.POST(zeroCopyBuffer, totalSize);
+    int httpResponseCode = -1;
+
+    try {
+        if (http.begin(MODEL_SERVER_URL)) {
+            http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
+            http.addHeader("Content-Type", "application/octet-stream");
+            // Send the zeroCopyBuffer directly
+            httpResponseCode = http.POST(zeroCopyBuffer, totalSize);
+        } else {
+            Serial.println("ModelServerTransmissionHandler: server connection failed");
+        }
+    } catch (...) {
+        Serial.println("ModelServerTransmissionHandler: EXCEPTION during HTTP transmission");
+        httpResponseCode = -1;
+    }
     
     // NO FREEING HERE - Buffer is reused for next batch
     
