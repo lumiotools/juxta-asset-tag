@@ -10,7 +10,7 @@
 #include "device_id.h"
 
 // Server URL and configuration
-const char* MODEL_SERVER_URL = "https://juxta.pmcprecision.com/api/model"; // Model server endpoint
+const char* MODEL_SERVER_URL = "https://assetserver.usejuxta.org/infer"; // Model server endpoint
 const int MODEL_TRANSMISSION_TIMEOUT = 60000; // 60 seconds timeout
 
 // ============================================================================
@@ -179,12 +179,21 @@ public:
     
     // Send via HTTP POST
     HTTPClient http;
-    http.begin(MODEL_SERVER_URL);
-    http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
-    http.addHeader("Content-Type", "application/octet-stream");
-    
-    // Send the zeroCopyBuffer directly
-    int httpResponseCode = http.POST(zeroCopyBuffer, totalSize);
+    int httpResponseCode = -1;
+
+    try {
+        if (http.begin(MODEL_SERVER_URL)) {
+            http.setTimeout(MODEL_TRANSMISSION_TIMEOUT);
+            http.addHeader("Content-Type", "application/octet-stream");
+            // Send the zeroCopyBuffer directly
+            httpResponseCode = http.POST(zeroCopyBuffer, totalSize);
+        } else {
+            Serial.println("ModelServerTransmissionHandler: server connection failed");
+        }
+    } catch (...) {
+        Serial.println("ModelServerTransmissionHandler: EXCEPTION during HTTP transmission");
+        httpResponseCode = -1;
+    }
     
     // NO FREEING HERE - Buffer is reused for next batch
     
@@ -199,9 +208,23 @@ public:
       
       int commaPos = response.indexOf(',');
       if (commaPos > 0) {
-        result.deltaLat = response.substring(0, commaPos).toDouble();
-        result.deltaLon = response.substring(commaPos + 1).toDouble();
-        result.valid = true;
+        double dLat = response.substring(0, commaPos).toDouble();
+        double dLon = response.substring(commaPos + 1).toDouble();
+        
+        // CHECK FOR NaN: If server sends "NaN,NaN" or invalid float, toDouble() might process it blindly
+        // or we need to check isnan() explicitly.
+        // Also check if response actually contains "NaN" string to be safe.
+        if (isnan(dLat) || isnan(dLon) || response.indexOf("NaN") >= 0 || response.indexOf("nan") >= 0) {
+            Serial.print("ModelServerTransmissionHandler: NaN response received, treating as 0.0, 0.0: ");
+            Serial.println(response);
+            result.deltaLat = 0.0;
+            result.deltaLon = 0.0;
+            result.valid = true;
+        } else {
+            result.deltaLat = dLat;
+            result.deltaLon = dLon;
+            result.valid = true;
+        }
       }
     }
     
@@ -329,6 +352,23 @@ public:
         currentLon += deltaPos.deltaLon;
         currentHdop = -1.0; // Mark as calculated position (not from real GPS)
         
+        // 1. Handle latitude crossing the poles (reflect + flip longitude)
+        while (currentLat > 90.0 || currentLat < -90.0) {
+          if (currentLat > 90.0) {
+            currentLat = 180.0 - currentLat;
+            currentLon += 180.0;
+          } else if (currentLat < -90.0) {
+            currentLat = -180.0 - currentLat;
+            currentLon += 180.0;
+          }
+        }
+        
+        // 2. Wrap Longitude to -180 to 180 (Efficiently handles large values)
+        // Logic: (((Lon + 180) % 360) - 180)
+        currentLon = fmod(currentLon + 180.0, 360.0);
+        if (currentLon < 0) currentLon += 360.0;
+        currentLon -= 180.0;
+
         Serial.print("ModelServerTransmissionHandler: Updated position: (");
         Serial.print(currentLat, 7);
         Serial.print(", ");
