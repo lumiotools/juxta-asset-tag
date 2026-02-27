@@ -9,8 +9,8 @@
 #include "libs/BMI3XY_SensorAPI-main/bmi323.h"
 
 // IMU pin definitions
-#define I2C_SDA_PIN 0     // IMU_SDA
-#define I2C_SCL_PIN 1     // IMU_SCL
+#define I2C_SDA_PIN 1     // IMU_SDA
+#define I2C_SCL_PIN 0     // IMU_SCL
 
 // Structure to hold all IMU data
 struct IMUData {
