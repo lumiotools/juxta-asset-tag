@@ -121,7 +121,7 @@ private:
       
       // Get battery level
       float batteryVoltage = BatteryMonitor::readBatteryVoltage();
-      int batteryLevel = BatteryMonitor::getBatteryPercentageV(batteryVoltage);
+      int batteryLevel = BatteryMonitor::getBatteryPercentage();
       
       const char* devId = (deviceId != nullptr) ? deviceId : "Unknown";
       const char* devVer = (deviceVersion != nullptr) ? deviceVersion : "v0.0.0";
