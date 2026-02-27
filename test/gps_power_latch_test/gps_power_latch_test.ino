@@ -1,236 +1,88 @@
-// GPS Sensor Test with Power Latch Control
-// This test verifies the AT6558 GPS sensor initialization and data reading
-// with power latch control for power management
-// 
-// Hardware Connections:
-// - GPS TX → GPIO 17 (ESP32 RX - RXD0)
-// - GPS RX → GPIO 16 (ESP32 TX - TXD0)
-// - GPS Power → GPIO 19 (GPS_POWER_PIN)
-// - Power Latch → GPIO 4 (POWER_LATCH_PIN)
-// - Button → GPIO 10 (BUTTON_PIN, for power off)
-// - LED → GPIO 20 (LED_PIN, indicates GPS fix)
+#include "gps_sensor.h"
+#include "time_sync.h"
+#include <esp_system.h>
+#include "driver/gpio.h"
 
-#include <Arduino.h>
-#include "../power_latch.h"
-#include "../../gps_sensor.h"
-#include "../../nvs_config.h"
+#define POWER_LATCH_PIN 4
 
-// GPS sensor instance
 GPSSensor gpsSensor;
-bool gpsInitialized = false;
+long long lastGPSToggleTime = -1;
+bool gpsIsOn = false;
 
-// Timing variables
-unsigned long lastGPSUpdateTime = 0;
-const unsigned long GPS_UPDATE_INTERVAL_MS = 1000; // Update GPS every 1 second
 
-// Fix acquisition timeout
-const unsigned long GPS_FIX_TIMEOUT_MS = 120000; // 2 minutes timeout for fix
-unsigned long gpsStartTime = 0;
-bool fixAcquired = false;
+void setPowerLatchPin(bool high) {
+  if (high) {
+    // Set HIGH: Configure as OUTPUT with pull-up
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLUP_ONLY);
+    digitalWrite(POWER_LATCH_PIN, HIGH);
+    Serial.println("Power latch pin (IO4) set HIGH with pull-up");
+  } else {
+    // Set LOW: Configure as OUTPUT with pull-down
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLDOWN_ONLY);
+    digitalWrite(POWER_LATCH_PIN, LOW);
+    Serial.println("Power latch pin (IO4) set LOW with pull-down");
+  }
+}
 
-// LED pin for GPS fix indicator
-const int LED_PIN = 20;
-
-// Serial command buffer
-String serialCommand = "";
 
 void setup() {
   Serial.begin(115200);
-  // No delay on boot - start immediately
-  
-  // Initialize power latch (set HIGH on boot)
-  initPowerLatch();
-  
-  // Initialize LED pin (starts OFF, will turn ON when GPS fix is acquired)
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
-  Serial.println("\n========================================");
-  Serial.println("GPS Sensor Test with Power Latch");
-  Serial.println("========================================\n");
-  
-  // Initialize NVS (required for GPS sensor to load/save last known position)
-  Serial.println("Initializing NVS...");
-  if (NVSConfig::initializeNVS()) {
-    Serial.println("NVS initialized successfully");
-  } else {
-    Serial.println("WARNING: NVS initialization failed - GPS hot start may not work");
-  }
-  
+  delay(100);
+  Serial.println("=== GPS Power Latch Test Start ===");
+
+  // Initialize power latch pin
+  Serial.println("Initializing power latch pin...");
+  setPowerLatchPin(true);
+  Serial.println("Power latch activated");
+
   // Initialize GPS sensor
   Serial.println("Initializing GPS sensor...");
-  gpsStartTime = millis();
-  gpsInitialized = gpsSensor.begin();
-  
-  if (gpsInitialized) {
-    Serial.println("GPS initialized successfully");
-    Serial.println("Waiting for GPS fix...");
-    Serial.println("(This may take up to 2 minutes)");
-  } else {
-    Serial.println("GPS initialization failed - continuing without GPS");
-  }
-  
-  Serial.println("\n========================================");
-  Serial.println("Test Setup Complete!");
-  Serial.println("Reading GPS data every 1 second...");
-  Serial.println("Hold button for 5 seconds to power off");
-  Serial.println("\nSerial Commands:");
-  Serial.println("  gps on  - Turn GPS power ON (HIGH)");
-  Serial.println("  gps off - Turn GPS power OFF (LOW)");
-  Serial.println("  help    - Show this help message");
-  Serial.println("========================================\n");
-}
+  bool gps_initialized = gpsSensor.begin();
+  Serial.print("GPS sensor initialized: ");
+  Serial.println(gps_initialized ? "SUCCESS" : "FAILED");
 
-// Handle serial commands
-void handleSerialCommand() {
-  if (Serial.available() > 0) {
-    char c = Serial.read();
-    
-    if (c == '\n' || c == '\r') {
-      // Command complete - process it
-      if (serialCommand.length() > 0) {
-        serialCommand.trim();
-        serialCommand.toLowerCase();
-        
-        if (serialCommand == "gps on") {
-          Serial.println("\n>>> Command: GPS ON");
-          GPSSensor::powerOn();
-          Serial.println(">>> GPS power set to HIGH (ON)\n");
-        } else if (serialCommand == "gps off") {
-          Serial.println("\n>>> Command: GPS OFF");
-          GPSSensor::powerOff();
-          Serial.println(">>> GPS power set to LOW (OFF)\n");
-        } else if (serialCommand == "help") {
-          Serial.println("\n========================================");
-          Serial.println("Available Serial Commands:");
-          Serial.println("  gps on  - Turn GPS power ON (HIGH)");
-          Serial.println("  gps off - Turn GPS power OFF (LOW)");
-          Serial.println("  help    - Show this help message");
-          Serial.println("========================================\n");
-        } else {
-          Serial.print("\n>>> Unknown command: ");
-          Serial.println(serialCommand);
-          Serial.println("Type 'help' for available commands\n");
-        }
-        
-        serialCommand = ""; // Clear command buffer
-      }
-    } else {
-      // Add character to command buffer
-      serialCommand += c;
-    }
-  }
-}
-
-void loop() {
-  // Handle serial commands
-  handleSerialCommand();
-  
-  // Update button handler (check for long press to power off)
-  updateButtonHandler();
-  
-  if (!gpsInitialized) {
-    delay(1000);
+  if (!gps_initialized) {
+    Serial.println("ERROR: GPS initialization failed");
     return;
   }
+
+  // Initialize time sync for timestamp tracking
+  Serial.println("Initializing time sync...");
   
-  // Update GPS data at regular intervals
-  unsigned long currentTime = millis();
-  if (currentTime - lastGPSUpdateTime >= GPS_UPDATE_INTERVAL_MS) {
-    lastGPSUpdateTime = currentTime;
-    
-    // Update GPS sensor (reads NMEA sentences)
-    gpsSensor.update();
-    
-    // Get GPS data
-    GPSData gpsData = gpsSensor.getGPSData();
-    
-    // Print GPS status
-    Serial.println("--- GPS Data ---");
-    
-    if (gpsData.hasValidFix) {
-      if (!fixAcquired) {
-        fixAcquired = true;
-        unsigned long fixTime = currentTime - gpsStartTime;
-        Serial.print("*** GPS FIX ACQUIRED! (Time: ");
-        Serial.print(fixTime / 1000);
-        Serial.println(" seconds) ***");
-        // Turn LED on when fix is acquired
-        digitalWrite(LED_PIN, HIGH);
-      }
-      
-      Serial.print("Status: VALID FIX (");
-      if (gpsData.fixType == 2) {
-        Serial.print("2D");
-      } else if (gpsData.fixType == 3) {
-        Serial.print("3D");
-      } else {
-        Serial.print("Type ");
-        Serial.print(gpsData.fixType);
-      }
-      Serial.println(")");
-      
-      Serial.print("Latitude:  ");
-      Serial.print(gpsData.latitude, 7);
-      Serial.println("°");
-      
-      Serial.print("Longitude: ");
-      Serial.print(gpsData.longitude, 7);
-      Serial.println("°");
-      
-      Serial.print("Altitude:  ");
-      Serial.print(gpsData.altitude, 2);
-      Serial.println(" m");
-      
-      Serial.print("Speed:     ");
-      Serial.print(gpsData.speed, 2);
-      Serial.println(" m/s");
-      
-      Serial.print("Heading:   ");
-      Serial.print(gpsData.heading, 1);
-      Serial.println("°");
-      
-      Serial.print("Satellites: ");
-      Serial.println(gpsData.satellites);
-      
-      Serial.print("HDOP:      ");
-      Serial.println(gpsData.hdop, 2);
-      
-      if (gpsData.lastFixTimeMillis > 0) {
-        Serial.print("Last Fix Time: ");
-        Serial.print(gpsData.lastFixTimeMillis);
-        Serial.println(" ms (since epoch or millis)");
-      }
+  lastGPSToggleTime = TimeSync::getCurrentTimeMillis();
+  gpsIsOn = true;
+  gpsSensor.powerOn();
+  Serial.println("GPS powered ON");
+  
+  Serial.println("=== Setup Complete ===");
+}
+
+
+void loop() {
+  long long currentTime = TimeSync::getCurrentTimeMillis();
+
+  // Toggle GPS every 30 seconds
+  if ((currentTime - lastGPSToggleTime) >= 15000) {
+    lastGPSToggleTime = currentTime;
+
+    if (gpsIsOn) {
+      // Turn GPS OFF
+      gpsSensor.powerOff();
+      gpsIsOn = false;
+      Serial.println("GPS powered OFF");
     } else {
-      // No fix
-      unsigned long elapsedTime = currentTime - gpsStartTime;
-      Serial.print("Status: NO FIX (Elapsed: ");
-      Serial.print(elapsedTime / 1000);
-      Serial.print(" seconds");
-      
-      if (elapsedTime >= GPS_FIX_TIMEOUT_MS) {
-        Serial.print(" - TIMEOUT");
-      }
-      Serial.println(")");
-      
-      // Show last known position if available
-      if (gpsData.latitude != 0.0 || gpsData.longitude != 0.0) {
-        Serial.println("Last known position (stale data):");
-        Serial.print("  Latitude:  ");
-        Serial.print(gpsData.latitude, 7);
-        Serial.println("°");
-        Serial.print("  Longitude: ");
-        Serial.print(gpsData.longitude, 7);
-        Serial.println("°");
-      } else {
-        Serial.println("No position data available");
-      }
+      // Turn GPS ON
+      gpsSensor.powerOn();
+      gpsIsOn = true;
+      Serial.println("GPS powered ON");
     }
-    
-    Serial.println();
+
+    Serial.print("GPS Toggle - Current state: ");
+    Serial.println(gpsIsOn ? "ON" : "OFF");
   }
-  
-  // Small delay to prevent excessive CPU usage
-  delay(10);
+
+  delay(100); // Small delay to prevent blocking
 }
 
