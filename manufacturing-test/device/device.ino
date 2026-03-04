@@ -11,7 +11,7 @@
 // - At the end, it releases the power latch to safely power off.
 
 #include <Arduino.h>
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 #include <WiFi.h>
 #include "../../device_id.h"
 #include "../../nvs_config.h"
@@ -48,7 +48,7 @@ long long startStatusLEDBlink(uint8_t /*r*/, uint8_t /*g*/, uint8_t /*b*/) { ret
 void stopStatusLEDBlink(long long /*t*/) {}
 
 // -------------------- Test objects --------------------
-Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+CRGB statusLED[STATUS_LED_COUNT];
 IMUSensor imuSensor;
 GPSSensor gpsSensor;
 
@@ -87,8 +87,8 @@ static void stepHeader(int stepIndex, int stepCount, const char* name) {
 static void waitCountdown(const char* label, int seconds) {
   
   // Save current pixel colors so we can restore them after turning off.
-  uint32_t prev0 = statusLED.getPixelColor(0);
-  uint32_t prev1 = statusLED.getPixelColor(1);
+  CRGB prev0 = statusLED[0];
+  CRGB prev1 = statusLED[1];
 
   for (int i = seconds; i > 0; --i) {
     Serial.print(label);
@@ -102,14 +102,14 @@ static void waitCountdown(const char* label, int seconds) {
       delay(250);
       if (j % 2 == 0) {
         // off
-        statusLED.setPixelColor(0, 0);
-        statusLED.setPixelColor(1, 0);
+        statusLED[0] = CRGB::Black;
+        statusLED[1] = CRGB::Black;
       } else {
         // restore previous colors
-        statusLED.setPixelColor(0, prev0);
-        statusLED.setPixelColor(1, prev1);
+        statusLED[0] = prev0;
+        statusLED[1] = prev1;
       }
-      statusLED.show();
+      FastLED.show();
     }
   }
 } 
@@ -186,9 +186,9 @@ static void logFail(const char* name, const char* reason) {
   Serial.println(reason);
 }
 
-static void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
-  statusLED.setPixelColor(pixel, statusLED.Color(r, g, b));
-  statusLED.show();
+static void setPixelAndShow(uint8_t pixel, CRGB color) {
+  statusLED[pixel] = color;
+  FastLED.show();
 }
 
 void setPowerLatchPin(bool high) {
@@ -248,8 +248,8 @@ static void waitForUploadRequest() {
     if (!ready_printed && (millis() - wait_start) >= UPLOAD_REQUEST_TIMEOUT_MS) {
       Serial.println("UPLOAD TIMEOUT: no button press detected - powering off");
       // Visual: RED
-      setPixelAndShow(0, 255, 0, 0);
-      setPixelAndShow(1, 255, 0, 0);
+      setPixelAndShow(0, CRGB::Red);
+      setPixelAndShow(1, CRGB::Red);
       waitCountdown("Powering off in", 3);
       releasePowerLatchAndPowerOff();
       return;
@@ -260,11 +260,11 @@ static void waitForUploadRequest() {
       last_toggle = millis();
       led_on = !led_on;
       if (led_on) {
-        setPixelAndShow(0, 0, 255, 0);
-        setPixelAndShow(1, 0, 255, 0);
+        setPixelAndShow(0, CRGB::Green);
+        setPixelAndShow(1, CRGB::Green);
       } else {
-        setPixelAndShow(0, 0, 0, 0);
-        setPixelAndShow(1, 0, 0, 0);
+        setPixelAndShow(0, CRGB::Black);
+        setPixelAndShow(1, CRGB::Black);
       }
     }
 
@@ -277,8 +277,8 @@ static void waitForUploadRequest() {
         ready_printed = true;
 
         // Make LED solid green after readiness announced
-        setPixelAndShow(0, 0, 255, 0);
-        setPixelAndShow(1, 0, 255, 0);
+        setPixelAndShow(0, CRGB::Green);
+        setPixelAndShow(1, CRGB::Green);
       }
     } else {
       press_start = 0;
@@ -304,42 +304,41 @@ static bool testDeviceId() {
 
 static bool testStatusLED() {
   Serial.println("LED: both pixels WHITE (500ms)");
-  setPixelAndShow(0, 255, 255, 255);
-  setPixelAndShow(1, 255, 255, 255);
+  setPixelAndShow(0, CRGB::White);
+  setPixelAndShow(1, CRGB::White);
   delay(500);
 
   // Test both pixels, one-by-one, for each color.
   // Keep the *other* pixel off while testing the current one.
-  const uint8_t level = 255;
   for (uint8_t pixel = 0; pixel < 2; pixel++) {
     Serial.print("LED pixel ");
     Serial.print(pixel);
     Serial.println(": testing R, G, B");
 
     // Ensure both off
-    setPixelAndShow(0, 0, 0, 0);
-    setPixelAndShow(1, 0, 0, 0);
+    setPixelAndShow(0, CRGB::Black);
+    setPixelAndShow(1, CRGB::Black);
     delay(500);
 
     // Red
-    setPixelAndShow(pixel, level, 0, 0);
+    setPixelAndShow(pixel, CRGB::Red);
     delay(500);
 
     // Green
-    setPixelAndShow(pixel, 0, level, 0);
+    setPixelAndShow(pixel, CRGB::Green);
     delay(500);
 
     // Blue
-    setPixelAndShow(pixel, 0, 0, level);
+    setPixelAndShow(pixel, CRGB::Blue);
     delay(500);
 
     // Off
-    setPixelAndShow(pixel, 0, 0, 0);
+    setPixelAndShow(pixel, CRGB::Black);
     delay(500);
   }
 
-  setPixelAndShow(0, 255, 255, 255);
-  setPixelAndShow(1, 255, 255, 255);
+  setPixelAndShow(0, CRGB::White);
+  setPixelAndShow(1, CRGB::White);
   return true;
 }
 
@@ -510,8 +509,8 @@ static bool testIMUMotionInterrupt(uint32_t maxMillisBudget) {
   MotionSleepManager::setupMotionISR();
 
   // Visual cue: motion-wait mode (unique color not used elsewhere)
-  setPixelAndShow(0, 180, 180, 0); // Yellow: waiting for motion
-  setPixelAndShow(1, 180, 180, 0);
+  setPixelAndShow(0, CRGB::Yellow); // Yellow: waiting for motion
+  setPixelAndShow(1, CRGB::Yellow);
 
   Serial.print("ACTION: Tap/shake the device now (<= ");
   Serial.print((maxMillisBudget + 999) / 1000);
@@ -535,8 +534,8 @@ static bool testIMUMotionInterrupt(uint32_t maxMillisBudget) {
       Serial.println("s");
 
       // Visual cue: motion detected (turn off)
-      setPixelAndShow(0, 0, 0, 0);
-      setPixelAndShow(1, 0, 0, 0);
+      setPixelAndShow(0, CRGB::Black);
+      setPixelAndShow(1, CRGB::Black);
       logPass("IMU INT (GPIO5)");
       return true;
     }
@@ -558,8 +557,8 @@ static bool testIMUMotionInterrupt(uint32_t maxMillisBudget) {
   Serial.print(budgetSec);
   Serial.println("s");
   // Optional cue: timeout (turn off)
-  setPixelAndShow(0, 0, 0, 0);
-  setPixelAndShow(1, 0, 0, 0);
+  setPixelAndShow(0, CRGB::Black);
+  setPixelAndShow(1, CRGB::Black);
   logFail("IMU INT (GPIO5)", "No interrupt observed");
   return false;
 }
@@ -598,8 +597,8 @@ static bool testHubConnect() {
     logPass("Hub Connect");
 
     // Visual cue: Hub connected -> PURPLE on both pixels
-    setPixelAndShow(0, 128, 0, 128);
-    setPixelAndShow(1, 128, 0, 128);
+    setPixelAndShow(0, CRGB::Purple);
+    setPixelAndShow(1, CRGB::Purple);
 
     return true;
   } else {
@@ -619,16 +618,15 @@ void setup() {
   banner("JUXTA FACTORY TEST");
 
   // Visual indication immediately on boot (helps operator while holding the button)
-  statusLED.begin();
-  statusLED.setBrightness(100);
-  setPixelAndShow(0, 150, 80, 0); // Amber: booting
-  setPixelAndShow(1, 150, 80, 0); // Amber: booting
+  FastLED.addLeds<WS2812, STATUS_LED_PIN>(statusLED, STATUS_LED_COUNT); 
+  setPixelAndShow(0, CRGB::Orange); // Amber: booting
+  setPixelAndShow(1, CRGB::Orange); // Amber: booting
 
   // Assert latch ASAP so operator can release the button
   setPowerLatchPin(true);
   delay(250);
-  setPixelAndShow(0, 0, 255, 0); // Green: latch asserted
-  setPixelAndShow(1, 0, 255, 0); // Green: latch asserted
+  setPixelAndShow(0, CRGB::Green); // Green: latch asserted
+  setPixelAndShow(1, CRGB::Green); // Green: latch asserted
   Serial.println("POWER LATCH ASSERTED - you can release the button now.");
 
   // Start BLE advertising ASAP (so operator has time to find it while other tests run)
@@ -691,8 +689,8 @@ void setup() {
     Serial.println("OVERALL: FAIL");
 
     // Visual: RED
-    setPixelAndShow(0, 255, 0, 0);
-    setPixelAndShow(1, 255, 0, 0);
+    setPixelAndShow(0, CRGB::Red);
+    setPixelAndShow(1, CRGB::Red);
 
     waitCountdown("Powering off in", 3);
     releasePowerLatchAndPowerOff();
@@ -708,8 +706,8 @@ void setup() {
     Serial.println("EARLY EXIT: BLE not connected during setup; powering off");
 
     // Visual: RED
-    setPixelAndShow(0, 255, 0, 0);
-    setPixelAndShow(1, 255, 0, 0);
+    setPixelAndShow(0, CRGB::Red);
+    setPixelAndShow(1, CRGB::Red);
 
     waitCountdown("Powering off in", 3);
     releasePowerLatchAndPowerOff();
@@ -719,8 +717,8 @@ void setup() {
   // BLE was connected earlier -> proceed
   logPass("BLE Connection");
   // Visual cue: BLE seen -> BLUE on both pixels
-  setPixelAndShow(0, 0, 0, 255);
-  setPixelAndShow(1, 0, 0, 255);
+  setPixelAndShow(0, CRGB::Blue);
+  setPixelAndShow(1, CRGB::Blue);
   // pauseBetweenSteps();
 
   // Proceed to hub WiFi connection
@@ -738,8 +736,8 @@ void setup() {
   } else {
     Serial.println("OVERALL: FAIL");
     // Red on pixel 0 for 2s
-    setPixelAndShow(0, 255, 0, 0);
-    setPixelAndShow(1, 255, 0, 0);
+    setPixelAndShow(0, CRGB::Red);
+    setPixelAndShow(1, CRGB::Red);
 
     waitCountdown("Powering off in", 3);
     releasePowerLatchAndPowerOff();

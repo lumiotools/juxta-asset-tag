@@ -10,7 +10,7 @@
 
 #include <Arduino.h>
 #include "battery_monitor.h"
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 
 // Battery thresholds
 #define BATTERY_THRESHOLD_PERCENT 20  // LED on (red) when below this percentage
@@ -28,29 +28,29 @@ enum BatteryBlinkState {
 
 class BatteryIndicatorLED {
 private:
-  Adafruit_NeoPixel* neopixel;  // Pointer to shared NeoPixel strip
+  CRGB* neopixel;  // Pointer to shared NeoPixel strip
   uint8_t pixelIndex;            // Pixel index (1 for battery, 0 is device status)
   bool enabled;                  // Track if LED is enabled
   BatteryBlinkState blinkState;  // Current blinking state
   unsigned long blinkStartTime;  // Time when blinking cycle started
   bool blinkOnState;             // Current on/off state during blinking
   
-  void setPixelColor(uint8_t r, uint8_t g, uint8_t b) {
+  void setPixelColor(CRGB color) {
     if (neopixel && enabled) {
-      neopixel->setPixelColor(pixelIndex, neopixel->Color(r, g, b));
-      neopixel->show();
+      neopixel[pixelIndex] = color;
+      FastLED.show();
     }
   }
   
   void ledOn() {
     if (!enabled || !neopixel) return;
-    setPixelColor(255, 0, 0); // Red
+    setPixelColor(CRGB::Red); // Red
   }
   
   void ledOff() {
     if (neopixel) {
-      neopixel->setPixelColor(pixelIndex, neopixel->Color(0, 0, 0));
-      neopixel->show();
+      neopixel[pixelIndex] = CRGB::Black;
+      FastLED.show();
     }
   }
   
@@ -86,7 +86,7 @@ public:
                           blinkState(BATTERY_OFF), blinkStartTime(0), blinkOnState(false) {
   }
 
-  void begin(Adafruit_NeoPixel* np, uint8_t pixel = 1) {
+  void begin(CRGB* np, uint8_t pixel = 1) {
     neopixel = np;
     pixelIndex = pixel;
     enabled = true;
@@ -96,8 +96,8 @@ public:
     
     // Initialize pixel to off
     if (neopixel) {
-      neopixel->setPixelColor(pixelIndex, neopixel->Color(0, 0, 0));
-      neopixel->show();
+      neopixel[pixelIndex] = CRGB::Black;
+      FastLED.show();
     }
     
     Serial.print("Battery LED initialized on pixel ");
@@ -136,13 +136,6 @@ public:
         blinkOnState = true;
       }
     }
-  }
-
-  // Set custom RGB color
-  void setColor(uint8_t r, uint8_t g, uint8_t b) {
-    if (!enabled || !neopixel) return;
-    setPixelColor(r, g, b);
-    // Note: This will override battery state until next updateBatteryLED() call
   }
 
   // Turn off LED

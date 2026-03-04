@@ -10,7 +10,7 @@
 #include "model_server_transmission.h"
 #include "position_server_transmission.h"
 #include "motion_sleep_manager.h"  // Motion detection and deep sleep management
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 #include <esp_system.h>
 #include "esp_sleep.h"
 #include <Ticker.h>
@@ -31,7 +31,7 @@ const char* DEVICE_ID = deviceIdBuffer;
 const int STATUS_LED_PIN = 11;
 const int STATUS_LED_COUNT = 2; 
 
-Adafruit_NeoPixel statusLED(STATUS_LED_COUNT, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+CRGB statusLED[STATUS_LED_COUNT];
 
 BatteryIndicatorLED batteryIndicatorLED;
 IMUSensor imuSensor;
@@ -94,9 +94,9 @@ void setPowerLatchPin(bool high) {
   }
 }
 
-void setPixelAndShow(uint8_t pixel, uint8_t r, uint8_t g, uint8_t b) {
-  statusLED.setPixelColor(pixel, statusLED.Color(r, g, b));
-  statusLED.show();
+void setPixelAndShow(uint8_t pixel, CRGB color) {
+  statusLED[pixel] = color;
+  FastLED.show();
 }
 
 // Attempt time synchronization if needed (WiFi must be connected first)
@@ -134,16 +134,16 @@ void setup() {
   Serial.println(DEVICE_VERSION);
 
   Serial.println("Initializing status LED...");
-  statusLED.begin();
+  FastLED.addLeds<WS2812, STATUS_LED_PIN>(statusLED, STATUS_LED_COUNT); 
 
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
   Serial.print("Wake reason: ");
   
   if(wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
     Serial.println("TIMER (scheduled wake)");
-    setPixelAndShow(0, 0, 255, 0); // Green on
+    setPixelAndShow(0, CRGB::Green); // Green on
     delay(1000);
-    setPixelAndShow(0, 0, 0, 0); // Off
+    setPixelAndShow(0, CRGB::Black); // Off
     gpio_hold_dis(GPIO_NUM_4); // Release GPIO hold on power latch pin
     setPowerLatchPin(true);
     is_first_cycle = false;
@@ -153,9 +153,9 @@ void setup() {
 
   } else if (wakeReason == ESP_SLEEP_WAKEUP_EXT0 || wakeReason == ESP_SLEEP_WAKEUP_EXT1) {
     Serial.println("EXTERNAL (EXT0/EXT1)");
-    setPixelAndShow(0, 0, 255, 0); // Green on
+    setPixelAndShow(0, CRGB::Green); // Green on
     delay(1000);
-    setPixelAndShow(0, 0, 0, 0); // Off
+    setPixelAndShow(0, CRGB::Black); // Off
     gpio_hold_dis(GPIO_NUM_4); // Release GPIO hold on power latch pin
     setPowerLatchPin(true);
     Serial.println("External wake detected");
@@ -170,15 +170,15 @@ void setup() {
     delay(4000);
     Serial.println("Button pressed - after delay of 4 seconds");
     setPowerLatchPin(true);
-    setPixelAndShow(0, 0, 255, 0); // Green on
+    setPixelAndShow(0, CRGB::Green); // Green on
     delay(2000);
-    setPixelAndShow(0, 0, 0, 0); // Off
+    setPixelAndShow(0, CRGB::Black); // Off
     is_first_cycle = true;
     Serial.println("Set to first cycle mode");
   }
 
   Serial.println("Initializing battery indicator LED...");
-  batteryIndicatorLED.begin(&statusLED, 1); // Pass NeoPixel pointer and pixel index 1
+  batteryIndicatorLED.begin(statusLED, 1); // Pass NeoPixel pointer and pixel index 1
   batteryIndicatorLED.updateBatteryLED(); // Initialize state
   delay(100);
 
@@ -284,13 +284,13 @@ void setup() {
   }
   Serial.println("BLE initialized");
   // Green blink pattern: Green -> 300ms -> Off -> 200ms -> Green -> 300ms -> Off
-  setPixelAndShow(0, 0, 255, 0); // Green on
+  setPixelAndShow(0, CRGB::Green); // Green on
   delay(200);
-  setPixelAndShow(0, 0, 0, 0); // Off
+  setPixelAndShow(0, CRGB::Black); // Off
   delay(200);
-  setPixelAndShow(0, 0, 255, 0); // Green on
+  setPixelAndShow(0, CRGB::Green); // Green on
   delay(200);
-  setPixelAndShow(0, 0, 0, 0); // Off
+  setPixelAndShow(0, CRGB::Black); // Off
   Serial.println("=== Setup Complete ===");
 }
 
@@ -313,7 +313,7 @@ void loop() {
          setPowerLatchPin(true);
          
          // 2. Visual indication (Blue - Reset Mode)
-         setPixelAndShow(0, 0, 0, 255); 
+         setPixelAndShow(0, CRGB::Blue); 
 
          // 3. Erase NVS (First for safety)
          Serial.println("Erasing NVS...");
@@ -325,25 +325,25 @@ void loop() {
          
          // 5. Restart with Red blink indication
          Serial.println("Reset complete. Restarting...");
-         setPixelAndShow(0, 255, 0, 0); // Red
+         setPixelAndShow(0, CRGB::Red); // Red
          delay(500);
-         setPixelAndShow(0, 0, 0, 0); // Off
+         setPixelAndShow(0, CRGB::Black); // Off
          setPowerLatchPin(false);
 
       } else if(prev_button_state == HIGH && (current_button_click_time - prev_button_click_time) > 4000) {
         // Just show pending shutdown indication (Red)
         // Actual shutdown happens on release if duration < 20s
         if ((current_button_click_time / 250) % 2 == 0) {
-            setPixelAndShow(0, 255, 0, 0); // Red
+            setPixelAndShow(0, CRGB::Red); // Red
          } else {
-            setPixelAndShow(0, 0, 0, 0); // Off
+            setPixelAndShow(0, CRGB::Black); // Off
          }
       } else if(prev_button_state == LOW && (current_button_click_time - prev_button_click_time) < 800) {
         Serial.println("Double press detected - restarting ESP...");
         delay(200); // Brief delay before restart
-        setPixelAndShow(0, 255, 0, 0); // Red on
+        setPixelAndShow(0, CRGB::Red); // Red on
         delay(500);
-        setPixelAndShow(0, 0, 0, 0); // Off
+        setPixelAndShow(0, CRGB::Black); // Off
         ESP.restart();
       } else {
         if(prev_button_state == LOW) {
@@ -362,7 +362,7 @@ void loop() {
           // Save pointers before manual shutdown
           unifiedCSVStorage.savePointers();
           
-          setPixelAndShow(0, 255, 0, 0); // Red on
+          setPixelAndShow(0, CRGB::Red); // Red on
           delay(500);
           setPowerLatchPin(false);
         }
@@ -379,7 +379,7 @@ void loop() {
 
   if(!flash_initialized || !csv_storage_initialized || !imu_initialized || !gps_initialized) {
     // Serial.println("ERROR: Sensors not initialized - showing error LED");
-    setPixelAndShow(0, 255, 0, 0);
+    setPixelAndShow(0, CRGB::Red);
     return;
   }
 
@@ -466,9 +466,9 @@ void loop() {
       }
       
       delay(200); // Brief delay before restart
-      setPixelAndShow(0, 255, 0, 0); // Red on
+      setPixelAndShow(0, CRGB::Red); // Red on
       delay(500);
-      setPixelAndShow(0, 0, 0, 0); // Off
+      setPixelAndShow(0, CRGB::Black); // Off
 
       MotionSleepManager::enterDeepSleep(&imuSensor);
     }
@@ -624,9 +624,9 @@ void loop() {
       
       Serial.println("Entering deep sleep for 30 seconds...");
       delay(200); // Brief delay before restart
-      setPixelAndShow(0, 255, 0, 0); // Red on
+      setPixelAndShow(0, CRGB::Red); // Red on
       delay(500);
-      setPixelAndShow(0, 0, 0, 0); // Off
+      setPixelAndShow(0, CRGB::Black); // Off
       esp_sleep_enable_timer_wakeup(1000 * 1000 * 30); // 30 seconds in microseconds
       esp_deep_sleep_start();
       return; // Will not reach here
@@ -635,9 +635,9 @@ void loop() {
     if(current_scenario == SCENARIO_NONE) {
       Serial.println("Scenario none detected - should never happen");
       delay(200); // Brief delay before restart
-      setPixelAndShow(0, 255, 0, 0); // Red on
+      setPixelAndShow(0, CRGB::Red); // Red on
       delay(500);
-      setPixelAndShow(0, 0, 0, 0); // Off
+      setPixelAndShow(0, CRGB::Black); // Off
       setPowerLatchPin(false);
       return;
     }
