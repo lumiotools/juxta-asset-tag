@@ -134,7 +134,7 @@ void setup() {
   Serial.println(DEVICE_VERSION);
 
   Serial.println("Initializing status LED...");
-  FastLED.addLeds<WS2812, STATUS_LED_PIN>(statusLED, STATUS_LED_COUNT); 
+  FastLED.addLeds<WS2812, STATUS_LED_PIN, GRB>(statusLED, STATUS_LED_COUNT); 
 
   esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
   Serial.print("Wake reason: ");

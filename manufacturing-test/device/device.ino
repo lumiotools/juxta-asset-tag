@@ -618,7 +618,7 @@ void setup() {
   banner("JUXTA FACTORY TEST");
 
   // Visual indication immediately on boot (helps operator while holding the button)
-  FastLED.addLeds<WS2812, STATUS_LED_PIN>(statusLED, STATUS_LED_COUNT); 
+  FastLED.addLeds<WS2812, STATUS_LED_PIN, GRB>(statusLED, STATUS_LED_COUNT);
   setPixelAndShow(0, CRGB::Orange); // Amber: booting
   setPixelAndShow(1, CRGB::Orange); // Amber: booting
 
