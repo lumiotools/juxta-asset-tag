@@ -109,7 +109,8 @@ public:
   void updateBatteryLED() {
     if (!enabled || !neopixel) return;
     
-    int currentBatteryPercent = BatteryMonitor::getBatteryPercentage();
+    float currentBatteryVoltage = BatteryMonitor::readBatteryVoltage();
+    int currentBatteryPercent = BatteryMonitor::getBatteryPercentageV(currentBatteryVoltage);
     BatteryBlinkState newState;
     
     if (currentBatteryPercent >= BATTERY_THRESHOLD_PERCENT) {
