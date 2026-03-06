@@ -2,7 +2,10 @@ import subprocess
 import sys
 from pathlib import Path
 import serial.tools.list_ports
-
+import time
+import re
+from datetime import datetime
+import pygsheets
 # ================= USER CONFIG =================
 
 # Use script's location to build absolute path to build directory
@@ -32,73 +35,94 @@ FLASH_FREQ = "80m"
 FLASH_SIZE = "4MB"
 
 # ===============================================
+EXCEL_FILE = "production_log.xlsx"
+gc = pygsheets.authorize(service_file="credentials.json")
+sh = gc.open('Production_PCB')
+wks = sh[0]
+
+def get_device_mac(port: str):
+    # Use only 'read-mac' and require BASE MAC to be present.
+    cmd = ["--chip", CHIP, "--port", port, "read-mac"]
+    out = run_esptool(cmd, return_output=True)
+    if not out:
+        return None
+    m_base = re.search(r"BASE\s+MAC:\s*([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})", out, re.IGNORECASE)
+    if m_base:
+        return m_base.group(1).upper()
+    # If BASE MAC not present, abort (no fallback)
+    return None
+
+def log_to_sheets(mac, status):
+    timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")  # Include time
+    try:
+        wks.append_table(values=[timestamp, mac, status])
+        print(f"saved to sheets: {mac}")
+    except Exception as e:
+        print(f"failed to save: {e}")
+        
+def monitor_multiple_esps():
+    seen_ports = set()
+    print("Monitoring for ESP32-C6 units. Plug them in one by one...")
+
+    while True:
+        current_ports = {p.device: p.hwid for p in serial.tools.list_ports.comports()}
+        
+        for device, hwid in current_ports.items():
+            if "303A" in hwid.upper() and device not in seen_ports:
+                print(f"\nNew ESP32-C6 detected: {device}")
+                seen_ports.add(device)
+                
+                # Try merged binary first, then split binaries
+                success = flash_merged(device)
+                if success is False:  # File not found
+                    print("\n⚠️  merged.bin not found, trying split binaries")
+                    success = flash_split(device)
+                
+                status = "Flashed" if success else "Failed"
+                
+                mac = get_device_mac(device)
+                mac12 = mac.replace(":", "").upper()  # Remove colons from MAC
+                log_to_sheets(mac12, status)
+                print(f"Saved to sheets: MAC {mac12} | Status {status}")
+
+        disconnected = seen_ports - set(current_ports.keys())
+        for device in disconnected:
+            print(f"ESP32-C6 removed: {device}. Ready for next device.")
+            seen_ports.remove(device)
+
+        time.sleep(0.5)
 
 
-def find_ports():
-    return list(serial.tools.list_ports.comports())
-
-
-def select_port(ports):
-    print("\nAvailable COM ports:")
-    for i, p in enumerate(ports):
-        print(f"[{i}] {p.device} - {p.description}")
-
-    if len(ports) == 1:
-        choice = input(f"\n✅ Auto-selected: {ports[0].device} - Use this port? (Y/n/manual): ").lower()
-        if choice == "" or choice == "y":
-            return ports[0].device
-        elif choice == "manual" or choice == "m":
-            manual_port = input("Enter COM port (e.g., COM3): ").strip()
-            return manual_port
-
-    print(f"[m] Manual entry")
-    choice = input("\nSelect port index or 'm' for manual: ").strip().lower()
-    
-    if choice == "m" or choice == "manual":
-        manual_port = input("Enter COM port (e.g., COM3): ").strip()
-        return manual_port
-    
-    return ports[int(choice)].device
-
-
-
-def run_esptool(args, retry_on_fail=True):
-    """Run esptool with error handling and retry option"""
+def run_esptool(args, retry_on_fail=True, return_output=False):
     cmd = [sys.executable, "-m", "esptool"] + args
-    print("\n🚀 Running:")
-    print(" ".join(cmd))
-    
+    # User-facing note
+    if any(k in args for k in ("erase_flash", "erase-flash", "read_mac", "read-mac", "get_mac", "get-mac")):
+        print("\n🚀 Running esptool command...")
+    else:
+        print("\n🚀 Flashing with esptool...")
+
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print(result.stdout)
+        if return_output:
+            # Return combined stdout+stderr for robust parsing
+            return (result.stdout or "") + "\n" + (result.stderr or "")
+        else:
+            print(result.stdout)
+        # Default success message for flashing ops
+        print("✅ Flash completed.")
         return True
     except subprocess.CalledProcessError as e:
-        print("\n❌ Error occurred:")
-        if e.stderr:
-            print(e.stderr)
-        if e.stdout:
-            print(e.stdout)
-        
-        # Check for common errors
-        error_msg = str(e.stderr) + str(e.stdout)
-        
-        if "PermissionError" in error_msg or "ClearCommError" in error_msg:
-            print("\n⚠️  Serial port access error!")
-            
-            if retry_on_fail:
-                retry = input("Put device in bootloader mode and retry? (y/N): ").lower()
-                if retry == "y":
-                    print("\n⏳ Waiting 2 seconds for bootloader mode...")
-                    import time
-                    time.sleep(2)
-                    return run_esptool(args, retry_on_fail=False)  # Only retry once
-        
-        elif "No serial data received" in error_msg or "Failed to connect" in error_msg:
-            print("\n⚠️  Cannot connect to ESP32-C6!")
-        
+        # When caller asked for output, return None so caller can try alternatives
+        if return_output:
+            # Return combined output if present
+            out = (e.stdout or "") + "\n" + (e.stderr or "")
+            return out if out.strip() else None
+        print("\n❌ esptool reported an error. Please check the USB cable and COM port, and try again.")
         return False
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        if return_output:
+            return None
+        print(f"\n❌ Unexpected error during esptool operation: {e}")
         return False
 
 
@@ -154,40 +178,17 @@ def flash_split(port):
 
 
 def main():
-    print("\nESP32-C6 Arduino Flash Tool")
-    print("----------------------------")
+    print("\nESP32-C6 Firmware Flash Tool")
+    print("-----------------------------")
 
     if BUILD_DIR is None or not BUILD_DIR.exists():
-        print(f"❌ Build directory not found: {BUILD_ROOT}")
+        print(f"❌ Build directory not found: {BUILD_DIR}")
         sys.exit(1)
     
     print(f"📁 Using build directory: {BUILD_DIR}")
 
-    ports = find_ports()
-    if not ports:
-        print("⚠️  No COM ports detected automatically")
-        manual = input("Enter COM port manually? (y/N): ").lower()
-        if manual == "y":
-            port = input("Enter COM port (e.g., COM3): ").strip()
-        else:
-            print("❌ Aborted - no ports available")
-            sys.exit(1)
-    else:
-        port = select_port(ports)
 
-    # Try merged binary first, then split binaries
-    success = flash_merged(port)
-    
-    if success is False:  # File not found
-        print("\n⚠️  merged.bin not found, flashing split binaries")
-        success = flash_split(port)
-    
-    if success:
-        print("\n✅ Flash completed successfully!")
-        print("📱 You can now reset the device or disconnect/reconnect power.")
-    else:
-        print("\n❌ Flash operation failed!")
-        sys.exit(1)
+    monitor_multiple_esps()
 
 
 if __name__ == "__main__":

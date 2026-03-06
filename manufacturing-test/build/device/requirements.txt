@@ -1,2 +1,5 @@
 pyserial
 esptool
+openpyxl
+pygsheets
+google-auth
