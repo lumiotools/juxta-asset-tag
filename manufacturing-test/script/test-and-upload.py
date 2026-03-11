@@ -514,8 +514,6 @@ def main():
                         
                         # Print test summary before exit
                         print_test_summary(test_results, 'PASS')
-                        
-                        sys.exit(0)
                     else:
                         print("\n❌ Firmware upload failed.")
                         log_to_sheets(mac12, "Test Passed, Flash Failed", test_results)
