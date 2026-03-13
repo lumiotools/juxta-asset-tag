@@ -1,11 +1,42 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <FastLED.h>
+#include <Ticker.h>
 #include <string.h>
 #include <vector>
 
 // Configuration
 static const char PREFIX[] = "Juxta AT";
 static const int MAX_CLIENTS = 5; 
+
+// LED Configuration (match device.ino)
+static const int STATUS_LED_PIN = 11;
+static const int STATUS_LED_COUNT = 2;
+CRGB statusLED[STATUS_LED_COUNT];
+
+// Ticker for LED blinks
+Ticker blinkTicker;
+volatile int blinksRemaining = 0;
+
+// LED Blink Callback
+void handleBlink() {
+  if (blinksRemaining > 0) {
+    blinksRemaining--;
+    statusLED[1] = (blinksRemaining % 2 != 0) ? CRGB::Blue : CRGB::Black;
+    FastLED.show();
+    
+    if (blinksRemaining == 0) {
+      blinkTicker.detach();
+    }
+  }
+}
+
+// Function to trigger/reset blinks
+void triggerConnectionBlink() {
+  blinksRemaining = 6; // 3 blinks (on-off * 3)
+  blinkTicker.detach(); // Reset if already running
+  blinkTicker.attach_ms(300, handleBlink);
+}
 
 // Track connected clients
 std::vector<NimBLEClient*> connectedClients;
@@ -22,6 +53,14 @@ void setup() {
   Serial.begin(115200);
   Serial.println("BLE Hub Starting in Simplified Mode...");
 
+  // Initialize LEDs
+  FastLED.addLeds<WS2812, STATUS_LED_PIN, GRB>(statusLED, STATUS_LED_COUNT);
+  
+  // Turn on LED 1 as green immediately
+  statusLED[0] = CRGB::Green;
+  statusLED[1] = CRGB::Black;
+  FastLED.show();
+
   // 1. Setup BLE
   NimBLEDevice::init("JuxtaHub");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
@@ -30,11 +69,10 @@ void setup() {
 void loop() {
   // Only scan if we have slots available
   if (connectedClients.size() < MAX_CLIENTS) {
-    Serial.printf("Scanning... (Connected: %d/%d)\n", connectedClients.size(), MAX_CLIENTS);
+    Serial.printf("Scanning... (Connected: %d/%d)\n", (int)connectedClients.size(), MAX_CLIENTS);
     
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setActiveScan(true);
-    // start(duration, is_continue) -> duration in seconds. Returns bool in this version.
     pScan->start(0); 
 
     unsigned long scanStart = millis();
@@ -57,6 +95,7 @@ void loop() {
           if (pClient->connect(d->getAddress())) {
             Serial.printf("Connected to %s\n", name.c_str());
             connectedClients.push_back(pClient);
+            triggerConnectionBlink();
             
             if (connectedClients.size() >= MAX_CLIENTS) break; // Stop connecting if full
           } else {
@@ -72,7 +111,7 @@ void loop() {
     delay(1000);
   }
 
-  // 4. Cleanup disconnected clients
+  // Cleanup disconnected clients
   for (auto it = connectedClients.begin(); it != connectedClients.end(); ) {
     if (!(*it)->isConnected()) {
       Serial.println("Client disconnected. freeing resource.");
@@ -85,3 +124,4 @@ void loop() {
 
   delay(100);
 }
+

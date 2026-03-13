@@ -24,7 +24,7 @@ BUILD_DIR = (SCRIPT_DIR).resolve()   # Resolves to absolute path
 
 # BUILD_DIR = find_build_dir()
 
-CHIP = "esp32s3"
+CHIP = "esp32c6"
 BAUD = "921600"
 
 FLASH_MODE = "dio"
