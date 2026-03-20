@@ -7,12 +7,10 @@
 // Notes / constraints:
 // - Does NOT intentionally toggle POWER_LATCH low (may power off the DUT).
 // - Does NOT require WiFi or a GPS fix; it validates GPS UART data presence.
-// - BLE test validates BLE stack init + advertising start (connection optional).
 // - At the end, it releases the power latch to safely power off.
 
 #include <Arduino.h>
 #include <FastLED.h>
-#include <WiFi.h>
 #include "../../device_id.h"
 #include "../../nvs_config.h"
 #include "../../battery_indicator_led.h"
@@ -20,7 +18,6 @@
 #include "../../unified_csv_storage.h"
 #include "../../imu_sensor.h"
 #include "../../gps_sensor.h"
-#include "../../ble_config.h"
 #include "../../motion_sleep_manager.h"
 
 #include "driver/gpio.h"
@@ -32,7 +29,6 @@ static const int STATUS_LED_PIN = 11;
 static const int STATUS_LED_COUNT = 2;
 
 // -------------------- Globals required by included modules --------------------
-// BLEConfig expects these globals (declared extern in ble_config.h)
 SPIFlashHandler spiFlash;
 UnifiedCSVStorage unifiedCSVStorage;
 
@@ -54,13 +50,6 @@ GPSSensor gpsSensor;
 
 static const char* DEVICE_VERSION_FOR_TEST = "v2.0.0";
 static char deviceIdBuffer[32];
-
-// Hub AP creds used by factory when BLE connected
-static const char HUB_AP_SSID[] = "PMC Test Hub";
-static const char HUB_AP_PWD[] = "PMC.Hub@Test";
-
-// Track whether any BLE client connected at any time during the setup
-static bool bleConnectedDuringSetup = false;
 
 static const uint32_t STEP_PAUSE_MS = 500;
 static const uint32_t OPERATOR_INPUT_TIMEOUT_MS = 20000;
@@ -95,8 +84,6 @@ static void waitCountdown(const char* label, int seconds) {
     Serial.print(" ");
     Serial.print(i);
     Serial.println("...");
-    // Poll BLE state during countdown so connections are captured
-    pollBLEDuringSetup();
 
     for (int j = 0; j < 4; j++) {
       delay(250);
@@ -120,20 +107,7 @@ static void pauseBetweenSteps(uint32_t ms = STEP_PAUSE_MS) {
   Serial.println(" ms...");
   unsigned long start = millis();
   while ((millis() - start) < ms) {
-    pollBLEDuringSetup();
     delay(50);
-  }
-}
-
-// Poll BLEConfig so we can detect if a client connected during setup
-static void pollBLEDuringSetup() {
-  // Let BLEConfig perform its periodic processing
-  BLEConfig::update();
-  if (BLEConfig::isConnected()) {
-    if (!bleConnectedDuringSetup) {
-      Serial.println("BLE: Device connected during setup");
-      bleConnectedDuringSetup = true;
-    }
   }
 }
 
@@ -212,11 +186,6 @@ static void releasePowerLatchAndPowerOff() {
   Serial.println("Releasing power latch (power off)...");
 
   // Best-effort: stop radios before cutting power
-  if (BLEConfig::isEnabled()) {
-    BLEConfig::stop();
-  }
-  WiFi.disconnect(true, true);
-  WiFi.mode(WIFI_OFF);
   GPSSensor::powerOff();
 
   setPowerLatchPin(false); // Set LOW to release power latch
@@ -302,46 +271,6 @@ static bool testDeviceId() {
   return true;
 }
 
-static bool testStatusLED() {
-  Serial.println("LED: both pixels WHITE (500ms)");
-  setPixelAndShow(0, CRGB::White);
-  setPixelAndShow(1, CRGB::White);
-  delay(500);
-
-  // Test both pixels, one-by-one, for each color.
-  // Keep the *other* pixel off while testing the current one.
-  for (uint8_t pixel = 0; pixel < 2; pixel++) {
-    Serial.print("LED pixel ");
-    Serial.print(pixel);
-    Serial.println(": testing R, G, B");
-
-    // Ensure both off
-    setPixelAndShow(0, CRGB::Black);
-    setPixelAndShow(1, CRGB::Black);
-    delay(500);
-
-    // Red
-    setPixelAndShow(pixel, CRGB::Red);
-    delay(500);
-
-    // Green
-    setPixelAndShow(pixel, CRGB::Green);
-    delay(500);
-
-    // Blue
-    setPixelAndShow(pixel, CRGB::Blue);
-    delay(500);
-
-    // Off
-    setPixelAndShow(pixel, CRGB::Black);
-    delay(500);
-  }
-
-  setPixelAndShow(0, CRGB::White);
-  setPixelAndShow(1, CRGB::White);
-  return true;
-}
-
 static bool testNVS() {
   bool ok = NVSConfig::initializeNVS();
   if (!ok) {
@@ -377,7 +306,6 @@ static bool testBatteryADC(uint32_t maxMillisBudget) {
   unsigned long start = millis();
   while (!BatteryMonitor::isNewReadingAvailable() && (millis() - start) < maxMillisBudget) {
     BatteryMonitor::updateBatteryReading();
-    pollBLEDuringSetup();
     delay(20);
   }
 
@@ -464,7 +392,6 @@ static bool testIMUReadings(uint32_t maxMillisBudget) {
   bool gotData = false;
 
   while ((millis() - start) < maxMillisBudget) {
-    pollBLEDuringSetup();
     imuSensor.update();
     IMUData d = imuSensor.getIMUData();
 
@@ -524,7 +451,6 @@ static bool testIMUMotionInterrupt(uint32_t maxMillisBudget) {
   Serial.println("s");
 
   while ((millis() - start) < maxMillisBudget) {
-    pollBLEDuringSetup();
 
     if (motionInterruptFlag) {
       motionInterruptFlag = false;
@@ -573,41 +499,6 @@ static bool testGPS() {
   return true;
 }
 
-static bool testHubConnect() {
-  Serial.print("Connecting to Hub AP: ");
-  Serial.println(HUB_AP_SSID);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true, true);
-  delay(50);
-
-  unsigned long start = millis();
-  const unsigned long timeout = 10000; // 10s timeout
-
-  WiFi.begin(HUB_AP_SSID, HUB_AP_PWD);
-  while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeout) {
-    // Poll BLE while waiting so we don't miss events
-    pollBLEDuringSetup();
-    delay(100);
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("Connected to Hub. IP: ");
-    Serial.println(WiFi.localIP());
-    logPass("Hub Connect");
-
-    // Visual cue: Hub connected -> PURPLE on both pixels
-    setPixelAndShow(0, CRGB::Purple);
-    setPixelAndShow(1, CRGB::Purple);
-
-    return true;
-  } else {
-    logFail("Hub Connect", "Failed to connect to Hub AP");
-    WiFi.mode(WIFI_OFF);
-    return false;
-  }
-} 
-
 // -------------------- Main factory sequence --------------------
 static bool ran = false;
 
@@ -629,102 +520,34 @@ void setup() {
   setPixelAndShow(1, CRGB::Green); // Green: latch asserted
   Serial.println("POWER LATCH ASSERTED - you can release the button now.");
 
-  // Start BLE advertising ASAP (so operator has time to find it while other tests run)
-  DeviceID::getDeviceId(deviceIdBuffer, sizeof(deviceIdBuffer));
-  BLEConfig::setDeviceId(deviceIdBuffer);
-  BLEConfig::setDeviceVersion(DEVICE_VERSION_FOR_TEST);
-  static long long bleOffAfterTime = 60000;
-  BLEConfig::setBleOffAfterTime(&bleOffAfterTime, 0);
-  (void)BLEConfig::begin();
-  Serial.print("BLE started. Look for: Juxta ");
-  Serial.println(deviceIdBuffer);
-  // Poll immediately so a quick connect is captured
-  pollBLEDuringSetup();
-
   Serial.println("Starting step-by-step tests...");
 
   // Human-friendly step-by-step execution
-  const int STEP_COUNT = 9;
+  const int STEP_COUNT = 6;
   int step = 1;
   bool overall = true;
 
   stepHeader(step++, STEP_COUNT, "Identity + NVS");
   overall &= testDeviceId();
   overall &= testNVS();
-  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "GPS");
   overall &= testGPS();
   Serial.println("GPS step done.");
-  // pauseBetweenSteps();
-
-  stepHeader(step++, STEP_COUNT, "Status LEDs");
-  overall &= testStatusLED();
-  // No operator feedback required for LEDs
-  logPass("LED");
-  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "Charging Connected");
   overall &= testCharging();
-  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "Battery ADC");
   overall &= testBatteryADC(3000);
-  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "External SPI flash R/W/C");
   overall &= testSPIFlashRW();
-  // pauseBetweenSteps();
 
   stepHeader(step++, STEP_COUNT, "IMU readings + motion interrupt (tap/shake)");
   overall &= testIMUReadings(2000);
   Serial.println("ACTION: Get ready to tap/shake for motion interrupt check...");
   overall &= testIMUMotionInterrupt(10000);
-
-  // Early-exit conditions per new flow:
-  // 1) If any prior step failed (overall == false) -> immediate power off
-  if (!overall) {
-    Serial.println();
-    Serial.println("EARLY EXIT: Failures detected before BLE/WiFi; powering off");
-    Serial.println("OVERALL: FAIL");
-
-    // Visual: RED
-    setPixelAndShow(0, CRGB::Red);
-    setPixelAndShow(1, CRGB::Red);
-
-    waitCountdown("Powering off in", 3);
-    releasePowerLatchAndPowerOff();
-    return;
-  }
-
-  // 2) If no BLE connection detected during setup -> early exit
-  stepHeader(step++, STEP_COUNT, "BLE connection during setup");
-  if (!bleConnectedDuringSetup) {
-    logFail("BLE Connection", "No device connected during setup");
-
-    Serial.println();
-    Serial.println("EARLY EXIT: BLE not connected during setup; powering off");
-
-    // Visual: RED
-    setPixelAndShow(0, CRGB::Red);
-    setPixelAndShow(1, CRGB::Red);
-
-    waitCountdown("Powering off in", 3);
-    releasePowerLatchAndPowerOff();
-    return;
-  }
-
-  // BLE was connected earlier -> proceed
-  logPass("BLE Connection");
-  // Visual cue: BLE seen -> BLUE on both pixels
-  setPixelAndShow(0, CRGB::Blue);
-  setPixelAndShow(1, CRGB::Blue);
-  // pauseBetweenSteps();
-
-  // Proceed to hub WiFi connection
-  stepHeader(step++, STEP_COUNT, "Hub WiFi connect (if BLE connected)");
-  overall &= testHubConnect();
-  // pauseBetweenSteps();
 
   Serial.println();
   if (overall) {

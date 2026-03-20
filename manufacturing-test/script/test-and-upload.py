@@ -341,11 +341,24 @@ def print_test_summary(test_results: dict, overall_status: str):
         "BLE Connection",
         "Hub Connect"
     ]
+
+    # Special handling for GPS: combine GPS and GPS Initialization
+    if test_results.get("GPS Initialization", {}).get("status") == "PASS":
+        gps_status = "PASS"
+        gps_reason = ""
+    else:
+        gps_test = test_results.get("GPS", {})
+        gps_status = gps_test.get("status", "FAILED")
+        gps_reason = gps_test.get("reason", "")
     
     for test_name in test_order:
         if test_name in test_results:
-            status = test_results[test_name]["status"]
-            reason = test_results[test_name]["reason"]
+            if test_name == "GPS": 
+                status = gps_status
+                reason = gps_reason
+            else:
+                status = test_results[test_name]["status"]
+                reason = test_results[test_name]["reason"]
             
             symbol = "✅" if status == "PASS" else "❌"
             if reason:
