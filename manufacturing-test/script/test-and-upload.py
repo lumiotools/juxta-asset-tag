@@ -76,13 +76,13 @@ EXPECTED_TESTS = {
 EXCEL_FILE = "production_log.xlsx"
 gc = pygsheets.authorize(service_file="credentials.json")
 sh = gc.open('Production_PCB')
-wks = sh[0]
+wks = sh[1]
 def get_esp_mac(port):
     cmd = [sys.executable, "-m", "esptool", "--chip", CHIP, "--port", port, "read-mac"]
     try:
         result = subprocess.check_output(cmd, check=True, capture_output=True, text=True)
         for line in result.splitlines():
-            print(line)
+            # print(line)
             if "MAC:" in line:
                 return line.split("MAC: ")[1].strip().replace(":", "").upper()
     except Exception as e:
@@ -142,9 +142,10 @@ def log_to_sheets(mac, status, test_results):
     
     try:
         wks.append_table(values=values)
-        print(f"saved to sheets: {mac}")
+        # print(f"saved to sheets: {mac}")
     except Exception as e:
-        print(f"failed to save: {e}")
+        return
+        # print(f"failed to save: {e}")
         
 def monitor_multiple_esps():
     seen_ports = set()
@@ -163,7 +164,7 @@ def monitor_multiple_esps():
                 
                 mac = get_device_mac(device)
                 log_to_sheets(mac, status)
-                print(f"Saved to Excel: MAC {mac} | Status {status}")
+                # print(f"Saved to Excel: MAC {mac} | Status {status}")
 
         disconnected = seen_ports - set(current_ports.keys())
         for device in disconnected:
@@ -175,10 +176,10 @@ def monitor_multiple_esps():
 def run_esptool(args, retry_on_fail=True, return_output=False):
     cmd = [sys.executable, "-m", "esptool"] + args
     # User-facing note
-    if any(k in args for k in ("erase_flash", "erase-flash", "read_mac", "read-mac", "get_mac", "get-mac")):
-        print("\n🚀 Running esptool command...")
-    else:
-        print("\n🚀 Flashing with esptool...")
+    # if any(k in args for k in ("erase_flash", "erase-flash", "read_mac", "read-mac", "get_mac", "get-mac")):
+    #     print("\n🚀 Running esptool command...")
+    # else:
+    #     print("\n🚀 Flashing with esptool...")
 
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -186,7 +187,7 @@ def run_esptool(args, retry_on_fail=True, return_output=False):
             # Return combined stdout+stderr for robust parsing
             return (result.stdout or "") + "\n" + (result.stderr or "")
         # Default success message for flashing ops
-        print("✅ Flash completed.")
+        # print("✅ Flash completed.")
         return True
     except subprocess.CalledProcessError as e:
         # When caller asked for output, return None so caller can try alternatives
@@ -211,7 +212,7 @@ def flash_dir(build_dir: Path, port: str, flash_baud: str):
 
     merged = next(build_dir.glob("*.merged.bin"), None)
     if merged:
-        print(f"\n✅ Found firmware image: {merged.name} - flashing...")
+        # print(f"\n✅ Found firmware image: {merged.name} - flashing...")
         return run_esptool([
             "--chip", CHIP,
             "--port", port,
@@ -239,7 +240,7 @@ def flash_dir(build_dir: Path, port: str, flash_baud: str):
             return False
         flash_args.extend([addr, str(matches[0])])
 
-    print("\n✅ Found split images, flashing now")
+    # print("\n✅ Found split images, flashing now")
     return run_esptool([
         "--chip", CHIP,
         "--port", port,
@@ -253,12 +254,12 @@ def flash_dir(build_dir: Path, port: str, flash_baud: str):
 
 
 def erase_flash(port: str, flash_baud: str):
-    print("\n--- Erasing flash (this may take a few seconds)... ---")
+    # print("\n--- Erasing flash (this may take a few seconds)... ---")
     ok = run_esptool(["--chip", CHIP, "--port", port, "--baud", flash_baud, "erase_flash"])
-    if ok:
-        print("✅ Erase completed.")
-    else:
-        print("❌ Erase failed. Aborting.")
+    # if ok:
+    #     print("✅ Erase completed.")
+    # else:
+    #     print("❌ Erase failed. Aborting.")
     return ok
 
 
@@ -281,14 +282,14 @@ def register_device(mac12: str, url: str, timeout_s: int) -> bool:
     Returns True on HTTP 2xx, False otherwise.
     """
     payload = "AT" + mac12
-    print(f"Registering device: {payload} ...")
+    # print(f"Registering device: {payload} ...")
     try:
         req = urllib.request.Request(url, data=payload.encode('utf-8'),
                                      headers={'Content-Type': 'text/plain'}, method='POST')
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             code = resp.getcode()
             if 200 <= code < 300:
-                print(f"✅ Registration complete: {payload}")
+                # print(f"✅ Registration complete: {payload}")
                 return True
             else:
                 print(f"❌ Registration failed: server returned {code}")
@@ -329,17 +330,17 @@ def print_test_summary(test_results: dict, overall_status: str):
     
     # Print in same order as Google Sheets columns
     test_order = [
-        "DeviceID",
-        "NVS", 
+        # "DeviceID",
+        # "NVS", 
         "GPS",  # Note: this will show GPS status, but GPS Initialization is handled in sheets
-        "LED",
-        "Charging Detect",
-        "Battery ADC", 
+        # "LED",
+        # "Charging Detect",
+        # "Battery ADC", 
         "SPI Flash",
         "IMU",
         "IMU INT (GPIO5)",
-        "BLE Connection",
-        "Hub Connect"
+        # "BLE Connection",
+        # "Hub Connect"
     ]
 
     # Special handling for GPS: combine GPS and GPS Initialization
@@ -376,7 +377,7 @@ def stream_serial_for_signals(port: str, baud: int, ready_re, pass_re, fail_re, 
     
     Returns: tuple of (status_str, test_results_dict)
     """
-    print(f"\n🔌 Opening serial {port} @ {baud}")
+    # print(f"\n🔌 Opening serial {port} @ {baud}")
     try:
         ser = serial.Serial(port, baudrate=baud, timeout=1)
     except Exception:
@@ -399,7 +400,7 @@ def stream_serial_for_signals(port: str, baud: int, ready_re, pass_re, fail_re, 
             try:
                 line = ser.readline()
             except serial.SerialException:
-                print("\n❌ Serial disconnected.")
+                # print("\n❌ Serial disconnected.")
                 return 'disconnect', test_results
             except Exception:
                 print("\n❌ Serial read error.")
@@ -414,7 +415,7 @@ def stream_serial_for_signals(port: str, baud: int, ready_re, pass_re, fail_re, 
                 text = repr(line)
 
             ts = time.strftime('%H:%M:%S')
-            print(f"[{ts}] {text}")
+            # print(f"[{ts}] {text}")
 
             # Parse TEST log lines
             test_match = test_log_pattern.match(text)
@@ -429,17 +430,17 @@ def stream_serial_for_signals(port: str, baud: int, ready_re, pass_re, fail_re, 
 
             # Detect overall fail
             if fail_re and fail_re.search(text):
-                _print_banner('OVERALL: FAIL', kind='fail')
+                # _print_banner('OVERALL: FAIL', kind='fail')
                 continue
 
             # Detect overall pass
             if pass_re and pass_re.search(text):
-                _print_banner('OVERALL: PASS', kind='pass')
+                # _print_banner('OVERALL: PASS', kind='pass')
                 continue
 
             # Detect readiness string
             if ready_re and ready_re.search(text):
-                print("\n✅ Readiness string detected (UPLOAD FIRMWARE READY)")
+                # print("\n✅ Readiness string detected (UPLOAD FIRMWARE READY)")
                 return 'ready', test_results
 
     finally:
@@ -471,16 +472,16 @@ def main():
                 print(f"\nNew ESP32-C6 detected: {port}")
                 seen_ports.add(port)
                 
-                print(f"\nUsing port: {port}")
+                # print(f"\nUsing port: {port}")
 
                 # Brief operator-facing summary of configuration
-                print("\nConfiguration:")
-                print(f" - Test build dir: {device_build}")
-                print(f" - Firmware build dir: {firmware_build}")
-                print(f" - Serial baud: {SERIAL_BAUD}")
-                print(f" - Flash baud: {FLASH_BAUD}")
-                print(f" - Registration URL: {REGISTER_URL}")
-                print()
+                # print("\nConfiguration:")
+                # print(f" - Test build dir: {device_build}")
+                # print(f" - Firmware build dir: {firmware_build}")
+                # print(f" - Serial baud: {SERIAL_BAUD}")
+                # print(f" - Flash baud: {FLASH_BAUD}")
+                # print(f" - Registration URL: {REGISTER_URL}")
+                # print()
 
                 # Erase flash to ensure clean state, and read base MAC
                 if not erase_flash(port, FLASH_BAUD):
@@ -508,7 +509,7 @@ def main():
                 pass_re = re.compile(PASS_REGEX)
                 fail_re = re.compile(FAIL_REGEX)
 
-                print("\n--- Streaming serial logs (press Ctrl-C to abort) ---")
+                print("\n--- Starting test ---")
                 status, test_results = stream_serial_for_signals(port, SERIAL_BAUD, ready_re, pass_re, fail_re, TIMEOUT)
 
                 mac12 = device_mac.replace(":", "").upper()
@@ -523,20 +524,20 @@ def main():
                         register_device(mac12, REGISTER_URL, REGISTER_TIMEOUT)
                         
                         log_to_sheets(mac12, "Flashed", test_results)
-                        print(f"Saved to Excel: MAC {mac12} | Status {status}")
+                        # print(f"Saved to Excel: MAC {mac12} | Status {status}")
                         
                         # Print test summary before exit
                         print_test_summary(test_results, 'PASS')
                     else:
-                        print("\n❌ Firmware upload failed.")
+                        # print("\n❌ Firmware upload failed.")
                         log_to_sheets(mac12, "Test Passed, Flash Failed", test_results)
                         print_test_summary(test_results, 'FIRMWARE UPLOAD FAILED')
                 elif status == 'fail':
-                    print("\n❌ Test reported OVERALL: FAIL. Firmware not uploaded.")
+                    # print("\n❌ Test reported OVERALL: FAIL. Firmware not uploaded.")
                     log_to_sheets(mac12, "Test Failed", test_results)
                     print_test_summary(test_results, 'FAIL')
                 else:
-                    print("\n❌ Test failed or device disconnected - firmware not uploaded.")
+                    # print("\n❌ Test failed or device disconnected - firmware not uploaded.")
                     log_to_sheets(mac12, "Test Failed", test_results)
                     print_test_summary(test_results, 'ERROR/TIMEOUT')
 
