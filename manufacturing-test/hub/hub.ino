@@ -5,6 +5,8 @@
 #include <string.h>
 #include <vector>
 
+#define POWER_LATCH_PIN 4
+
 // Configuration
 static const char PREFIX[] = "Juxta AT";
 static const int MAX_CLIENTS = 5; 
@@ -17,6 +19,22 @@ CRGB statusLED[STATUS_LED_COUNT];
 // Ticker for LED blinks
 Ticker blinkTicker;
 volatile int blinksRemaining = 0;
+
+void setPowerLatchPin(bool high) {
+  if (high) {
+    // Set HIGH: Configure as OUTPUT with pull-up
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLUP_ONLY);
+    digitalWrite(POWER_LATCH_PIN, HIGH);
+    Serial.println("Power latch pin (IO4) set HIGH with pull-up");
+  } else {
+    // Set LOW: Configure as OUTPUT with pull-down
+    pinMode(POWER_LATCH_PIN, OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_4, GPIO_PULLDOWN_ONLY);
+    digitalWrite(POWER_LATCH_PIN, LOW);
+    Serial.println("Power latch pin (IO4) set LOW with pull-down");
+  }
+}
 
 // LED Blink Callback
 void handleBlink() {
@@ -52,6 +70,7 @@ bool isAlreadyConnected(NimBLEAddress addr) {
 void setup() {
   Serial.begin(115200);
   Serial.println("BLE Hub Starting in Simplified Mode...");
+  setPowerLatchPin(true);
 
   // Initialize LEDs
   FastLED.addLeds<WS2812, STATUS_LED_PIN, GRB>(statusLED, STATUS_LED_COUNT);
