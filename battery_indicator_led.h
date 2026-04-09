@@ -1,9 +1,8 @@
-// Battery Indicator LED - RGB NeoPixel LED that indicates battery level
+// Battery Indicator LED - RGB NeoPixel LED that indicates charging state
 // Uses pixel 1 of shared NeoPixel strip (pixel 0 is for device status)
-// Behavior: 
-//   - >= 20%: OFF
-//   - 10-20%: RED (solid on)
-//   - < 10%: RED (blinking at 500ms intervals, asynchronous)
+// Behavior:
+//   - When charger is connected: solid green on
+//   - When charger is disconnected: use low-battery red indicator only
 
 #ifndef BATTERY_INDICATOR_LED_H
 #define BATTERY_INDICATOR_LED_H
@@ -20,10 +19,11 @@
 #define BLINK_INTERVAL_MS 500  // 500ms on/off interval for blinking
 
 // Battery state enum
-enum BatteryBlinkState {
-  BATTERY_OFF,      // >= 20% - LED off
-  BATTERY_ON,       // 10-20% - LED on (red, solid)
-  BATTERY_BLINKING  // < 10% - LED blinking (red, 500ms)
+enum BatteryLEDState {
+  BATTERY_OFF,
+  BATTERY_RED,
+  BATTERY_RED_BLINK,
+  BATTERY_GREEN
 };
 
 class BatteryIndicatorLED {
@@ -31,9 +31,10 @@ private:
   CRGB* neopixel;  // Pointer to shared NeoPixel strip
   uint8_t pixelIndex;            // Pixel index (1 for battery, 0 is device status)
   bool enabled;                  // Track if LED is enabled
-  BatteryBlinkState blinkState;  // Current blinking state
+  BatteryLEDState blinkState;    // Current battery LED state
   unsigned long blinkStartTime;  // Time when blinking cycle started
   bool blinkOnState;             // Current on/off state during blinking
+  CRGB currentColor;             // Current solid/blink color
   
   void setPixelColor(CRGB color) {
     if (neopixel && enabled) {
@@ -44,18 +45,21 @@ private:
   
   void ledOn() {
     if (!enabled || !neopixel) return;
-    setPixelColor(CRGB::Red); // Red
+    setPixelColor(currentColor);
   }
   
   void ledOff() {
-    if (neopixel) {
-      neopixel[pixelIndex] = CRGB::Black;
-      FastLED.show();
-    }
+    if (!enabled || !neopixel) return;
+    neopixel[pixelIndex] = CRGB::Black;
+    FastLED.show();
+  }
+  
+  bool isBlinkingState() const {
+    return blinkState == BATTERY_RED_BLINK;
   }
   
   void updateBlink() {
-    if (!enabled || !neopixel || blinkState != BATTERY_BLINKING) {
+    if (!enabled || !neopixel || !isBlinkingState()) {
       return;
     }
     
@@ -83,7 +87,7 @@ private:
   
 public:
   BatteryIndicatorLED() : neopixel(nullptr), pixelIndex(1), enabled(true), 
-                          blinkState(BATTERY_OFF), blinkStartTime(0), blinkOnState(false) {
+                          blinkState(BATTERY_OFF), blinkStartTime(0), blinkOnState(false), currentColor(CRGB::Black) {
   }
 
   void begin(CRGB* np, uint8_t pixel = 1) {
@@ -93,6 +97,7 @@ public:
     blinkState = BATTERY_OFF;
     blinkStartTime = millis();
     blinkOnState = false;
+    currentColor = CRGB::Black;
     
     // Initialize pixel to off
     if (neopixel) {
@@ -102,7 +107,7 @@ public:
     
     Serial.print("Battery LED initialized on pixel ");
     Serial.print(pixelIndex);
-    Serial.print(" (thresholds: >= 20% = OFF, 10-20% = RED, < 10% = RED blinking)");
+    Serial.print(" (charger connected = solid green, otherwise battery low red)");
     Serial.println();
   }
 
@@ -111,14 +116,33 @@ public:
     
     float currentBatteryVoltage = BatteryMonitor::readBatteryVoltage();
     int currentBatteryPercent = BatteryMonitor::getBatteryPercentageV(currentBatteryVoltage);
-    BatteryBlinkState newState;
+    bool charging = BatteryMonitor::isCharging();
+    BatteryLEDState newState;
     
-    if (currentBatteryPercent >= BATTERY_THRESHOLD_PERCENT) {
-      newState = BATTERY_OFF;
-    } else if (currentBatteryPercent >= BATTERY_CRITICAL_PERCENT) {
-      newState = BATTERY_ON;
+    if (charging) {
+      newState = BATTERY_GREEN;
     } else {
-      newState = BATTERY_BLINKING;
+      if (currentBatteryPercent >= BATTERY_THRESHOLD_PERCENT) {
+        newState = BATTERY_OFF;
+      } else if (currentBatteryPercent >= BATTERY_CRITICAL_PERCENT) {
+        newState = BATTERY_RED;
+      } else {
+        newState = BATTERY_RED_BLINK;
+      }
+    }
+    
+    // Update current color for solid/blink states
+    switch (newState) {
+      case BATTERY_OFF:
+        currentColor = CRGB::Black;
+        break;
+      case BATTERY_RED:
+      case BATTERY_RED_BLINK:
+        currentColor = CRGB::Red;
+        break;
+      case BATTERY_GREEN:
+        currentColor = CRGB::Green;
+        break;
     }
     
     // State changed - update LED immediately
@@ -129,12 +153,12 @@ public:
       
       if (blinkState == BATTERY_OFF) {
         ledOff();
-      } else if (blinkState == BATTERY_ON) {
-        ledOn();
-      } else if (blinkState == BATTERY_BLINKING) {
+      } else if (isBlinkingState()) {
         // Start blinking - turn on first
         ledOn();
         blinkOnState = true;
+      } else {
+        ledOn();
       }
     }
   }
@@ -163,7 +187,8 @@ public:
   void doubleBlink() {
     // Optional: Can be used for critical alerts
     if (!enabled) return;
-    blinkState = BATTERY_BLINKING;
+    blinkState = BATTERY_RED_BLINK;
+    currentColor = CRGB::Red;
     blinkStartTime = millis();
     ledOn();
     blinkOnState = true;

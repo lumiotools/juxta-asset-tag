@@ -93,6 +93,10 @@ public:
     return latestVoltage;
   }
 
+  static bool isCharging() {
+    return digitalRead(USB_DETECTION_PIN) == HIGH;
+  }
+
   static int getBatteryPercentage() {
     if (digitalRead(USB_DETECTION_PIN) == HIGH) {
       return -1;
