@@ -152,12 +152,8 @@ private:
       
       if (result.success) {
         Serial.println("PositionServerTransmissionHandler: WiFi transmission successful");
-        
-        // Turn off WiFi if it wasn't connected before
-        if (!wifiWasConnected) {
-          Serial.println("PositionServerTransmissionHandler: Turning WiFi off");
-          CustomWiFi::disconnectWiFi();
-        }
+        Serial.println("PositionServerTransmissionHandler: Turning WiFi off after Position transmission");
+        CustomWiFi::disconnectWiFi();
         
         return result;
       } else {
@@ -167,9 +163,9 @@ private:
       Serial.println("PositionServerTransmissionHandler: WiFi connection failed");
     }
     
-    // Turn off WiFi after attempt if it wasn't connected before
-    if (!wifiWasConnected) {
-      Serial.println("PositionServerTransmissionHandler: Turning WiFi off");
+    // Turn off WiFi after attempt (forced) regardless of previous state
+    if (CustomWiFi::isConnected()) {
+      Serial.println("PositionServerTransmissionHandler: Turning WiFi off after Position transmission");
       CustomWiFi::disconnectWiFi();
     }
     

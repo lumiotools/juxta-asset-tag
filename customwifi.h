@@ -37,6 +37,7 @@ public:
       return false;
     }
     
+    WiFi.mode(WIFI_STA);         // Explicitly power on WiFi in station mode
     WiFi.setAutoReconnect(true); // Enable auto-reconnect for stability
     WiFi.persistent(false); // Don't save WiFi config to flash (reduces wear)
     WiFi.begin(ssid.c_str(), password.c_str());
@@ -166,7 +167,9 @@ public:
   }
   
   static void disconnectWiFi() {
-    WiFi.disconnect(true); // true = turn off WiFi radio
+    WiFi.disconnect(true, true); // disconnect + erase AP config from RAM/flash driver state
+    WiFi.mode(WIFI_OFF);         // explicit radio off for maximum power saving
+    delay(20);                   // let WiFi stack settle into OFF state
   }
   
   // Send IMU data to model server with lat/long prefix and receive delta position
