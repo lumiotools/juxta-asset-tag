@@ -35,10 +35,10 @@ FLASH_FREQ = "80m"
 FLASH_SIZE = "4MB"
 
 # ===============================================
-EXCEL_FILE = "production_log.xlsx"
-gc = pygsheets.authorize(service_file="credentials.json")
-sh = gc.open('Production_PCB')
-wks = sh[0]
+# EXCEL_FILE = "production_log.xlsx"
+# gc = pygsheets.authorize(service_file="credentials.json")
+# sh = gc.open('Production_PCB')
+# wks = sh[0]
 
 def get_device_mac(port: str):
     # Use only 'read-mac' and require BASE MAC to be present.
@@ -52,13 +52,13 @@ def get_device_mac(port: str):
     # If BASE MAC not present, abort (no fallback)
     return None
 
-def log_to_sheets(mac, status):
-    timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")  # Include time
-    try:
-        wks.append_table(values=[timestamp, mac, status])
-        print(f"saved to sheets: {mac}")
-    except Exception as e:
-        print(f"failed to save: {e}")
+# def log_to_sheets(mac, status):
+#     timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")  # Include time
+#     try:
+#         wks.append_table(values=[timestamp, mac, status])
+#         print(f"saved to sheets: {mac}")
+#     except Exception as e:
+#         print(f"failed to save: {e}")
         
 def monitor_multiple_esps():
     seen_ports = set()

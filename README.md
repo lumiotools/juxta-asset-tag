@@ -12,7 +12,7 @@ This repository contains the firmware for the Juxta Asset Tag.
 
 Install these via **Arduino IDE → Tools → Manage Libraries…**:
 
-- **Adafruit NeoPixel** (LED/status indicator)
+- **FastLED** (LED/status indicator)
 - **Adafruit Unified Sensor**
 - **NimBLE-Arduino** (by h2zero)
 - **PKAE_Timer**
